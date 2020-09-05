@@ -50,4 +50,7 @@ THE SOFTWARE.
 [ LuaJIT includes code from dlmalloc, which has this license statement: ]
 
 This is a version (aka dlmalloc) of malloc/free/realloc written by
-Doug Lea an
+Doug Lea and released to the public domain, as explained at
+https://creativecommons.org/licenses/publicdomain
+
+===============================================================================
