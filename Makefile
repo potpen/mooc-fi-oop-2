@@ -118,4 +118,39 @@ default all $(INSTALL_DEP):
 	@echo "==== Successfully built LuaJIT $(VERSION) ===="
 
 install: $(INSTALL_DEP)
-	@echo "==== Installing LuaJIT $(VERSION) t
+	@echo "==== Installing LuaJIT $(VERSION) to $(PREFIX) ===="
+	$(MKDIR) $(INSTALL_DIRS)
+	cd src && $(INSTALL_X) $(FILE_T) $(INSTALL_T)
+	cd src && test -f $(FILE_A) && $(INSTALL_F) $(FILE_A) $(INSTALL_STATIC) || :
+	$(RM) $(INSTALL_DYN) $(INSTALL_SHORT1) $(INSTALL_SHORT2)
+	cd src && test -f $(FILE_SO) && \
+	  $(INSTALL_X) $(FILE_SO) $(INSTALL_DYN) && \
+	  ( $(LDCONFIG) $(INSTALL_LIB) || : ) && \
+	  $(SYMLINK) $(INSTALL_SONAME) $(INSTALL_SHORT1) && \
+	  $(SYMLINK) $(INSTALL_SONAME) $(INSTALL_SHORT2) || :
+	cd etc && $(INSTALL_F) $(FILE_MAN) $(INSTALL_MAN)
+	cd etc && $(SED_PC) $(FILE_PC) > $(FILE_PC).tmp && \
+	  $(INSTALL_F) $(FILE_PC).tmp $(INSTALL_PC) && \
+	  $(RM) $(FILE_PC).tmp
+	cd src && $(INSTALL_F) $(FILES_INC) $(INSTALL_INC)
+	cd src/jit && $(INSTALL_F) $(FILES_JITLIB) $(INSTALL_JITLIB)
+	@echo "==== Successfully installed LuaJIT $(VERSION) to $(PREFIX) ===="
+	@echo ""
+	@echo "Note: the development releases deliberately do NOT install a symlink for luajit"
+	@echo "You can do this now by running this command (with sudo):"
+	@echo ""
+	@echo "  $(SYMLINK) $(INSTALL_TNAME) $(INSTALL_TSYM)"
+	@echo ""
+
+
+uninstall:
+	@echo "==== Uninstalling LuaJIT $(VERSION) from $(PREFIX) ===="
+	$(UNINSTALL) $(INSTALL_T) $(INSTALL_STATIC) $(INSTALL_DYN) $(INSTALL_SHORT1) $(INSTALL_SHORT2) $(INSTALL_MAN)/$(FILE_MAN) $(INSTALL_PC)
+	for file in $(FILES_JITLIB); do \
+	  $(UNINSTALL) $(INSTALL_JITLIB)/$$file; \
+	  done
+	for file in $(FILES_INC); do \
+	  $(UNINSTALL) $(INSTALL_INC)/$$file; \
+	  done
+	$(LDCONFIG) $(INSTALL_LIB)
+	$(RMDIR
