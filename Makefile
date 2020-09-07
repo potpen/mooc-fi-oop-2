@@ -67,4 +67,55 @@ INSTALL_PC= $(INSTALL_PKGCONFIG)/$(INSTALL_PCNAME)
 INSTALL_DIRS= $(INSTALL_BIN) $(INSTALL_LIB) $(INSTALL_INC) $(INSTALL_MAN) \
   $(INSTALL_PKGCONFIG) $(INSTALL_JITLIB) $(INSTALL_LMOD) $(INSTALL_CMOD)
 UNINSTALL_DIRS= $(INSTALL_JITLIB) $(INSTALL_LJLIBD) $(INSTALL_INC) \
-  $(INSTALL_LMOD) $(IN
+  $(INSTALL_LMOD) $(INSTALL_LMODD) $(INSTALL_CMOD) $(INSTALL_CMODD)
+
+RM= rm -f
+MKDIR= mkdir -p
+RMDIR= rmdir 2>/dev/null
+SYMLINK= ln -sf
+INSTALL_X= install -m 0755
+INSTALL_F= install -m 0644
+UNINSTALL= $(RM)
+LDCONFIG= ldconfig -n 2>/dev/null
+SED_PC= sed -e "s|^prefix=.*|prefix=$(PREFIX)|" \
+            -e "s|^multilib=.*|multilib=$(MULTILIB)|"
+ifneq ($(INSTALL_DEFINC),$(INSTALL_INC))
+  SED_PC+= -e "s|^includedir=.*|includedir=$(INSTALL_INC)|"
+endif
+
+FILE_T= luajit
+FILE_A= libluajit.a
+FILE_SO= libluajit.so
+FILE_MAN= luajit.1
+FILE_PC= luajit.pc
+FILES_INC= lua.h lualib.h lauxlib.h luaconf.h lua.hpp luajit.h
+FILES_JITLIB= bc.lua bcsave.lua dump.lua p.lua v.lua zone.lua \
+	      dis_x86.lua dis_x64.lua dis_arm.lua dis_arm64.lua \
+	      dis_arm64be.lua dis_ppc.lua dis_mips.lua dis_mipsel.lua \
+	      dis_mips64.lua dis_mips64el.lua vmdef.lua
+
+ifeq (,$(findstring Windows,$(OS)))
+  HOST_SYS:= $(shell uname -s)
+else
+  HOST_SYS= Windows
+endif
+TARGET_SYS?= $(HOST_SYS)
+
+ifeq (Darwin,$(TARGET_SYS))
+  INSTALL_SONAME= $(INSTALL_DYLIBNAME)
+  INSTALL_SOSHORT1= $(INSTALL_DYLIBSHORT1)
+  INSTALL_SOSHORT2= $(INSTALL_DYLIBSHORT2)
+  LDCONFIG= :
+endif
+
+##############################################################################
+
+INSTALL_DEP= src/luajit
+
+default all $(INSTALL_DEP):
+	@echo "==== Building LuaJIT $(VERSION) ===="
+	$(MAKE) -C src
+	@echo "==== Successfully built LuaJIT $(VERSION) ===="
+
+install: $(INSTALL_DEP)
+	@echo "==== Installing LuaJIT $(VERSION) t
