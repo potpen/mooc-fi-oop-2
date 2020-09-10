@@ -153,4 +153,18 @@ uninstall:
 	  $(UNINSTALL) $(INSTALL_INC)/$$file; \
 	  done
 	$(LDCONFIG) $(INSTALL_LIB)
-	$(RMDIR
+	$(RMDIR) $(UNINSTALL_DIRS) || :
+	@echo "==== Successfully uninstalled LuaJIT $(VERSION) from $(PREFIX) ===="
+
+##############################################################################
+
+amalg:
+	@echo "Building LuaJIT $(VERSION)"
+	$(MAKE) -C src amalg
+
+clean:
+	$(MAKE) -C src clean
+
+.PHONY: all install amalg clean
+
+##############################################################################
