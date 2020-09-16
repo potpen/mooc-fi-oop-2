@@ -114,4 +114,37 @@ applies recursively to all sub-functions of the function with
 <h3 id="mode_trace"><tt>luaJIT_setmode(L, trace,<br>
 &nbsp;&nbsp;LUAJIT_MODE_TRACE|LUAJIT_MODE_FLUSH)</tt></h3>
 <p>
-Flushes the specified root trace and all of its 
+Flushes the specified root trace and all of its side traces from the cache.
+The code for the trace will be retained as long as there are any other
+traces which link to it.
+</p>
+
+<h3 id="mode_wrapcfunc"><tt>luaJIT_setmode(L, idx, LUAJIT_MODE_WRAPCFUNC|flag)</tt></h3>
+<p>
+This mode defines a wrapper function for calls to C functions. If
+called with <tt>LUAJIT_MODE_ON</tt>, the stack index at <tt>idx</tt>
+must be a <tt>lightuserdata</tt> object holding a pointer to the wrapper
+function. From now on, all C functions are called through the wrapper
+function. If called with <tt>LUAJIT_MODE_OFF</tt> this mode is turned
+off and all C functions are directly called.
+</p>
+<p>
+The wrapper function can be used for debugging purposes or to catch
+and convert foreign exceptions. But please read the section on
+<a href="extensions.html#exceptions">C++&nbsp;exception interoperability</a>
+first. Recommended usage can be seen in this C++ code excerpt:
+</p>
+<pre class="code">
+#include &lt;exception&gt;
+#include "lua.hpp"
+
+// Catch C++ exceptions and convert them to Lua error messages.
+// Customize as needed for your own exception classes.
+static int wrap_exceptions(lua_State *L, lua_CFunction f)
+{
+  try {
+    return f(L);  // Call wrapped function and return result.
+  } catch (const char *s) {  // Catch and convert exceptions.
+    lua_pushstring(L, s);
+  } catch (std::exception& e) {
+    lua_pushstring(L, e.what()
