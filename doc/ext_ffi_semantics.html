@@ -39,4 +39,47 @@ td.convop { font-style: italic; width: 40%; }
 </li><li>
 <a href="ext_ffi_api.html">ffi.* API</a>
 </li><li>
-<a class="current" href="ext_ffi_semantics.html">FFI Sema
+<a class="current" href="ext_ffi_semantics.html">FFI Semantics</a>
+</li></ul>
+</li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
+<a href="ext_jit.html">jit.* Library</a>
+</li><li>
+<a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
+</li></ul>
+</li><li>
+<a href="status.html">Status</a>
+</li><li>
+<a href="faq.html">FAQ</a>
+</li><li>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+</li></ul>
+</div>
+<div id="main">
+<p>
+This page describes the detailed semantics underlying the FFI library
+and its interaction with both Lua and C&nbsp;code.
+</p>
+<p>
+Given that the FFI library is designed to interface with C&nbsp;code
+and that declarations can be written in plain C&nbsp;syntax, <b>it
+closely follows the C&nbsp;language semantics</b>, wherever possible.
+Some minor concessions are needed for smoother interoperation with Lua
+language semantics.
+</p>
+<p>
+Please don't be overwhelmed by the contents of this page &mdash; this
+is a reference and you may need to consult it, if in doubt. It doesn't
+hurt to skim this page, but most of the semantics "just work" as you'd
+expect them to work. It should be straightforward to write
+applications using the LuaJIT FFI for developers with a C or C++
+background.
+</p>
+
+<h2 id="clang">C Language Support</h2>
+<p>
+The FFI library has a built-in C&nbsp;parser with a minimal memory
+footpri
