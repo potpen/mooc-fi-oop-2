@@ -82,4 +82,45 @@ background.
 <h2 id="clang">C Language Support</h2>
 <p>
 The FFI library has a built-in C&nbsp;parser with a minimal memory
-footpri
+footprint. It's used by the <a href="ext_ffi_api.html">ffi.* library
+functions</a> to declare C&nbsp;types or external symbols.
+</p>
+<p>
+Its only purpose is to parse C&nbsp;declarations, as found e.g. in
+C&nbsp;header files. Although it does evaluate constant expressions,
+it's <em>not</em> a C&nbsp;compiler. The body of <tt>inline</tt>
+C&nbsp;function definitions is simply ignored.
+</p>
+<p>
+Also, this is <em>not</em> a validating C&nbsp;parser. It expects and
+accepts correctly formed C&nbsp;declarations, but it may choose to
+ignore bad declarations or show rather generic error messages. If in
+doubt, please check the input against your favorite C&nbsp;compiler.
+</p>
+<p>
+The C&nbsp;parser complies to the <b>C99 language standard</b> plus
+the following extensions:
+</p>
+<ul>
+
+<li>The <tt>'\e'</tt> escape in character and string literals.</li>
+
+<li>The C99/C++ boolean type, declared with the keywords <tt>bool</tt>
+or <tt>_Bool</tt>.</li>
+
+<li>Complex numbers, declared with the keywords <tt>complex</tt> or
+<tt>_Complex</tt>.</li>
+
+<li>Two complex number types: <tt>complex</tt> (aka
+<tt>complex&nbsp;double</tt>) and <tt>complex&nbsp;float</tt>.</li>
+
+<li>Vector types, declared with the GCC <tt>mode</tt> or
+<tt>vector_size</tt> attribute.</li>
+
+<li>Unnamed ('transparent') <tt>struct</tt>/<tt>union</tt> fields
+inside a <tt>struct</tt>/<tt>union</tt>.</li>
+
+<li>Incomplete <tt>enum</tt> declarations, handled like incomplete
+<tt>struct</tt> declarations.</li>
+
+<li>Unnamed <tt>enum</
