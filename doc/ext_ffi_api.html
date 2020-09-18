@@ -324,3 +324,244 @@ the position and the field size (in bits) for bit fields.
 <p>
 Returns <tt>true</tt> if <tt>obj</tt> has the C&nbsp;type given by
 <tt>ct</tt>. Returns <tt>false</tt> otherwise.
+</p>
+<p>
+C&nbsp;type qualifiers (<tt>const</tt> etc.) are ignored. Pointers are
+checked with the standard pointer compatibility rules, but without any
+special treatment for <tt>void&nbsp;*</tt>. If <tt>ct</tt> specifies a
+<tt>struct</tt>/<tt>union</tt>, then a pointer to this type is accepted,
+too. Otherwise the types must match exactly.
+</p>
+<p>
+Note: this function accepts all kinds of Lua objects for the
+<tt>obj</tt> argument, but always returns <tt>false</tt> for non-cdata
+objects.
+</p>
+
+<h2 id="util">Utility Functions</h2>
+
+<h3 id="ffi_errno"><tt>err = ffi.errno([newerr])</tt></h3>
+<p>
+Returns the error number set by the last C&nbsp;function call which
+indicated an error condition. If the optional <tt>newerr</tt> argument
+is present, the error number is set to the new value and the previous
+value is returned.
+</p>
+<p>
+This function offers a portable and OS-independent way to get and set the
+error number. Note that only <em>some</em> C&nbsp;functions set the error
+number. And it's only significant if the function actually indicated an
+error condition (e.g. with a return value of <tt>-1</tt> or
+<tt>NULL</tt>). Otherwise, it may or may not contain any previously set
+value.
+</p>
+<p>
+You're advised to call this function only when needed and as close as
+possible after the return of the related C&nbsp;function. The
+<tt>errno</tt> value is preserved across hooks, memory allocations,
+invocations of the JIT compiler and other internal VM activity. The same
+applies to the value returned by <tt>GetLastError()</tt> on Windows, but
+you need to declare and call it yourself.
+</p>
+
+<h3 id="ffi_string"><tt>str = ffi.string(ptr [,len])</tt></h3>
+<p>
+Creates an interned Lua string from the data pointed to by
+<tt>ptr</tt>.
+</p>
+<p>
+If the optional argument <tt>len</tt> is missing, <tt>ptr</tt> is
+converted to a <tt>"char&nbsp;*"</tt> and the data is assumed to be
+zero-terminated. The length of the string is computed with
+<tt>strlen()</tt>.
+</p>
+<p>
+Otherwise <tt>ptr</tt> is converted to a <tt>"void&nbsp;*"</tt> and
+<tt>len</tt> gives the length of the data. The data may contain
+embedded zeros and need not be byte-oriented (though this may cause
+endianess issues).
+</p>
+<p>
+This function is mainly useful to convert (temporary)
+<tt>"const&nbsp;char&nbsp;*"</tt> pointers returned by
+C&nbsp;functions to Lua strings and store them or pass them to other
+functions expecting a Lua string. The Lua string is an (interned) copy
+of the data and bears no relation to the original data area anymore.
+Lua strings are 8&nbsp;bit clean and may be used to hold arbitrary,
+non-character data.
+</p>
+<p>
+Performance notice: it's faster to pass the length of the string, if
+it's known. E.g. when the length is returned by a C&nbsp;call like
+<tt>sprintf()</tt>.
+</p>
+
+<h3 id="ffi_copy"><tt>ffi.copy(dst, src, len)<br>
+ffi.copy(dst, str)</tt></h3>
+<p>
+Copies the data pointed to by <tt>src</tt> to <tt>dst</tt>.
+<tt>dst</tt> is converted to a <tt>"void&nbsp;*"</tt> and <tt>src</tt>
+is converted to a <tt>"const void&nbsp;*"</tt>.
+</p>
+<p>
+In the first syntax, <tt>len</tt> gives the number of bytes to copy.
+Caveat: if <tt>src</tt> is a Lua string, then <tt>len</tt> must not
+exceed <tt>#src+1</tt>.
+</p>
+<p>
+In the second syntax, the source of the copy must be a Lua string. All
+bytes of the string <em>plus a zero-terminator</em> are copied to
+<tt>dst</tt> (i.e. <tt>#src+1</tt> bytes).
+</p>
+<p>
+Performance notice: <tt>ffi.copy()</tt> may be used as a faster
+(inlinable) replacement for the C&nbsp;library functions
+<tt>memcpy()</tt>, <tt>strcpy()</tt> and <tt>strncpy()</tt>.
+</p>
+
+<h3 id="ffi_fill"><tt>ffi.fill(dst, len [,c])</tt></h3>
+<p>
+Fills the data pointed to by <tt>dst</tt> with <tt>len</tt> constant
+bytes, given by <tt>c</tt>. If <tt>c</tt> is omitted, the data is
+zero-filled.
+</p>
+<p>
+Performance notice: <tt>ffi.fill()</tt> may be used as a faster
+(inlinable) replacement for the C&nbsp;library function
+<tt>memset(dst,&nbsp;c,&nbsp;len)</tt>. Please note the different
+order of arguments!
+</p>
+
+<h2 id="target">Target-specific Information</h2>
+
+<h3 id="ffi_abi"><tt>status = ffi.abi(param)</tt></h3>
+<p>
+Returns <tt>true</tt> if <tt>param</tt> (a Lua string) applies for the
+target ABI (Application Binary Interface). Returns <tt>false</tt>
+otherwise. The following parameters are currently defined:
+</p>
+<table class="abitable">
+<tr class="abihead">
+<td class="abiparam">Parameter</td>
+<td class="abidesc">Description</td>
+</tr>
+<tr class="odd separate">
+<td class="abiparam">32bit</td><td class="abidesc">32 bit architecture</td></tr>
+<tr class="even">
+<td class="abiparam">64bit</td><td class="abidesc">64 bit architecture</td></tr>
+<tr class="odd separate">
+<td class="abiparam">le</td><td class="abidesc">Little-endian architecture</td></tr>
+<tr class="even">
+<td class="abiparam">be</td><td class="abidesc">Big-endian architecture</td></tr>
+<tr class="odd separate">
+<td class="abiparam">fpu</td><td class="abidesc">Target has a hardware FPU</td></tr>
+<tr class="even">
+<td class="abiparam">softfp</td><td class="abidesc">softfp calling conventions</td></tr>
+<tr class="odd">
+<td class="abiparam">hardfp</td><td class="abidesc">hardfp calling conventions</td></tr>
+<tr class="even separate">
+<td class="abiparam">eabi</td><td class="abidesc">EABI variant of the standard ABI</td></tr>
+<tr class="odd">
+<td class="abiparam">win</td><td class="abidesc">Windows variant of the standard ABI</td></tr>
+<tr class="even">
+<td class="abiparam">uwp</td><td class="abidesc">Universal Windows Platform</td></tr>
+<tr class="odd">
+<td class="abiparam">gc64</td><td class="abidesc">64 bit GC references</td></tr>
+</table>
+
+<h3 id="ffi_os"><tt>ffi.os</tt></h3>
+<p>
+Contains the target OS name. Same contents as
+<a href="ext_jit.html#jit_os"><tt>jit.os</tt></a>.
+</p>
+
+<h3 id="ffi_arch"><tt>ffi.arch</tt></h3>
+<p>
+Contains the target architecture name. Same contents as
+<a href="ext_jit.html#jit_arch"><tt>jit.arch</tt></a>.
+</p>
+
+<h2 id="callback">Methods for Callbacks</h2>
+<p>
+The C&nbsp;types for <a href="ext_ffi_semantics.html#callback">callbacks</a>
+have some extra methods:
+</p>
+
+<h3 id="callback_free"><tt>cb:free()</tt></h3>
+<p>
+Free the resources associated with a callback. The associated Lua
+function is unanchored and may be garbage collected. The callback
+function pointer is no longer valid and must not be called again
+(it may be reused by a subsequently created callback).
+</p>
+
+<h3 id="callback_set"><tt>cb:set(func)</tt></h3>
+<p>
+Associate a new Lua function with a callback. The C&nbsp;type of the
+callback and the callback function pointer are unchanged.
+</p>
+<p>
+This method is useful to dynamically switch the receiver of callbacks
+without creating a new callback each time and registering it again (e.g.
+with a GUI library).
+</p>
+
+<h2 id="extended">Extended Standard Library Functions</h2>
+<p>
+The following standard library functions have been extended to work
+with cdata objects:
+</p>
+
+<h3 id="tonumber"><tt>n = tonumber(cdata)</tt></h3>
+<p>
+Converts a number cdata object to a <tt>double</tt> and returns it as
+a Lua number. This is particularly useful for boxed 64&nbsp;bit
+integer values. Caveat: this conversion may incur a precision loss.
+</p>
+
+<h3 id="tostring"><tt>s = tostring(cdata)</tt></h3>
+<p>
+Returns a string representation of the value of 64&nbsp;bit integers
+(<tt><b>"</b>nnn<b>LL"</b></tt> or <tt><b>"</b>nnn<b>ULL"</b></tt>) or
+complex numbers (<tt><b>"</b>re&plusmn;im<b>i"</b></tt>). Otherwise
+returns a string representation of the C&nbsp;type of a ctype object
+(<tt><b>"ctype&lt;</b>type<b>&gt;"</b></tt>) or a cdata object
+(<tt><b>"cdata&lt;</b>type<b>&gt;:&nbsp;</b>address"</tt>), unless you
+override it with a <tt>__tostring</tt> metamethod (see
+<a href="#ffi_metatype"><tt>ffi.metatype()</tt></a>).
+</p>
+
+<h3 id="pairs"><tt>iter, obj, start = pairs(cdata)<br>
+iter, obj, start = ipairs(cdata)<br></tt></h3>
+<p>
+Calls the <tt>__pairs</tt> or <tt>__ipairs</tt> metamethod of the
+corresponding ctype.
+</p>
+
+<h2 id="literals">Extensions to the Lua Parser</h2>
+<p>
+The parser for Lua source code treats numeric literals with the
+suffixes <tt>LL</tt> or <tt>ULL</tt> as signed or unsigned 64&nbsp;bit
+integers. Case doesn't matter, but uppercase is recommended for
+readability. It handles decimal (<tt>42LL</tt>), hexadecimal
+(<tt>0x2aLL</tt>) and binary (<tt>0b101010LL</tt>) literals.
+</p>
+<p>
+The imaginary part of complex numbers can be specified by suffixing
+number literals with <tt>i</tt> or <tt>I</tt>, e.g. <tt>12.5i</tt>.
+Caveat: you'll need to use <tt>1i</tt> to get an imaginary part with
+the value one, since <tt>i</tt> itself still refers to a variable
+named <tt>i</tt>.
+</p>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
