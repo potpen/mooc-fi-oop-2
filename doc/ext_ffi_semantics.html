@@ -123,4 +123,45 @@ inside a <tt>struct</tt>/<tt>union</tt>.</li>
 <li>Incomplete <tt>enum</tt> declarations, handled like incomplete
 <tt>struct</tt> declarations.</li>
 
-<li>Unnamed <tt>enum</
+<li>Unnamed <tt>enum</tt> fields inside a
+<tt>struct</tt>/<tt>union</tt>. This is similar to a scoped C++
+<tt>enum</tt>, except that declared constants are visible in the
+global namespace, too.</li>
+
+<li>Scoped <tt>static&nbsp;const</tt> declarations inside a
+<tt>struct</tt>/<tt>union</tt> (from C++).</li>
+
+<li>Zero-length arrays (<tt>[0]</tt>), empty
+<tt>struct</tt>/<tt>union</tt>, variable-length arrays (VLA,
+<tt>[?]</tt>) and variable-length structs (VLS, with a trailing
+VLA).</li>
+
+<li>C++ reference types (<tt>int&nbsp;&amp;x</tt>).</li>
+
+<li>Alternate GCC keywords with '<tt>__</tt>', e.g.
+<tt>__const__</tt>.</li>
+
+<li>GCC <tt>__attribute__</tt> with the following attributes:
+<tt>aligned</tt>, <tt>packed</tt>, <tt>mode</tt>,
+<tt>vector_size</tt>, <tt>cdecl</tt>, <tt>fastcall</tt>,
+<tt>stdcall</tt>, <tt>thiscall</tt>.</li>
+
+<li>The GCC <tt>__extension__</tt> keyword and the GCC
+<tt>__alignof__</tt> operator.</li>
+
+<li>GCC <tt>__asm__("symname")</tt> symbol name redirection for
+function declarations.</li>
+
+<li>MSVC keywords for fixed-length types: <tt>__int8</tt>,
+<tt>__int16</tt>, <tt>__int32</tt> and <tt>__int64</tt>.</li>
+
+<li>MSVC <tt>__cdecl</tt>, <tt>__fastcall</tt>, <tt>__stdcall</tt>,
+<tt>__thiscall</tt>, <tt>__ptr32</tt>, <tt>__ptr64</tt>,
+<tt>__declspec(align(n))</tt> and <tt>#pragma&nbsp;pack</tt>.</li>
+
+<li>All other GCC/MSVC-specific attributes are ignored.</li>
+
+</ul>
+<p>
+The following C&nbsp;types are predefined by the C&nbsp;parser (like
+a <tt
