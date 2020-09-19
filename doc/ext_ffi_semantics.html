@@ -205,4 +205,36 @@ treated as a function taking zero arguments, like in C++.</li>
 there's no support for the related conversions, accesses or arithmetic
 operations.</li>
 
-<li>Wide 
+<li>Wide character strings and character literals are not
+supported.</li>
+
+<li><a href="#status">See below</a> for features that are currently
+not implemented.</li>
+
+</ul>
+
+<h2 id="convert">C Type Conversion Rules</h2>
+
+<h3 id="convert_tolua">Conversions from C&nbsp;types to Lua objects</h3>
+<p>
+These conversion rules apply for <em>read accesses</em> to
+C&nbsp;types: indexing pointers, arrays or
+<tt>struct</tt>/<tt>union</tt> types; reading external variables or
+constant values; retrieving return values from C&nbsp;calls:
+</p>
+<table class="convtable">
+<tr class="convhead">
+<td class="convin">Input</td>
+<td class="convop">Conversion</td>
+<td class="convout">Output</td>
+</tr>
+<tr class="odd separate">
+<td class="convin"><tt>int8_t</tt>, <tt>int16_t</tt></td><td class="convop">&rarr;<sup>sign-ext</sup> <tt>int32_t</tt> &rarr; <tt>double</tt></td><td class="convout">number</td></tr>
+<tr class="even">
+<td class="convin"><tt>uint8_t</tt>, <tt>uint16_t</tt></td><td class="convop">&rarr;<sup>zero-ext</sup> <tt>int32_t</tt> &rarr; <tt>double</tt></td><td class="convout">number</td></tr>
+<tr class="odd">
+<td class="convin"><tt>int32_t</tt>, <tt>uint32_t</tt></td><td class="convop">&rarr; <tt>double</tt></td><td class="convout">number</td></tr>
+<tr class="even">
+<td class="convin"><tt>int64_t</tt>, <tt>uint64_t</tt></td><td class="convop">boxed value</td><td class="convout">64 bit int cdata</td></tr>
+<tr class="odd separate">
+<td
