@@ -164,4 +164,45 @@ function declarations.</li>
 </ul>
 <p>
 The following C&nbsp;types are predefined by the C&nbsp;parser (like
-a <tt
+a <tt>typedef</tt>, except re-declarations will be ignored):
+</p>
+<ul>
+
+<li>Vararg handling: <tt>va_list</tt>, <tt>__builtin_va_list</tt>,
+<tt>__gnuc_va_list</tt>.</li>
+
+<li>From <tt>&lt;stddef.h&gt;</tt>: <tt>ptrdiff_t</tt>,
+<tt>size_t</tt>, <tt>wchar_t</tt>.</li>
+
+<li>From <tt>&lt;stdint.h&gt;</tt>: <tt>int8_t</tt>, <tt>int16_t</tt>,
+<tt>int32_t</tt>, <tt>int64_t</tt>, <tt>uint8_t</tt>,
+<tt>uint16_t</tt>, <tt>uint32_t</tt>, <tt>uint64_t</tt>,
+<tt>intptr_t</tt>, <tt>uintptr_t</tt>.</li>
+
+<li>From <tt>&lt;unistd.h&gt;</tt> (POSIX): <tt>ssize_t</tt>.</li>
+
+</ul>
+<p>
+You're encouraged to use these types in preference to
+compiler-specific extensions or target-dependent standard types.
+E.g. <tt>char</tt> differs in signedness and <tt>long</tt> differs in
+size, depending on the target architecture and platform ABI.
+</p>
+<p>
+The following C&nbsp;features are <b>not</b> supported:
+</p>
+<ul>
+
+<li>A declaration must always have a type specifier; it doesn't
+default to an <tt>int</tt> type.</li>
+
+<li>Old-style empty function declarations (K&amp;R) are not allowed.
+All C&nbsp;functions must have a proper prototype declaration. A
+function declared without parameters (<tt>int&nbsp;foo();</tt>) is
+treated as a function taking zero arguments, like in C++.</li>
+
+<li>The <tt>long double</tt> C&nbsp;type is parsed correctly, but
+there's no support for the related conversions, accesses or arithmetic
+operations.</li>
+
+<li>Wide 
