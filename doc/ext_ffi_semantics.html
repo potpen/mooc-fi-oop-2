@@ -237,4 +237,29 @@ constant values; retrieving return values from C&nbsp;calls:
 <tr class="even">
 <td class="convin"><tt>int64_t</tt>, <tt>uint64_t</tt></td><td class="convop">boxed value</td><td class="convout">64 bit int cdata</td></tr>
 <tr class="odd separate">
-<td
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr; <tt>double</tt></td><td class="convout">number</td></tr>
+<tr class="even separate">
+<td class="convin"><tt>bool</tt></td><td class="convop">0 &rarr; <tt>false</tt>, otherwise <tt>true</tt></td><td class="convout">boolean</td></tr>
+<tr class="odd separate">
+<td class="convin"><tt>enum</tt></td><td class="convop">boxed value</td><td class="convout">enum cdata</td></tr>
+<tr class="even">
+<td class="convin">Complex number</td><td class="convop">boxed value</td><td class="convout">complex cdata</td></tr>
+<tr class="odd">
+<td class="convin">Vector</td><td class="convop">boxed value</td><td class="convout">vector cdata</td></tr>
+<tr class="even">
+<td class="convin">Pointer</td><td class="convop">boxed value</td><td class="convout">pointer cdata</td></tr>
+<tr class="odd separate">
+<td class="convin">Array</td><td class="convop">boxed reference</td><td class="convout">reference cdata</td></tr>
+<tr class="even">
+<td class="convin"><tt>struct</tt>/<tt>union</tt></td><td class="convop">boxed reference</td><td class="convout">reference cdata</td></tr>
+</table>
+<p>
+Bitfields are treated like their underlying type.
+</p>
+<p>
+Reference types are dereferenced <em>before</em> a conversion can take
+place &mdash; the conversion is applied to the C&nbsp;type pointed to
+by the reference.
+</p>
+
+<h3 id="conve
