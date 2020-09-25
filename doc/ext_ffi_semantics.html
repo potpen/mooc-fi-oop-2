@@ -340,4 +340,22 @@ pointer or type compatibility:
 <tr class="even">
 <td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup> <tt>int32_t</tt> &rarr;<sup>narrow</sup></td><td class="convout"><tt>(u)int8_t</tt>, <tt>(u)int16_t</tt></td></tr>
 <tr class="odd">
-<td class="convin"><tt>double</t
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup></td><td class="convout"><tt>(u)int32_t</tt>, <tt>(u)int64_t</tt></td></tr>
+<tr class="even">
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>round</sup></td><td class="convout"><tt>float</tt>, <tt>double</tt></td></tr>
+<tr class="odd separate">
+<td class="convin">Number</td><td class="convop">n == 0 &rarr; 0, otherwise 1</td><td class="convout"><tt>bool</tt></td></tr>
+<tr class="even">
+<td class="convin"><tt>bool</tt></td><td class="convop"><tt>false</tt> &rarr; 0, <tt>true</tt> &rarr; 1</td><td class="convout">Number</td></tr>
+<tr class="odd separate">
+<td class="convin">Complex number</td><td class="convop">convert real part</td><td class="convout">Number</td></tr>
+<tr class="even">
+<td class="convin">Number</td><td class="convop">convert real part, imag = 0</td><td class="convout">Complex number</td></tr>
+<tr class="odd">
+<td class="convin">Complex number</td><td class="convop">convert real and imag part</td><td class="convout">Complex number</td></tr>
+<tr class="even separate">
+<td class="convin">Number</td><td class="convop">convert scalar and replicate</td><td class="convout">Vector</td></tr>
+<tr class="odd">
+<td class="convin">Vector</td><td class="convop">copy (same size)</td><td class="convout">Vector</td></tr>
+<tr class="even separate">
+<td class="convin"><tt>struct</tt>/<tt>union</tt></td><td cla
