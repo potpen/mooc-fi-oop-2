@@ -262,4 +262,31 @@ place &mdash; the conversion is applied to the C&nbsp;type pointed to
 by the reference.
 </p>
 
-<h3 id="conve
+<h3 id="convert_fromlua">Conversions from Lua objects to C&nbsp;types</h3>
+<p>
+These conversion rules apply for <em>write accesses</em> to
+C&nbsp;types: indexing pointers, arrays or
+<tt>struct</tt>/<tt>union</tt> types; initializing cdata objects;
+casts to C&nbsp;types; writing to external variables; passing
+arguments to C&nbsp;calls:
+</p>
+<table class="convtable">
+<tr class="convhead">
+<td class="convin">Input</td>
+<td class="convop">Conversion</td>
+<td class="convout">Output</td>
+</tr>
+<tr class="odd separate">
+<td class="convin">number</td><td class="convop">&rarr;</td><td class="convout"><tt>double</tt></td></tr>
+<tr class="even">
+<td class="convin">boolean</td><td class="convop"><tt>false</tt> &rarr; 0, <tt>true</tt> &rarr; 1</td><td class="convout"><tt>bool</tt></td></tr>
+<tr class="odd separate">
+<td class="convin">nil</td><td class="convop"><tt>NULL</tt> &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="even">
+<td class="convin">lightuserdata</td><td class="convop">lightuserdata address &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="odd">
+<td class="convin">userdata</td><td class="convop">userdata payload &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="even">
+<td class="convin">io.* file</td><td class="convop">get FILE * handle &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="odd separate">
+<td class="convin">string</td><td class="convop">match
