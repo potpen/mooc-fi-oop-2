@@ -312,4 +312,32 @@ are applied.
 <p>
 Reference types are immutable after initialization ("no re-seating of
 references"). For initialization purposes or when passing values to
-reference paramete
+reference parameters, they are treated like pointers. Note that unlike
+in C++, there's no way to implement automatic reference generation of
+variables under the Lua language semantics. If you want to call a
+function with a reference parameter, you need to explicitly pass a
+one-element array.
+</p>
+
+<h3 id="convert_between">Conversions between C&nbsp;types</h3>
+<p>
+These conversion rules are more or less the same as the standard
+C&nbsp;conversion rules. Some rules only apply to casts, or require
+pointer or type compatibility:
+</p>
+<table class="convtable">
+<tr class="convhead">
+<td class="convin">Input</td>
+<td class="convop">Conversion</td>
+<td class="convout">Output</td>
+</tr>
+<tr class="odd separate">
+<td class="convin">Signed integer</td><td class="convop">&rarr;<sup>narrow or sign-extend</sup></td><td class="convout">Integer</td></tr>
+<tr class="even">
+<td class="convin">Unsigned integer</td><td class="convop">&rarr;<sup>narrow or zero-extend</sup></td><td class="convout">Integer</td></tr>
+<tr class="odd">
+<td class="convin">Integer</td><td class="convop">&rarr;<sup>round</sup></td><td class="convout"><tt>double</tt>, <tt>float</tt></td></tr>
+<tr class="even">
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup> <tt>int32_t</tt> &rarr;<sup>narrow</sup></td><td class="convout"><tt>(u)int8_t</tt>, <tt>(u)int16_t</tt></td></tr>
+<tr class="odd">
+<td class="convin"><tt>double</t
