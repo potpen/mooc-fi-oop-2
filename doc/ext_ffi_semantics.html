@@ -409,4 +409,38 @@ to the variable argument part of vararg C&nbsp;functions:
 <tr class="even separate">
 <td class="convin">string</td><td class="convop">string data &rarr;</td><td class="convout"><tt>const char *</tt></td></tr>
 <tr class="odd separate">
-<td class="convin"><tt>float</tt
+<td class="convin"><tt>float</tt> cdata</td><td class="convop">&rarr;</td><td class="convout"><tt>double</tt></td></tr>
+<tr class="even">
+<td class="convin">Array cdata</td><td class="convop">take base address</td><td class="convout">Element pointer</td></tr>
+<tr class="odd">
+<td class="convin"><tt>struct</tt>/<tt>union</tt> cdata</td><td class="convop">take base address</td><td class="convout"><tt>struct</tt>/<tt>union</tt> pointer</td></tr>
+<tr class="even">
+<td class="convin">Function cdata</td><td class="convop">take function address</td><td class="convout">Function pointer</td></tr>
+<tr class="odd">
+<td class="convin">Any other cdata</td><td class="convop">no conversion</td><td class="convout">C type</td></tr>
+</table>
+<p>
+To pass a Lua object, other than a cdata object, as a specific type,
+you need to override the conversion rules: create a temporary cdata
+object with a constructor or a cast and initialize it with the value
+to pass:
+</p>
+<p>
+Assuming <tt>x</tt> is a Lua number, here's how to pass it as an
+integer to a vararg function:
+</p>
+<pre class="code">
+ffi.cdef[[
+int printf(const char *fmt, ...);
+]]
+ffi.C.printf("integer value: %d\n", ffi.new("int", x))
+</pre>
+<p>
+If you don't do this, the default Lua number &rarr; <tt>double</tt>
+conversion rule applies. A vararg C&nbsp;function expecting an integer
+will see a garbled or uninitialized value.
+</p>
+
+<h2 id="init">Initializers</h2>
+<p>
+Cr
