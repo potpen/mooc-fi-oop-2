@@ -381,4 +381,32 @@ Bitfields or <tt>enum</tt> types are treated like their underlying
 type.
 </p>
 <p>
-Conversions not listed above will raise an error.
+Conversions not listed above will raise an error. E.g. it's not
+possible to convert a pointer to a complex number or vice versa.
+</p>
+
+<h3 id="convert_vararg">Conversions for vararg C&nbsp;function arguments</h3>
+<p>
+The following default conversion rules apply when passing Lua objects
+to the variable argument part of vararg C&nbsp;functions:
+</p>
+<table class="convtable">
+<tr class="convhead">
+<td class="convin">Input</td>
+<td class="convop">Conversion</td>
+<td class="convout">Output</td>
+</tr>
+<tr class="odd separate">
+<td class="convin">number</td><td class="convop">&rarr;</td><td class="convout"><tt>double</tt></td></tr>
+<tr class="even">
+<td class="convin">boolean</td><td class="convop"><tt>false</tt> &rarr; 0, <tt>true</tt> &rarr; 1</td><td class="convout"><tt>bool</tt></td></tr>
+<tr class="odd separate">
+<td class="convin">nil</td><td class="convop"><tt>NULL</tt> &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="even">
+<td class="convin">userdata</td><td class="convop">userdata payload &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="odd">
+<td class="convin">lightuserdata</td><td class="convop">lightuserdata address &rarr;</td><td class="convout"><tt>(void *)</tt></td></tr>
+<tr class="even separate">
+<td class="convin">string</td><td class="convop">string data &rarr;</td><td class="convout"><tt>const char *</tt></td></tr>
+<tr class="odd separate">
+<td class="convin"><tt>float</tt
