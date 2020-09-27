@@ -358,4 +358,27 @@ pointer or type compatibility:
 <tr class="odd">
 <td class="convin">Vector</td><td class="convop">copy (same size)</td><td class="convout">Vector</td></tr>
 <tr class="even separate">
-<td class="convin"><tt>struct</tt>/<tt>union</tt></td><td cla
+<td class="convin"><tt>struct</tt>/<tt>union</tt></td><td class="convop">take base address (compat)</td><td class="convout">Pointer</td></tr>
+<tr class="odd">
+<td class="convin">Array</td><td class="convop">take base address (compat)</td><td class="convout">Pointer</td></tr>
+<tr class="even">
+<td class="convin">Function</td><td class="convop">take function address</td><td class="convout">Function pointer</td></tr>
+<tr class="odd separate">
+<td class="convin">Number</td><td class="convop">convert via <tt>uintptr_t</tt> (cast)</td><td class="convout">Pointer</td></tr>
+<tr class="even">
+<td class="convin">Pointer</td><td class="convop">convert address (compat/cast)</td><td class="convout">Pointer</td></tr>
+<tr class="odd">
+<td class="convin">Pointer</td><td class="convop">convert address (cast)</td><td class="convout">Integer</td></tr>
+<tr class="even">
+<td class="convin">Array</td><td class="convop">convert base address (cast)</td><td class="convout">Integer</td></tr>
+<tr class="odd separate">
+<td class="convin">Array</td><td class="convop">copy (compat)</td><td class="convout">Array</td></tr>
+<tr class="even">
+<td class="convin"><tt>struct</tt>/<tt>union</tt></td><td class="convop">copy (identical type)</td><td class="convout"><tt>struct</tt>/<tt>union</tt></td></tr>
+</table>
+<p>
+Bitfields or <tt>enum</tt> types are treated like their underlying
+type.
+</p>
+<p>
+Conversions not listed above will raise an error.
