@@ -476,4 +476,43 @@ the whole string plus a terminating zero-byte. The copy stops early only
 if the array has a known, fixed size.</li>
 
 <li>The fields of a <tt>struct</tt> are initialized in the order of
-their declaration. Uninitialized fields are filled w
+their declaration. Uninitialized fields are filled with zero
+bytes.</li>
+
+<li>Only the first field of a <tt>union</tt> can be initialized with a
+flat initializer.</li>
+
+<li>Elements or fields which are aggregates themselves are initialized
+with a <em>single</em> initializer, but this may be a table
+initializer or a compatible aggregate.</li>
+
+<li>Excess initializers cause an error.</li>
+
+</ul>
+
+<h2 id="init_table">Table Initializers</h2>
+<p>
+The following rules apply if a Lua table is used to initialize an
+Array or a <tt>struct</tt>/<tt>union</tt>:
+</p>
+<ul>
+
+<li>If the table index <tt>[0]</tt> is non-<tt>nil</tt>, then the
+table is assumed to be zero-based. Otherwise it's assumed to be
+one-based.</li>
+
+<li>Array elements, starting at index zero, are initialized one-by-one
+with the consecutive table elements, starting at either index
+<tt>[0]</tt> or <tt>[1]</tt>. This process stops at the first
+<tt>nil</tt> table element.</li>
+
+<li>If exactly one array element was initialized, it's repeated for
+all the remaining elements. Otherwise all remaining uninitialized
+elements are filled with zero bytes.</li>
+
+<li>The above logic only applies to arrays with a known fixed size.
+A VLA is only initialized with the element(s) given in the table.
+Depending on the use case, you may need to explicitly add a
+<tt>NULL</tt> or <tt>0</tt> terminator to a VLA.</li>
+
+<li>A <tt>struct</tt>/<tt>union</tt> can be initialize
