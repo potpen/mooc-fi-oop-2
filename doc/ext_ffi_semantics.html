@@ -555,4 +555,39 @@ struct nested { int x; struct foo y; };
 ]]
 
 ffi.new("int[3]", {})            --> 0, 0, 0
-ffi.new("int[3]", {1})           --> 1, 
+ffi.new("int[3]", {1})           --> 1, 1, 1
+ffi.new("int[3]", {1,2})         --> 1, 2, 0
+ffi.new("int[3]", {1,2,3})       --> 1, 2, 3
+ffi.new("int[3]", {[0]=1})       --> 1, 1, 1
+ffi.new("int[3]", {[0]=1,2})     --> 1, 2, 0
+ffi.new("int[3]", {[0]=1,2,3})   --> 1, 2, 3
+ffi.new("int[3]", {[0]=1,2,3,4}) --> error: too many initializers
+
+ffi.new("struct foo", {})            --> a = 0, b = 0
+ffi.new("struct foo", {1})           --> a = 1, b = 0
+ffi.new("struct foo", {1,2})         --> a = 1, b = 2
+ffi.new("struct foo", {[0]=1,2})     --> a = 1, b = 2
+ffi.new("struct foo", {b=2})         --> a = 0, b = 2
+ffi.new("struct foo", {a=1,b=2,c=3}) --> a = 1, b = 2  'c' is ignored
+
+ffi.new("union bar", {})        --> i = 0, d = 0.0
+ffi.new("union bar", {1})       --> i = 1, d = ?
+ffi.new("union bar", {[0]=1,2}) --> i = 1, d = ?    '2' is ignored
+ffi.new("union bar", {d=2})     --> i = ?, d = 2.0
+
+ffi.new("struct nested", {1,{2,3}})     --> x = 1, y.a = 2, y.b = 3
+ffi.new("struct nested", {x=1,y={2,3}}) --> x = 1, y.a = 2, y.b = 3
+</pre>
+
+<h2 id="cdata_ops">Operations on cdata Objects</h2>
+<p>
+All standard Lua operators can be applied to cdata objects or a
+mix of a cdata object and another Lua object. The following list shows
+the predefined operations.
+</p>
+<p>
+Reference types are dereferenced <em>before</em> performing each of
+the operations below &mdash; the operation is applied to the
+C&nbsp;type pointed to by the reference.
+</p>
+<p>
