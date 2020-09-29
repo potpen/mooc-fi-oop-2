@@ -591,3 +591,31 @@ the operations below &mdash; the operation is applied to the
 C&nbsp;type pointed to by the reference.
 </p>
 <p>
+The predefined operations are always tried first before deferring to a
+metamethod or index table (if any) for the corresponding ctype (except
+for <tt>__new</tt>). An error is raised if the metamethod lookup or
+index table lookup fails.
+</p>
+
+<h3 id="cdata_array">Indexing a cdata object</h3>
+<ul>
+
+<li><b>Indexing a pointer/array</b>: a cdata pointer/array can be
+indexed by a cdata number or a Lua number. The element address is
+computed as the base address plus the number value multiplied by the
+element size in bytes. A read access loads the element value and
+<a href="#convert_tolua">converts it to a Lua object</a>. A write
+access <a href="#convert_fromlua">converts a Lua object to the element
+type</a> and stores the converted value to the element. An error is
+raised if the element size is undefined or a write access to a
+constant element is attempted.</li>
+
+<li><b>Dereferencing a <tt>struct</tt>/<tt>union</tt> field</b>: a
+cdata <tt>struct</tt>/<tt>union</tt> or a pointer to a
+<tt>struct</tt>/<tt>union</tt> can be dereferenced by a string key,
+giving the field name. The field address is computed as the base
+address plus the relative offset of the field. A read access loads the
+field value and <a href="#convert_tolua">converts it to a Lua
+object</a>. A write access <a href="#convert_fromlua">converts a Lua
+object to the field type</a> and stores the converted value to the
+field. An er
