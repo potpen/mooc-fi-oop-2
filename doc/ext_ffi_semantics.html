@@ -648,4 +648,35 @@ to the corresponding metamethods or index tables (if any).
 <p>
 Note: since there's (deliberately) no address-of operator, a cdata
 object holding a value type is effectively immutable after
-initialization. The
+initialization. The JIT compiler benefits from this fact when applying
+certain optimizations.
+</p>
+<p>
+As a consequence, the <em>elements</em> of complex numbers and
+vectors are immutable. But the elements of an aggregate holding these
+types <em>may</em> be modified, of course. I.e. you cannot assign to
+<tt>foo.c.im</tt>, but you can assign a (newly created) complex number
+to <tt>foo.c</tt>.
+</p>
+<p>
+The JIT compiler implements strict aliasing rules: accesses to different
+types do <b>not</b> alias, except for differences in signedness (this
+applies even to <tt>char</tt> pointers, unlike C99). Type punning
+through unions is explicitly detected and allowed.
+</p>
+
+<h3 id="cdata_call">Calling a cdata object</h3>
+<ul>
+
+<li><b>Constructor</b>: a ctype object can be called and used as a
+<a href="ext_ffi_api.html#ffi_new">constructor</a>. This is equivalent
+to <tt>ffi.new(ct, ...)</tt>, unless a <tt>__new</tt> metamethod is
+defined. The <tt>__new</tt> metamethod is called with the ctype object
+plus any other arguments passed to the constructor. Note that you have to
+use <tt>ffi.new</tt> inside the metamethod, since calling <tt>ct(...)</tt>
+would cause infinite recursion.</li>
+
+<li><b>C&nbsp;function call</b>: a cdata function or cdata function
+pointer can be called. The passed arguments are
+<a href="#convert_fromlua">converted to the C&nbsp;types</a> of the
+parameters given by the function declaration. A
