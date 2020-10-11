@@ -739,4 +739,39 @@ For <tt>bit.band()</tt>, <tt>bit.bor()</tt> and <tt>bit.bxor()</tt>, the
 conversion to <tt>int64_t</tt> or <tt>uint64_t</tt> applies to
 <em>all</em> arguments, if <em>any</em> argument is a cdata number.<br>
 
-For all other operations, only the first argument is used to d
+For all other operations, only the first argument is used to determine
+the output type. This implies that a cdata number as a shift count for
+shifts and rotates is accepted, but that alone does <em>not</em> cause
+a cdata number output.
+
+</ul>
+
+<h3 id="cdata_comp">Comparisons of cdata objects</h3>
+<ul>
+
+<li><b>Pointer comparison</b>: two compatible cdata pointers/arrays
+can be compared. The result is the same as an unsigned comparison of
+their addresses. <tt>nil</tt> is treated like a <tt>NULL</tt> pointer,
+which is compatible with any other pointer type.</li>
+
+<li><b>64&nbsp;bit integer comparison</b>: two cdata numbers, or a
+cdata number and a Lua number can be compared with each other. If one
+of them is an <tt>uint64_t</tt>, the other side is converted to an
+<tt>uint64_t</tt> and an unsigned comparison is performed. Otherwise,
+both sides are converted to an <tt>int64_t</tt> and a signed
+comparison is performed.<br>
+
+If one of the operands is an <tt>enum</tt> and the other operand is a
+string, the string is converted to the value of a matching <tt>enum</tt>
+constant before the above conversion.<br>
+
+<li><b>Comparisons for equality/inequality</b> never raise an error.
+Even incompatible pointers can be compared for equality by address. Any
+other incompatible comparison (also with non-cdata objects) treats the
+two sides as unequal.</li>
+
+</ul>
+
+<h3 id="cdata_key">cdata objects as table keys</h3>
+<p>
+Lua tables may be indexed by cdata objects, but this d
