@@ -774,4 +774,39 @@ two sides as unequal.</li>
 
 <h3 id="cdata_key">cdata objects as table keys</h3>
 <p>
-Lua tables may be indexed by cdata objects, but this d
+Lua tables may be indexed by cdata objects, but this doesn't provide
+any useful semantics &mdash; <b>cdata objects are unsuitable as table
+keys!</b>
+</p>
+<p>
+A cdata object is treated like any other garbage-collected object and
+is hashed and compared by its address for table indexing. Since
+there's no interning for cdata value types, the same value may be
+boxed in different cdata objects with different addresses. Thus,
+<tt>t[1LL+1LL]</tt> and <tt>t[2LL]</tt> usually <b>do not</b> point to
+the same hash slot, and they certainly <b>do not</b> point to the same
+hash slot as <tt>t[2]</tt>.
+</p>
+<p>
+It would seriously drive up implementation complexity and slow down
+the common case, if one were to add extra handling for by-value
+hashing and comparisons to Lua tables. Given the ubiquity of their use
+inside the VM, this is not acceptable.
+</p>
+<p>
+There are three viable alternatives, if you really need to use cdata
+objects as keys:
+</p>
+<ul>
+
+<li>If you can get by with the precision of Lua numbers
+(52&nbsp;bits), then use <tt>tonumber()</tt> on a cdata number or
+combine multiple fields of a cdata aggregate to a Lua number. Then use
+the resulting Lua number as a key when indexing tables.<br>
+One obvious benefit: <tt>t[tonumber(2LL)]</tt> <b>does</b> point to
+the same slot as <tt>t[2]</tt>.</li>
+
+<li>Otherwise, use either <tt>tostring()</tt> on 64&nbsp;bit integers
+or complex numbers or combine multiple fields of a cdata aggregate to
+a Lua string (e.g. with
+<a href="e
