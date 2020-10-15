@@ -809,4 +809,41 @@ the same slot as <tt>t[2]</tt>.</li>
 <li>Otherwise, use either <tt>tostring()</tt> on 64&nbsp;bit integers
 or complex numbers or combine multiple fields of a cdata aggregate to
 a Lua string (e.g. with
-<a href="e
+<a href="ext_ffi_api.html#ffi_string"><tt>ffi.string()</tt></a>). Then
+use the resulting Lua string as a key when indexing tables.</li>
+
+<li>Create your own specialized hash table implementation using the
+C&nbsp;types provided by the FFI library, just like you would in
+C&nbsp;code. Ultimately, this may give much better performance than the
+other alternatives or what a generic by-value hash table could
+possibly provide.</li>
+
+</ul>
+
+<h2 id="param">Parameterized Types</h2>
+<p>
+To facilitate some abstractions, the two functions
+<a href="ext_ffi_api.html#ffi_typeof"><tt>ffi.typeof</tt></a> and
+<a href="ext_ffi_api.html#ffi_cdef"><tt>ffi.cdef</tt></a> support
+parameterized types in C&nbsp;declarations. Note: none of the other API
+functions taking a cdecl allow this.
+</p>
+<p>
+Any place you can write a <b><tt>typedef</tt> name</b>, an
+<b>identifier</b> or a <b>number</b> in a declaration, you can write
+<tt>$</tt> (the dollar sign) instead. These placeholders are replaced in
+order of appearance with the arguments following the cdecl string:
+</p>
+<pre class="code">
+-- Declare a struct with a parameterized field type and name:
+ffi.cdef([[
+typedef struct { $ $; } foo_t;
+]], type1, name1)
+
+-- Anonymous struct with dynamic names:
+local bar_t = ffi.typeof("struct { int $, $; }", name1, name2)
+-- Derived pointer type:
+local bar_ptr_t = ffi.typeof("$ *", bar_t)
+
+-- Parameterized dimensions work even where a VLA won't work:
+local matrix_
