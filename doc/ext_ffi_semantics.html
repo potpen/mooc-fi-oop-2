@@ -846,4 +846,33 @@ local bar_t = ffi.typeof("struct { int $, $; }", name1, name2)
 local bar_ptr_t = ffi.typeof("$ *", bar_t)
 
 -- Parameterized dimensions work even where a VLA won't work:
-local matrix_
+local matrix_t = ffi.typeof("uint8_t[$][$]", width, height)
+</pre>
+<p>
+Caveat: this is <em>not</em> simple text substitution! A passed ctype or
+cdata object is treated like the underlying type, a passed string is
+considered an identifier and a number is considered a number. You must
+not mix this up: e.g. passing <tt>"int"</tt> as a string doesn't work in
+place of a type, you'd need to use <tt>ffi.typeof("int")</tt> instead.
+</p>
+<p>
+The main use for parameterized types are libraries implementing abstract
+data types
+(<a href="https://www.freelists.org/post/luajit/ffi-type-of-pointer-to,8"><span class="ext">&raquo;</span>&nbsp;example</a>),
+similar to what can be achieved with C++ template metaprogramming.
+Another use case are derived types of anonymous structs, which avoids
+pollution of the global struct namespace.
+</p>
+<p>
+Please note that parameterized types are a nice tool and indispensable
+for certain use cases. But you'll want to use them sparingly in regular
+code, e.g. when all types are actually fixed.
+</p>
+
+<h2 id="gc">Garbage Collection of cdata Objects</h2>
+<p>
+All explicitly (<tt>ffi.new()</tt>, <tt>ffi.cast()</tt> etc.) or
+implicitly (accessors) created cdata objects are garbage collected.
+You need to ensure to retain valid references to cdata objects
+somewhere on a Lua stack, an upvalue or in a Lua table while they are
+still in use. Once the last reference to a cdata object is gone, the
