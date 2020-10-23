@@ -876,3 +876,37 @@ implicitly (accessors) created cdata objects are garbage collected.
 You need to ensure to retain valid references to cdata objects
 somewhere on a Lua stack, an upvalue or in a Lua table while they are
 still in use. Once the last reference to a cdata object is gone, the
+garbage collector will automatically free the memory used by it (at
+the end of the next GC cycle).
+</p>
+<p>
+Please note, that pointers themselves are cdata objects, however they
+are <b>not</b> followed by the garbage collector. So e.g. if you
+assign a cdata array to a pointer, you must keep the cdata object
+holding the array alive as long as the pointer is still in use:
+</p>
+<pre class="code">
+ffi.cdef[[
+typedef struct { int *a; } foo_t;
+]]
+
+local s = ffi.new("foo_t", ffi.new("int[10]")) -- <span style="color:#c00000;">WRONG!</span>
+
+local a = ffi.new("int[10]") -- <span style="color:#00a000;">OK</span>
+local s = ffi.new("foo_t", a)
+-- Now do something with 's', but keep 'a' alive until you're done.
+</pre>
+<p>
+Similar rules apply for Lua strings which are implicitly converted to
+<tt>"const&nbsp;char&nbsp;*"</tt>: the string object itself must be
+referenced somewhere or it'll be garbage collected eventually. The
+pointer will then point to stale data, which may have already been
+overwritten. Note that <em>string literals</em> are automatically kept
+alive as long as the function containing it (actually its prototype)
+is not garbage collected.
+</p>
+<p>
+Objects which are passed as an argument to an external C&nbsp;function
+are kept alive until the call returns. So it's generally safe to
+create temporary cdata objects in argument lists. This is a common
+idiom for <a href="#convert_vararg">passing
