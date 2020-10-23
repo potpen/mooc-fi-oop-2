@@ -909,4 +909,38 @@ is not garbage collected.
 Objects which are passed as an argument to an external C&nbsp;function
 are kept alive until the call returns. So it's generally safe to
 create temporary cdata objects in argument lists. This is a common
-idiom for <a href="#convert_vararg">passing
+idiom for <a href="#convert_vararg">passing specific C&nbsp;types to
+vararg functions</a>.
+</p>
+<p>
+Memory areas returned by C functions (e.g. from <tt>malloc()</tt>)
+must be manually managed, of course (or use
+<a href="ext_ffi_api.html#ffi_gc"><tt>ffi.gc()</tt></a>). Pointers to
+cdata objects are indistinguishable from pointers returned by C
+functions (which is one of the reasons why the GC cannot follow them).
+</p>
+
+<h2 id="callback">Callbacks</h2>
+<p>
+The LuaJIT FFI automatically generates special callback functions
+whenever a Lua function is converted to a C&nbsp;function pointer. This
+associates the generated callback function pointer with the C&nbsp;type
+of the function pointer and the Lua function object (closure).
+</p>
+<p>
+This can happen implicitly due to the usual conversions, e.g. when
+passing a Lua function to a function pointer argument. Or, you can use
+<tt>ffi.cast()</tt> to explicitly cast a Lua function to a
+C&nbsp;function pointer.
+</p>
+<p>
+Currently, only certain C&nbsp;function types can be used as callback
+functions. Neither C&nbsp;vararg functions nor functions with
+pass-by-value aggregate argument or result types are supported. There
+are no restrictions on the kind of Lua functions that can be called
+from the callback &mdash; no checks for the proper number of arguments
+are made. The return value of the Lua function will be converted to the
+result type, and an error will be thrown for invalid conversions.
+</p>
+<p>
+It's a
