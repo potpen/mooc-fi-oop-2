@@ -974,4 +974,46 @@ architecture). The associated Lua functions are anchored to prevent
 garbage collection, too.
 </p>
 <p>
-<b>Callbacks due to implicit conversions ar
+<b>Callbacks due to implicit conversions are permanent!</b> There is no
+way to guess their lifetime, since the C&nbsp;side might store the
+function pointer for later use (typical for GUI toolkits). The associated
+resources cannot be reclaimed until termination:
+</p>
+<pre class="code">
+ffi.cdef[[
+typedef int (__stdcall *WNDENUMPROC)(void *hwnd, intptr_t l);
+int EnumWindows(WNDENUMPROC func, intptr_t l);
+]]
+
+-- Implicit conversion to a callback via function pointer argument.
+local count = 0
+ffi.C.EnumWindows(function(hwnd, l)
+  count = count + 1
+  return true
+end, 0)
+-- The callback is permanent and its resources cannot be reclaimed!
+-- Ok, so this may not be a problem, if you do this only once.
+</pre>
+<p>
+Note: this example shows that you <em>must</em> properly declare
+<tt>__stdcall</tt> callbacks on Windows/x86 systems. The calling
+convention cannot be automatically detected, unlike for
+<tt>__stdcall</tt> calls <em>to</em> Windows functions.
+</p>
+<p>
+For some use cases, it's necessary to free up the resources or to
+dynamically redirect callbacks. Use an explicit cast to a
+C&nbsp;function pointer and keep the resulting cdata object. Then use
+the <a href="ext_ffi_api.html#callback_free"><tt>cb:free()</tt></a>
+or <a href="ext_ffi_api.html#callback_set"><tt>cb:set()</tt></a> methods
+on the cdata object:
+</p>
+<pre class="code">
+-- Explicitly convert to a callback via cast.
+local count = 0
+local cb = ffi.cast("WNDENUMPROC", function(hwnd, l)
+  count = count + 1
+  return true
+end)
+
+-- Pass it to a C functi
