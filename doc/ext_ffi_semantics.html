@@ -1016,4 +1016,38 @@ local cb = ffi.cast("WNDENUMPROC", function(hwnd, l)
   return true
 end)
 
--- Pass it to a C functi
+-- Pass it to a C function.
+ffi.C.EnumWindows(cb, 0)
+-- EnumWindows doesn't need the callback after it returns, so free it.
+
+cb:free()
+-- The callback function pointer is no longer valid and its resources
+-- will be reclaimed. The created Lua closure will be garbage collected.
+</pre>
+
+<h3 id="callback_performance">Callback performance</h3>
+<p>
+<b>Callbacks are slow!</b> First, the C&nbsp;to Lua transition itself
+has an unavoidable cost, similar to a <tt>lua_call()</tt> or
+<tt>lua_pcall()</tt>. Argument and result marshalling add to that cost.
+And finally, neither the C&nbsp;compiler nor LuaJIT can inline or
+optimize across the language barrier and hoist repeated computations out
+of a callback function.
+</p>
+<p>
+Do not use callbacks for performance-sensitive work: e.g. consider a
+numerical integration routine which takes a user-defined function to
+integrate over. It's a bad idea to call a user-defined Lua function from
+C&nbsp;code millions of times. The callback overhead will be absolutely
+detrimental for performance.
+</p>
+<p>
+It's considerably faster to write the numerical integration routine
+itself in Lua &mdash; the JIT compiler will be able to inline the
+user-defined function and optimize it together with its calling context,
+with very competitive performance.
+</p>
+<p>
+As a general guideline: <b>use callbacks only when you must</b>, because
+of existing C&nbsp;APIs. E.g. callback performance is irrelevant for a
+GUI application
