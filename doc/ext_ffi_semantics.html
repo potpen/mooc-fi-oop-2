@@ -1050,4 +1050,33 @@ with very competitive performance.
 <p>
 As a general guideline: <b>use callbacks only when you must</b>, because
 of existing C&nbsp;APIs. E.g. callback performance is irrelevant for a
-GUI application
+GUI application, which waits for user input most of the time, anyway.
+</p>
+<p>
+For new designs <b>avoid push-style APIs</b>: a C&nbsp;function repeatedly
+calling a callback for each result. Instead, <b>use pull-style APIs</b>:
+call a C&nbsp;function repeatedly to get a new result. Calls from Lua
+to C via the FFI are much faster than the other way round. Most well-designed
+libraries already use pull-style APIs (read/write, get/put).
+</p>
+
+<h2 id="clib">C Library Namespaces</h2>
+<p>
+A C&nbsp;library namespace is a special kind of object which allows
+access to the symbols contained in shared libraries or the default
+symbol namespace. The default
+<a href="ext_ffi_api.html#ffi_C"><tt>ffi.C</tt></a> namespace is
+automatically created when the FFI library is loaded. C&nbsp;library
+namespaces for specific shared libraries may be created with the
+<a href="ext_ffi_api.html#ffi_load"><tt>ffi.load()</tt></a> API
+function.
+</p>
+<p>
+Indexing a C&nbsp;library namespace object with a symbol name (a Lua
+string) automatically binds it to the library. First, the symbol type
+is resolved &mdash; it must have been declared with
+<a href="ext_ffi_api.html#ffi_cdef"><tt>ffi.cdef</tt></a>. Then the
+symbol address is resolved by searching for the symbol name in the
+associated shared libraries or the default symbol namespace. Finally,
+the resulting binding between the symbol name, the symbol type and its
+address is cached. Missing sym
