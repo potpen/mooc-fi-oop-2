@@ -1079,4 +1079,45 @@ is resolved &mdash; it must have been declared with
 symbol address is resolved by searching for the symbol name in the
 associated shared libraries or the default symbol namespace. Finally,
 the resulting binding between the symbol name, the symbol type and its
-address is cached. Missing sym
+address is cached. Missing symbol declarations or nonexistent symbol
+names cause an error.
+</p>
+<p>
+This is what happens on a <b>read access</b> for the different kinds of
+symbols:
+</p>
+<ul>
+
+<li>External functions: a cdata object with the type of the function
+and its address is returned.</li>
+
+<li>External variables: the symbol address is dereferenced and the
+loaded value is <a href="#convert_tolua">converted to a Lua object</a>
+and returned.</li>
+
+<li>Constant values (<tt>static&nbsp;const</tt> or <tt>enum</tt>
+constants): the constant is <a href="#convert_tolua">converted to a
+Lua object</a> and returned.</li>
+
+</ul>
+<p>
+This is what happens on a <b>write access</b>:
+</p>
+<ul>
+
+<li>External variables: the value to be written is
+<a href="#convert_fromlua">converted to the C&nbsp;type</a> of the
+variable and then stored at the symbol address.</li>
+
+<li>Writing to constant variables or to any other symbol type causes
+an error, like any other attempted write to a constant location.</li>
+
+</ul>
+<p>
+C&nbsp;library namespaces themselves are garbage collected objects. If
+the last reference to the namespace object is gone, the garbage
+collector will eventually release the shared library reference and
+remove all memory associated with the namespace. Since this may
+trigger the removal of the shared library from the memory of the
+running process, it's generally <em>not safe</em> to use function
+cdata objects obtained from a librar
