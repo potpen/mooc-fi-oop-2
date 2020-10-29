@@ -1187,4 +1187,32 @@ currently incomplete:
 <ul>
 <li>C&nbsp;declarations are not passed through a C&nbsp;pre-processor,
 yet.</li>
-<li>The C&nbsp
+<li>The C&nbsp;parser is able to evaluate most constant expressions
+commonly found in C&nbsp;header files. However, it doesn't handle the
+full range of C&nbsp;expression semantics and may fail for some
+obscure constructs.</li>
+<li><tt>static const</tt> declarations only work for integer types
+up to 32&nbsp;bits. Neither declaring string constants nor
+floating-point constants is supported.</li>
+<li>Packed <tt>struct</tt> bitfields that cross container boundaries
+are not implemented.</li>
+<li>Native vector types may be defined with the GCC <tt>mode</tt> or
+<tt>vector_size</tt> attribute. But no operations other than loading,
+storing and initializing them are supported, yet.</li>
+<li>The <tt>volatile</tt> type qualifier is currently ignored by
+compiled code.</li>
+<li><a href="ext_ffi_api.html#ffi_cdef"><tt>ffi.cdef</tt></a> silently
+ignores most re-declarations. Note: avoid re-declarations which do not
+conform to C99. The implementation will eventually be changed to
+perform strict checks.</li>
+</ul>
+<p>
+The JIT compiler already handles a large subset of all FFI operations.
+It automatically falls back to the interpreter for unimplemented
+operations (you can check for this with the
+<a href="running.html#opt_j"><tt>-jv</tt></a> command line option).
+The following operations are currently not compiled and may exhibit
+suboptimal performance, especially when used in inner loops:
+</p>
+<ul>
+<li>Vector opera
