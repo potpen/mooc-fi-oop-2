@@ -1120,4 +1120,37 @@ collector will eventually release the shared library reference and
 remove all memory associated with the namespace. Since this may
 trigger the removal of the shared library from the memory of the
 running process, it's generally <em>not safe</em> to use function
-cdata objects obtained from a librar
+cdata objects obtained from a library if the namespace object may be
+unreferenced.
+</p>
+<p>
+Performance notice: the JIT compiler specializes to the identity of
+namespace objects and to the strings used to index it. This
+effectively turns function cdata objects into constants. It's not
+useful and actually counter-productive to explicitly cache these
+function objects, e.g. <tt>local strlen = ffi.C.strlen</tt>. OTOH, it
+<em>is</em> useful to cache the namespace itself, e.g. <tt>local C =
+ffi.C</tt>.
+</p>
+
+<h2 id="policy">No Hand-holding!</h2>
+<p>
+The FFI library has been designed as <b>a low-level library</b>. The
+goal is to interface with C&nbsp;code and C&nbsp;data types with a
+minimum of overhead. This means <b>you can do anything you can do
+from&nbsp;C</b>: access all memory, overwrite anything in memory, call
+machine code at any memory address and so on.
+</p>
+<p>
+The FFI library provides <b>no memory safety</b>, unlike regular Lua
+code. It will happily allow you to dereference a <tt>NULL</tt>
+pointer, to access arrays out of bounds or to misdeclare
+C&nbsp;functions. If you make a mistake, your application might crash,
+just like equivalent C&nbsp;code would.
+</p>
+<p>
+This behavior is inevitable, since the goal is to provide full
+interoperability with C&nbsp;code. Adding extra safety measures, like
+bounds checks, would be futile. There's no way to detect
+misdeclarations of C&nbsp;functions, since shared libraries only
+provide
