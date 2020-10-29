@@ -1153,4 +1153,38 @@ This behavior is inevitable, since the goal is to provide full
 interoperability with C&nbsp;code. Adding extra safety measures, like
 bounds checks, would be futile. There's no way to detect
 misdeclarations of C&nbsp;functions, since shared libraries only
-provide
+provide symbol names, but no type information. Likewise, there's no way
+to infer the valid range of indexes for a returned pointer.
+</p>
+<p>
+Again: the FFI library is a low-level library. This implies it needs
+to be used with care, but it's flexibility and performance often
+outweigh this concern. If you're a C or C++ developer, it'll be easy
+to apply your existing knowledge. OTOH, writing code for the FFI
+library is not for the faint of heart and probably shouldn't be the
+first exercise for someone with little experience in Lua, C or C++.
+</p>
+<p>
+As a corollary of the above, the FFI library is <b>not safe for use by
+untrusted Lua code</b>. If you're sandboxing untrusted Lua code, you
+definitely don't want to give this code access to the FFI library or
+to <em>any</em> cdata object (except 64&nbsp;bit integers or complex
+numbers). Any properly engineered Lua sandbox needs to provide safety
+wrappers for many of the standard Lua library functions &mdash;
+similar wrappers need to be written for high-level operations on FFI
+data types, too.
+</p>
+
+<h2 id="status">Current Status</h2>
+<p>
+The initial release of the FFI library has some limitations and is
+missing some features. Most of these will be fixed in future releases.
+</p>
+<p>
+<a href="#clang">C language support</a> is
+currently incomplete:
+</p>
+<ul>
+<li>C&nbsp;declarations are not passed through a C&nbsp;pre-processor,
+yet.</li>
+<li>The C&nbsp
