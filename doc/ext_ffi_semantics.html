@@ -1215,4 +1215,42 @@ The following operations are currently not compiled and may exhibit
 suboptimal performance, especially when used in inner loops:
 </p>
 <ul>
-<li>Vector opera
+<li>Vector operations.</li>
+<li>Table initializers.</li>
+<li>Initialization of nested <tt>struct</tt>/<tt>union</tt> types.</li>
+<li>Non-default initialization of VLA/VLS or large C&nbsp;types
+(&gt; 128&nbsp;bytes or &gt; 16 array elements).</li>
+<li>Bitfield initializations.</li>
+<li>Pointer differences for element sizes that are not a power of
+two.</li>
+<li>Calls to C&nbsp;functions with aggregates passed or returned by
+value.</li>
+<li>Calls to ctype metamethods which are not plain functions.</li>
+<li>ctype <tt>__newindex</tt> tables and non-string lookups in ctype
+<tt>__index</tt> tables.</li>
+<li><tt>tostring()</tt> for cdata types.</li>
+<li>Calls to <tt>ffi.cdef()</tt>, <tt>ffi.load()</tt> and
+<tt>ffi.metatype()</tt>.</li>
+</ul>
+<p>
+Other missing features:
+</p>
+<ul>
+<li>Arithmetic for <tt>complex</tt> numbers.</li>
+<li>Passing structs by value to vararg C&nbsp;functions.</li>
+<li><a href="extensions.html#exceptions">C++ exception interoperability</a>
+does not extend to C&nbsp;functions called via the FFI, if the call is
+compiled.</li>
+</ul>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
