@@ -56,4 +56,43 @@ td.idiomlua b { font-weight: normal; color: #2142bf; }
 <a href="status.html">Status</a>
 </li><li>
 <a href="faq.html">FAQ</a>
-</li><li
+</li><li>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+</li></ul>
+</div>
+<div id="main">
+<p>
+This page is intended to give you an overview of the features of the FFI
+library by presenting a few use cases and guidelines.
+</p>
+<p>
+This page makes no attempt to explain all of the FFI library, though.
+You'll want to have a look at the <a href="ext_ffi_api.html">ffi.* API
+function reference</a> and the <a href="ext_ffi_semantics.html">FFI
+semantics</a> to learn more.
+</p>
+
+<h2 id="load">Loading the FFI Library</h2>
+<p>
+The FFI library is built into LuaJIT by default, but it's not loaded
+and initialized by default. The suggested way to use the FFI library
+is to add the following to the start of every Lua file that needs one
+of its functions:
+</p>
+<pre class="code">
+local ffi = require("ffi")
+</pre>
+<p>
+Please note, this doesn't define an <tt>ffi</tt> variable in the table
+of globals &mdash; you really need to use the local variable. The
+<tt>require</tt> function ensures the library is only loaded once.
+</p>
+<p style="font-size: 8pt;">
+Note: If you want to experiment with the FFI from the interactive prompt
+of the command line executable, omit the <tt>local</tt>, as it doesn't
+preserve local variables across lines.
+</p>
+
+<h2 id="sleep">Accessing Standard System Functions</h2>
+<p>
+The following code explains how to access standard
