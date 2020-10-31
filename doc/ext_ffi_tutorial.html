@@ -95,4 +95,68 @@ preserve local variables across lines.
 
 <h2 id="sleep">Accessing Standard System Functions</h2>
 <p>
-The following code explains how to access standard
+The following code explains how to access standard system functions.
+We slowly print two lines of dots by sleeping for 10&nbsp;milliseconds
+after each dot:
+</p>
+<pre class="code mark">
+<span class="codemark">&nbsp;
+&#9312;
+
+
+
+
+
+&#9313;
+&#9314;
+&#9315;
+
+
+
+&#9316;
+
+
+
+
+
+&#9317;</span>local ffi = require("ffi")
+ffi.cdef[[
+<span style="color:#00a000;">void Sleep(int ms);
+int poll(struct pollfd *fds, unsigned long nfds, int timeout);</span>
+]]
+
+local sleep
+if ffi.os == "Windows" then
+  function sleep(s)
+    ffi.C.Sleep(s*1000)
+  end
+else
+  function sleep(s)
+    ffi.C.poll(nil, 0, s*1000)
+  end
+end
+
+for i=1,160 do
+  io.write("."); io.flush()
+  sleep(0.01)
+end
+io.write("\n")
+</pre>
+<p>
+Here's the step-by-step explanation:
+</p>
+<p>
+<span class="mark">&#9312;</span> This defines the
+C&nbsp;library functions we're going to use. The part inside the
+double-brackets (in green) is just standard C&nbsp;syntax. You can
+usually get this info from the C&nbsp;header files or the
+documentation provided by each C&nbsp;library or C&nbsp;compiler.
+</p>
+<p>
+<span class="mark">&#9313;</span> The difficulty we're
+facing here, is that there are different standards to choose from.
+Windows has a simple <tt>Sleep()</tt> function. On other systems there
+are a variety of functions available to achieve sub-second sleeps, but
+with no clear consensus. Thankfully <tt>poll()</tt> can be used for
+this task, too, and it's present on most non-Windows systems. The
+check for <tt>ffi.os</tt> makes sure we use the Wi
