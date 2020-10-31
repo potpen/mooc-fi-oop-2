@@ -159,4 +159,30 @@ Windows has a simple <tt>Sleep()</tt> function. On other systems there
 are a variety of functions available to achieve sub-second sleeps, but
 with no clear consensus. Thankfully <tt>poll()</tt> can be used for
 this task, too, and it's present on most non-Windows systems. The
-check for <tt>ffi.os</tt> makes sure we use the Wi
+check for <tt>ffi.os</tt> makes sure we use the Windows-specific
+function only on Windows systems.
+</p>
+<p>
+<span class="mark">&#9314;</span> Here we're wrapping the
+call to the C&nbsp;function in a Lua function. This isn't strictly
+necessary, but it's helpful to deal with system-specific issues only
+in one part of the code. The way we're wrapping it ensures the check
+for the OS is only done during initialization and not for every call.
+</p>
+<p>
+<span class="mark">&#9315;</span> A more subtle point is
+that we defined our <tt>sleep()</tt> function (for the sake of this
+example) as taking the number of seconds, but accepting fractional
+seconds. Multiplying this by 1000 gets us milliseconds, but that still
+leaves it a Lua number, which is a floating-point value. Alas, the
+<tt>Sleep()</tt> function only accepts an integer value. Luckily for
+us, the FFI library automatically performs the conversion when calling
+the function (truncating the FP value towards zero, like in C).
+</p>
+<p style="font-size: 8pt;">
+Some readers will notice that <tt>Sleep()</tt> is part of
+<tt>KERNEL32.DLL</tt> and is also a <tt>stdcall</tt> function. So how
+can this possibly work? The FFI library provides the <tt>ffi.C</tt>
+default C&nbsp;library namespace, which allows calling functions from
+the default set of libraries, like a C&nbsp;compiler would. Also, the
+FFI library automatically detects <tt>stdcall</tt> functions, so
