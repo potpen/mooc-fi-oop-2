@@ -185,4 +185,36 @@ Some readers will notice that <tt>Sleep()</tt> is part of
 can this possibly work? The FFI library provides the <tt>ffi.C</tt>
 default C&nbsp;library namespace, which allows calling functions from
 the default set of libraries, like a C&nbsp;compiler would. Also, the
-FFI library automatically detects <tt>stdcall</tt> functions, so
+FFI library automatically detects <tt>stdcall</tt> functions, so you
+don't need to declare them as such.
+</p>
+<p>
+<span class="mark">&#9316;</span> The <tt>poll()</tt>
+function takes a couple more arguments we're not going to use. You can
+simply use <tt>nil</tt> to pass a <tt>NULL</tt> pointer and <tt>0</tt>
+for the <tt>nfds</tt> parameter. Please note, that the
+number&nbsp;<tt>0</tt> <em>does not convert to a pointer value</em>,
+unlike in C++. You really have to pass pointers to pointer arguments
+and numbers to number arguments.
+</p>
+<p style="font-size: 8pt;">
+The page on <a href="ext_ffi_semantics.html">FFI semantics</a> has all
+of the gory details about
+<a href="ext_ffi_semantics.html#convert">conversions between Lua
+objects and C&nbsp;types</a>. For the most part you don't have to deal
+with this, as it's performed automatically and it's carefully designed
+to bridge the semantic differences between Lua and C.
+</p>
+<p>
+<span class="mark">&#9317;</span> Now that we have defined
+our own <tt>sleep()</tt> function, we can just call it from plain Lua
+code. That wasn't so bad, huh? Turning these boring animated dots into
+a fascinating best-selling game is left as an exercise for the reader.
+:-)
+</p>
+
+<h2 id="zlib">Accessing the zlib Compression Library</h2>
+<p>
+The following code shows how to access the <a
+href="https://zlib.net/"><span class="ext">&raquo;</span>&nbsp;zlib</a> compression library from Lua code.
+We'll define two convenience wrapper functions that take a string and
