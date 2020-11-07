@@ -218,3 +218,74 @@ a fascinating best-selling game is left as an exercise for the reader.
 The following code shows how to access the <a
 href="https://zlib.net/"><span class="ext">&raquo;</span>&nbsp;zlib</a> compression library from Lua code.
 We'll define two convenience wrapper functions that take a string and
+compress or uncompress it to another string:
+</p>
+<pre class="code mark">
+<span class="codemark">&nbsp;
+&#9312;
+
+
+
+
+
+
+&#9313;
+
+
+&#9314;
+
+&#9315;
+
+
+&#9316;
+
+
+&#9317;
+
+
+
+
+
+
+
+&#9318;</span>local ffi = require("ffi")
+ffi.cdef[[
+<span style="color:#00a000;">unsigned long compressBound(unsigned long sourceLen);
+int compress2(uint8_t *dest, unsigned long *destLen,
+	      const uint8_t *source, unsigned long sourceLen, int level);
+int uncompress(uint8_t *dest, unsigned long *destLen,
+	       const uint8_t *source, unsigned long sourceLen);</span>
+]]
+local zlib = ffi.load(ffi.os == "Windows" and "zlib1" or "z")
+
+local function compress(txt)
+  local n = zlib.compressBound(#txt)
+  local buf = ffi.new("uint8_t[?]", n)
+  local buflen = ffi.new("unsigned long[1]", n)
+  local res = zlib.compress2(buf, buflen, txt, #txt, 9)
+  assert(res == 0)
+  return ffi.string(buf, buflen[0])
+end
+
+local function uncompress(comp, n)
+  local buf = ffi.new("uint8_t[?]", n)
+  local buflen = ffi.new("unsigned long[1]", n)
+  local res = zlib.uncompress(buf, buflen, comp, #comp)
+  assert(res == 0)
+  return ffi.string(buf, buflen[0])
+end
+
+-- Simple test code.
+local txt = string.rep("abcd", 1000)
+print("Uncompressed size: ", #txt)
+local c = compress(txt)
+print("Compressed size: ", #c)
+local txt2 = uncompress(c, #txt)
+assert(txt2 == txt)
+</pre>
+<p>
+Here's the step-by-step explanation:
+</p>
+<p>
+<span class="mark">&#9312;</span> This defines some of the
+C&nbsp;functions provided b
