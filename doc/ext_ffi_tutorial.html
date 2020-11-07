@@ -288,4 +288,33 @@ Here's the step-by-step explanation:
 </p>
 <p>
 <span class="mark">&#9312;</span> This defines some of the
-C&nbsp;functions provided b
+C&nbsp;functions provided by zlib. For the sake of this example, some
+type indirections have been reduced and it uses the predefined
+fixed-size integer types, while still adhering to the zlib API/ABI.
+</p>
+<p>
+<span class="mark">&#9313;</span> This loads the zlib shared
+library. On POSIX systems, it's named <tt>libz.so</tt> and usually
+comes pre-installed. Since <tt>ffi.load()</tt> automatically adds any
+missing standard prefixes/suffixes, we can simply load the
+<tt>"z"</tt> library. On Windows it's named <tt>zlib1.dll</tt> and
+you'll have to download it first from the
+<a href="https://zlib.net/"><span class="ext">&raquo;</span>&nbsp;zlib site</a>. The check for
+<tt>ffi.os</tt> makes sure we pass the right name to
+<tt>ffi.load()</tt>.
+</p>
+<p>
+<span class="mark">&#9314;</span> First, the maximum size of
+the compression buffer is obtained by calling the
+<tt>zlib.compressBound</tt> function with the length of the
+uncompressed string. The next line allocates a byte buffer of this
+size. The <tt>[?]</tt> in the type specification indicates a
+variable-length array (VLA). The actual number of elements of this
+array is given as the 2nd argument to <tt>ffi.new()</tt>.
+</p>
+<p>
+<span class="mark">&#9315;</span> This may look strange at
+first, but have a look at the declaration of the <tt>compress2</tt>
+function from zlib: the destination length is defined as a pointer!
+This is because you pass in the maximum buffer size and get back the
+actual leng
