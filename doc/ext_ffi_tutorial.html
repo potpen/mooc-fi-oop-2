@@ -346,4 +346,36 @@ for garbage collection and string interning.
 <span class="mark">&#9317;</span> The <tt>uncompress</tt>
 functions does the exact opposite of the <tt>compress</tt> function.
 The compressed data doesn't include the size of the original string,
-so this needs to be passed in. Otherwise,
+so this needs to be passed in. Otherwise, no surprises here.
+</p>
+<p>
+<span class="mark">&#9318;</span> The code, that makes use
+of the functions we just defined, is just plain Lua code. It doesn't
+need to know anything about the LuaJIT FFI &mdash; the convenience
+wrapper functions completely hide it.
+</p>
+<p>
+One major advantage of the LuaJIT FFI is that you are now able to
+write those wrappers <em>in Lua</em>. And at a fraction of the time it
+would cost you to create an extra C&nbsp;module using the Lua/C API.
+Many of the simpler C&nbsp;functions can probably be used directly
+from your Lua code, without any wrappers.
+</p>
+<p style="font-size: 8pt;">
+Side note: the zlib API uses the <tt>long</tt> type for passing
+lengths and sizes around. But all those zlib functions actually only
+deal with 32&nbsp;bit values. This is an unfortunate choice for a
+public API, but may be explained by zlib's history &mdash; we'll just
+have to deal with it.
+</p>
+<p style="font-size: 8pt;">
+First, you should know that a <tt>long</tt> is a 64&nbsp;bit type e.g.
+on POSIX/x64 systems, but a 32&nbsp;bit type on Windows/x64 and on
+32&nbsp;bit systems. Thus a <tt>long</tt> result can be either a plain
+Lua number or a boxed 64&nbsp;bit integer cdata object, depending on
+the target system.
+</p>
+<p style="font-size: 8pt;">
+Ok, so the <tt>ffi.*</tt> functions generally accept cdata objects
+wherever you'd want to use a number. That's why we get a away with
+passing <tt>n</tt> to <tt>ffi
