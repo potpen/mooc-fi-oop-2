@@ -317,4 +317,33 @@ array is given as the 2nd argument to <tt>ffi.new()</tt>.
 first, but have a look at the declaration of the <tt>compress2</tt>
 function from zlib: the destination length is defined as a pointer!
 This is because you pass in the maximum buffer size and get back the
-actual leng
+actual length that was used.
+</p>
+<p>
+In C you'd pass in the address of a local variable
+(<tt>&amp;buflen</tt>). But since there's no address-of operator in
+Lua, we'll just pass in a one-element array. Conveniently, it can be
+initialized with the maximum buffer size in one step. Calling the
+actual <tt>zlib.compress2</tt> function is then straightforward.
+</p>
+<p>
+<span class="mark">&#9316;</span> We want to return the
+compressed data as a Lua string, so we'll use <tt>ffi.string()</tt>.
+It needs a pointer to the start of the data and the actual length. The
+length has been returned in the <tt>buflen</tt> array, so we'll just
+get it from there.
+</p>
+<p style="font-size: 8pt;">
+Note that since the function returns now, the <tt>buf</tt> and
+<tt>buflen</tt> variables will eventually be garbage collected. This
+is fine, because <tt>ffi.string()</tt> has copied the contents to a
+newly created (interned) Lua string. If you plan to call this function
+lots of times, consider reusing the buffers and/or handing back the
+results in buffers instead of strings. This will reduce the overhead
+for garbage collection and string interning.
+</p>
+<p>
+<span class="mark">&#9317;</span> The <tt>uncompress</tt>
+functions does the exact opposite of the <tt>compress</tt> function.
+The compressed data doesn't include the size of the original string,
+so this needs to be passed in. Otherwise,
