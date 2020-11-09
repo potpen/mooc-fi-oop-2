@@ -438,4 +438,68 @@ two-dimensional point object.
 </p>
 <p>
 <span class="mark">&#9313;</span> We have to declare the variable
-holding the po
+holding the point constructor first, because it's used inside of a
+metamethod.
+</p>
+<p>
+<span class="mark">&#9314;</span> Let's define an <tt>__add</tt>
+metamethod which adds the coordinates of two points and creates a new
+point object. For simplicity, this function assumes that both arguments
+are points. But it could be any mix of objects, if at least one operand
+is of the required type (e.g. adding a point plus a number or vice
+versa). Our <tt>__len</tt> metamethod returns the distance of a point to
+the origin.
+</p>
+<p>
+<span class="mark">&#9315;</span> If we run out of operators, we can
+define named methods, too. Here, the <tt>__index</tt> table defines an
+<tt>area</tt> function. For custom indexing needs, one might want to
+define <tt>__index</tt> and <tt>__newindex</tt> <em>functions</em> instead.
+</p>
+<p>
+<span class="mark">&#9316;</span> This associates the metamethods with
+our C&nbsp;type. This only needs to be done once. For convenience, a
+constructor is returned by
+<a href="ext_ffi_api.html#ffi_metatype"><tt>ffi.metatype()</tt></a>.
+We're not required to use it, though. The original C&nbsp;type can still
+be used e.g. to create an array of points. The metamethods automatically
+apply to any and all uses of this type.
+</p>
+<p>
+Please note, that the association with a metatable is permanent and
+<b>the metatable must not be modified afterwards!</b> Ditto for the
+<tt>__index</tt> table.
+</p>
+<p>
+<span class="mark">&#9317;</span> Here are some simple usage examples
+for the point type and their expected results. The predefined
+operations (such as <tt>a.x</tt>) can be freely mixed with the newly
+defined metamethods. Note that <tt>area</tt> is a method and must be
+called with the Lua syntax for methods: <tt>a:area()</tt>, not
+<tt>a.area()</tt>.
+</p>
+<p>
+The C&nbsp;type metamethod mechanism is most useful when used in
+conjunction with C&nbsp;libraries that are written in an object-oriented
+style. Creators return a pointer to a new instance, and methods take an
+instance pointer as the first argument. Sometimes you can just point
+<tt>__index</tt> to the library namespace and <tt>__gc</tt> to the
+destructor and you're done. But often enough you'll want to add
+convenience wrappers, e.g. to return actual Lua strings or when
+returning multiple values.
+</p>
+<p>
+Some C libraries only declare instance pointers as an opaque
+<tt>void&nbsp;*</tt> type. In this case you can use a fake type for all
+declarations, e.g. a pointer to a named (incomplete) struct will do:
+<tt>typedef struct foo_type *foo_handle</tt>. The C&nbsp;side doesn't
+know what you declare with the LuaJIT FFI, but as long as the underlying
+types are compatible, everything still works.
+</p>
+
+<h2 id="idioms">Translating C&nbsp;Idioms</h2>
+<p>
+Here's a list of common C&nbsp;idioms and their translation to the
+LuaJIT FFI:
+</p>
+<table class="idiomtabl
