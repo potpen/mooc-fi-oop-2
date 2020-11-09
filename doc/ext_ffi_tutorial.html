@@ -502,4 +502,21 @@ types are compatible, everything still works.
 Here's a list of common C&nbsp;idioms and their translation to the
 LuaJIT FFI:
 </p>
-<table class="idiomtabl
+<table class="idiomtable">
+<tr class="idiomhead">
+<td class="idiomdesc">Idiom</td>
+<td class="idiomc">C&nbsp;code</td>
+<td class="idiomlua">Lua code</td>
+</tr>
+<tr class="odd separate">
+<td class="idiomdesc">Pointer dereference<br><tt>int *p;</tt></td><td class="idiomc"><tt>x = *p;<br>*p = y;</tt></td><td class="idiomlua"><tt>x = <b>p[0]</b><br><b>p[0]</b> = y</tt></td></tr>
+<tr class="even">
+<td class="idiomdesc">Pointer indexing<br><tt>int i, *p;</tt></td><td class="idiomc"><tt>x = p[i];<br>p[i+1] = y;</tt></td><td class="idiomlua"><tt>x = p[i]<br>p[i+1] = y</tt></td></tr>
+<tr class="odd">
+<td class="idiomdesc">Array indexing<br><tt>int i, a[];</tt></td><td class="idiomc"><tt>x = a[i];<br>a[i+1] = y;</tt></td><td class="idiomlua"><tt>x = a[i]<br>a[i+1] = y</tt></td></tr>
+<tr class="even separate">
+<td class="idiomdesc"><tt>struct</tt>/<tt>union</tt> dereference<br><tt>struct foo s;</tt></td><td class="idiomc"><tt>x = s.field;<br>s.field = y;</tt></td><td class="idiomlua"><tt>x = s.field<br>s.field = y</tt></td></tr>
+<tr class="odd">
+<td class="idiomdesc"><tt>struct</tt>/<tt>union</tt> pointer deref.<br><tt>struct foo *sp;</tt></td><td class="idiomc"><tt>x = sp->field;<br>sp->field = y;</tt></td><td class="idiomlua"><tt>x = <b>s.field</b><br><b>s.field</b> = y</tt></td></tr>
+<tr class="even separate">
+<td class="idiomdesc">Pointer arithmetic<br><tt>int i, *p;</tt></td><td class="idiomc"><tt>x = p + i;<br>y = p - i;</tt
