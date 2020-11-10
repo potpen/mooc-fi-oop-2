@@ -519,4 +519,17 @@ LuaJIT FFI:
 <tr class="odd">
 <td class="idiomdesc"><tt>struct</tt>/<tt>union</tt> pointer deref.<br><tt>struct foo *sp;</tt></td><td class="idiomc"><tt>x = sp->field;<br>sp->field = y;</tt></td><td class="idiomlua"><tt>x = <b>s.field</b><br><b>s.field</b> = y</tt></td></tr>
 <tr class="even separate">
-<td class="idiomdesc">Pointer arithmetic<br><tt>int i, *p;</tt></td><td class="idiomc"><tt>x = p + i;<br>y = p - i;</tt
+<td class="idiomdesc">Pointer arithmetic<br><tt>int i, *p;</tt></td><td class="idiomc"><tt>x = p + i;<br>y = p - i;</tt></td><td class="idiomlua"><tt>x = p + i<br>y = p - i</tt></td></tr>
+<tr class="odd">
+<td class="idiomdesc">Pointer difference<br><tt>int *p1, *p2;</tt></td><td class="idiomc"><tt>x = p1 - p2;</tt></td><td class="idiomlua"><tt>x = p1 - p2</tt></td></tr>
+<tr class="even">
+<td class="idiomdesc">Array element pointer<br><tt>int i, a[];</tt></td><td class="idiomc"><tt>x = &amp;a[i];</tt></td><td class="idiomlua"><tt>x = <b>a+i</b></tt></td></tr>
+<tr class="odd">
+<td class="idiomdesc">Cast pointer to address<br><tt>int *p;</tt></td><td class="idiomc"><tt>x = (intptr_t)p;</tt></td><td class="idiomlua"><tt>x = <b>tonumber(<br>&nbsp;ffi.cast("intptr_t",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;p))</b></tt></td></tr>
+<tr class="even separate">
+<td class="idiomdesc">Functions with outargs<br><tt>void foo(int *inoutlen);</tt></td><td class="idiomc"><tt>int len = x;<br>foo(&amp;len);<br>y = len;</tt></td><td class="idiomlua"><tt><b>local len =<br>&nbsp;&nbsp;ffi.new("int[1]", x)<br>foo(len)<br>y = len[0]</b></tt></td></tr>
+<tr class="odd">
+<td class="idiomdesc"><a href="ext_ffi_semantics.html#convert_vararg">Vararg conversions</a><br><tt>int printf(char *fmt, ...);</tt></td><td class="idiomc"><tt>printf("%g", 1.0);<br>printf("%d", 1);<br>&nbsp;</tt></td><td class="idiomlua"><tt>printf("%g", 1);<br>printf("%d",<br>&nbsp;&nbsp;<b>ffi.new("int", 1)</b>)</tt></td></tr>
+</table>
+
+<h2 id="cache">To Cache or Not to
