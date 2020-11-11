@@ -568,4 +568,30 @@ end
 <p>
 This turns them into indirect calls and generates bigger and slower
 machine code. Instead, you'll want to cache the namespace itself and
-rely on the JIT compiler to elimin
+rely on the JIT compiler to eliminate the lookups:
+</p>
+<pre class="code">
+local <b>C</b> = ffi.C          -- <span style="color:#00a000;">Instead use this!</span>
+local function foo(x, n)
+  for i=1,n do <b>C.funcb</b>(<b>C.funca</b>(x, i), 1) end
+end
+</pre>
+<p>
+This generates both shorter and faster code. So <b>don't cache
+C&nbsp;functions</b>, but <b>do</b> cache namespaces! Most often the
+namespace is already in a local variable at an outer scope, e.g. from
+<tt>local&nbsp;lib&nbsp;=&nbsp;ffi.load(...)</tt>. Note that copying
+it to a local variable in the function scope is unnecessary.
+</p>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
