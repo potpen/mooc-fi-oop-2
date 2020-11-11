@@ -532,4 +532,40 @@ LuaJIT FFI:
 <td class="idiomdesc"><a href="ext_ffi_semantics.html#convert_vararg">Vararg conversions</a><br><tt>int printf(char *fmt, ...);</tt></td><td class="idiomc"><tt>printf("%g", 1.0);<br>printf("%d", 1);<br>&nbsp;</tt></td><td class="idiomlua"><tt>printf("%g", 1);<br>printf("%d",<br>&nbsp;&nbsp;<b>ffi.new("int", 1)</b>)</tt></td></tr>
 </table>
 
-<h2 id="cache">To Cache or Not to
+<h2 id="cache">To Cache or Not to Cache</h2>
+<p>
+It's a common Lua idiom to cache library functions in local variables
+or upvalues, e.g.:
+</p>
+<pre class="code">
+local byte, char = string.byte, string.char
+local function foo(x)
+  return char(byte(x)+1)
+end
+</pre>
+<p>
+This replaces several hash-table lookups with a (faster) direct use of
+a local or an upvalue. This is less important with LuaJIT, since the
+JIT compiler optimizes hash-table lookups a lot and is even able to
+hoist most of them out of the inner loops. It can't eliminate
+<em>all</em> of them, though, and it saves some typing for often-used
+functions. So there's still a place for this, even with LuaJIT.
+</p>
+<p>
+The situation is a bit different with C&nbsp;function calls via the
+FFI library. The JIT compiler has special logic to eliminate <em>all
+of the lookup overhead</em> for functions resolved from a
+<a href="ext_ffi_semantics.html#clib">C&nbsp;library namespace</a>!
+Thus it's not helpful and actually counter-productive to cache
+individual C&nbsp;functions like this:
+</p>
+<pre class="code">
+local <b>funca</b>, <b>funcb</b> = ffi.C.funca, ffi.C.funcb -- <span style="color:#c00000;">Not helpful!</span>
+local function foo(x, n)
+  for i=1,n do <b>funcb</b>(<b>funca</b>(x, i), 1) end
+end
+</pre>
+<p>
+This turns them into indirect calls and generates bigger and slower
+machine code. Instead, you'll want to cache the namespace itself and
+rely on the JIT compiler to elimin
