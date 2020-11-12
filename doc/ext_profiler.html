@@ -65,4 +65,40 @@ The integrated profiler can be accessed from three levels:
 <ul>
 <li>The <a href="#hl_profiler">bundled high-level profiler</a>, invoked by the
 <a href="#j_p"><tt>-jp</tt></a> command line option.</li>
-<li>A <a href="#ll_lua_a
+<li>A <a href="#ll_lua_api">low-level Lua API</a> to control the profiler.</li>
+<li>A <a href="#ll_c_api">low-level C API</a> to control the profiler.</li>
+</ul>
+
+<h2 id="hl_profiler">High-Level Profiler</h2>
+<p>
+The bundled high-level profiler offers basic profiling functionality. It
+generates simple textual summaries or source code annotations. It can be
+accessed with the <a href="#j_p"><tt>-jp</tt></a> command line option
+or from Lua code by loading the underlying <tt>jit.p</tt> module.
+</p>
+<p>
+To cut to the chase &mdash; run this to get a CPU usage profile by
+function name:
+</p>
+<pre class="code">
+luajit -jp myapp.lua
+</pre>
+<p>
+It's <em>not</em> a stated goal of the bundled profiler to add every
+possible option or to cater for special profiling needs. The low-level
+profiler APIs are documented below. They may be used by third-party
+authors to implement advanced functionality, e.g. IDE integration or
+graphical profilers.
+</p>
+<p>
+Note: Sampling works for both interpreted and JIT-compiled code. The
+results for JIT-compiled code may sometimes be surprising. LuaJIT
+heavily optimizes and inlines Lua code &mdash; there's no simple
+one-to-one correspondence between source code lines and the sampled
+machine code.
+</p>
+
+<h3 id="j_p"><tt>-jp=[options[,output]]</tt></h3>
+<p>
+The <tt>-jp</tt> command line option starts the high-level profiler.
+When the application run by the command line terminates, the profil
