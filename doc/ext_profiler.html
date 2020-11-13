@@ -132,3 +132,38 @@ Default: 3%.</li>
 <li><tt>i&lt;number&gt;</tt> &mdash; Sampling interval in milliseconds.
 Default: 10ms.<br>
 Note: The actual sampling precision is OS-dependent.</li>
+</ul>
+<p>
+The default output for <tt>-jp</tt> is a list of the most CPU consuming
+spots in the application. Increasing the stack dump depth with (say)
+<tt>-jp=2</tt> may help to point out the main callers or callees of
+hotspots. But sample aggregation is still flat per unique stack dump.
+</p>
+<p>
+To get a two-level view (split view) of callers/callees, use
+<tt>-jp=s</tt> or <tt>-jp=-s</tt>. The percentages shown for the second
+level are relative to the first level.
+</p>
+<p>
+To see how much time is spent in each line relative to a function, use
+<tt>-jp=fl</tt>.
+</p>
+<p>
+To see how much time is spent in different VM states or
+<a href="#jit_zone">zones</a>, use <tt>-jp=v</tt> or <tt>-jp=z</tt>.
+</p>
+<p>
+Combinations of <tt>v/z</tt> with <tt>f/F/l</tt> produce two-level
+views, e.g. <tt>-jp=vf</tt> or <tt>-jp=fv</tt>. This shows the time
+spent in a VM state or zone vs. hotspots. This can be used to answer
+questions like "Which time-consuming functions are only interpreted?" or
+"What's the garbage collector overhead for a specific function?".
+</p>
+<p>
+Multiple options can be combined &mdash; but not all combinations make
+sense, see above. E.g. <tt>-jp=3si4m1</tt> samples three stack levels
+deep in 4ms intervals and shows a split view of the CPU consuming
+functions and their callers with a 1% threshold.
+</p>
+<p>
+Source code annotations produced by <tt>-jp
