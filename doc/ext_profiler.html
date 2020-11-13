@@ -166,4 +166,45 @@ deep in 4ms intervals and shows a split view of the CPU consuming
 functions and their callers with a 1% threshold.
 </p>
 <p>
-Source code annotations produced by <tt>-jp
+Source code annotations produced by <tt>-jp=a</tt> or <tt>-jp=A</tt> are
+always flat and at the line level. Obviously, the source code files need
+to be readable by the profiler script.
+</p>
+<p>
+The high-level profiler can also be started and stopped from Lua code with:
+</p>
+<pre class="code">
+require("jit.p").start(options, output)
+...
+require("jit.p").stop()
+</pre>
+
+<h3 id="jit_zone"><tt>jit.zone</tt> &mdash; Zones</h3>
+<p>
+Zones can be used to provide information about different parts of an
+application to the high-level profiler. E.g. a game could make use of an
+<tt>"AI"</tt> zone, a <tt>"PHYS"</tt> zone, etc. Zones are hierarchical,
+organized as a stack.
+</p>
+<p>
+The <tt>jit.zone</tt> module needs to be loaded explicitly:
+</p>
+<pre class="code">
+local zone = require("jit.zone")
+</pre>
+<ul>
+<li><tt>zone("name")</tt> pushes a named zone to the zone stack.</li>
+<li><tt>zone()</tt> pops the current zone from the zone stack and
+returns its name.</li>
+<li><tt>zone:get()</tt> returns the current zone name or <tt>nil</tt>.</li>
+<li><tt>zone:flush()</tt> flushes the zone stack.</li>
+</ul>
+<p>
+To show the time spent in each zone use <tt>-jp=z</tt>. To show the time
+spent relative to hotspots use e.g. <tt>-jp=zf</tt> or <tt>-jp=fz</tt>.
+</p>
+
+<h2 id="ll_lua_api">Low-level Lua API</h2>
+<p>
+The <tt>jit.profile</tt> module gives access to the low-level API of the
+profiler from Lua code. This module needs to be l
