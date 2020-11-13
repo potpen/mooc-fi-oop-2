@@ -101,4 +101,34 @@ machine code.
 <h3 id="j_p"><tt>-jp=[options[,output]]</tt></h3>
 <p>
 The <tt>-jp</tt> command line option starts the high-level profiler.
-When the application run by the command line terminates, the profil
+When the application run by the command line terminates, the profiler
+stops and writes the results to <tt>stdout</tt> or to the specified
+<tt>output</tt> file.
+</p>
+<p>
+The <tt>options</tt> argument specifies how the profiling is to be
+performed:
+</p>
+<ul>
+<li><tt>f</tt> &mdash; Stack dump: function name, otherwise module:line.
+This is the default mode.</li>
+<li><tt>F</tt> &mdash; Stack dump: ditto, but dump module:name.</li>
+<li><tt>l</tt> &mdash; Stack dump: module:line.</li>
+<li><tt>&lt;number&gt;</tt> &mdash; stack dump depth (callee &larr;
+caller). Default: 1.</li>
+<li><tt>-&lt;number&gt;</tt> &mdash; Inverse stack dump depth (caller
+&rarr; callee).</li>
+<li><tt>s</tt> &mdash; Split stack dump after first stack level. Implies
+depth&nbsp;&ge;&nbsp;2 or depth&nbsp;&le;&nbsp;-2.</li>
+<li><tt>p</tt> &mdash; Show full path for module names.</li>
+<li><tt>v</tt> &mdash; Show VM states.</li>
+<li><tt>z</tt> &mdash; Show <a href="#jit_zone">zones</a>.</li>
+<li><tt>r</tt> &mdash; Show raw sample counts. Default: show percentages.</li>
+<li><tt>a</tt> &mdash; Annotate excerpts from source code files.</li>
+<li><tt>A</tt> &mdash; Annotate complete source code files.</li>
+<li><tt>G</tt> &mdash; Produce raw output suitable for graphical tools.</li>
+<li><tt>m&lt;number&gt;</tt> &mdash; Minimum sample percentage to be shown.
+Default: 3%.</li>
+<li><tt>i&lt;number&gt;</tt> &mdash; Sampling interval in milliseconds.
+Default: 10ms.<br>
+Note: The actual sampling precision is OS-dependent.</li>
