@@ -240,4 +240,45 @@ The <tt>cb</tt> argument is a callback function which is called with
 three arguments: <tt>(thread, samples, vmstate)</tt>. The callback is
 called on a separate coroutine, the <tt>thread</tt> argument is the
 state that holds the stack to sample for profiling. Note: do
-<em>not</em> modify the stack of that state or call functions on 
+<em>not</em> modify the stack of that state or call functions on it.
+</p>
+<p>
+<tt>samples</tt> gives the number of accumulated samples since the last
+callback (usually 1).
+</p>
+<p>
+<tt>vmstate</tt> holds the VM state at the time the profiling timer
+triggered. This may or may not correspond to the state of the VM when
+the profiling callback is called. The state is either <tt>'N'</tt>
+native (compiled) code, <tt>'I'</tt> interpreted code, <tt>'C'</tt>
+C&nbsp;code, <tt>'G'</tt> the garbage collector, or <tt>'J'</tt> the JIT
+compiler.
+</p>
+
+<h3 id="profile_stop"><tt>profile.stop()</tt>
+&mdash; Stop profiler</h3>
+<p>
+This function stops the profiler.
+</p>
+
+<h3 id="profile_dump"><tt>dump = profile.dumpstack([thread,] fmt, depth)</tt>
+&mdash; Dump stack </h3>
+<p>
+This function allows taking stack dumps in an efficient manner. It
+returns a string with a stack dump for the <tt>thread</tt> (coroutine),
+formatted according to the <tt>fmt</tt> argument:
+</p>
+<ul>
+<li><tt>p</tt> &mdash; Preserve the full path for module names. Otherwise,
+only the file name is used.</li>
+<li><tt>f</tt> &mdash; Dump the function name if it can be derived. Otherwise,
+use module:line.</li>
+<li><tt>F</tt> &mdash; Ditto, but dump module:name.</li>
+<li><tt>l</tt> &mdash; Dump module:line.</li>
+<li><tt>Z</tt> &mdash; Zap the following characters for the last dumped
+frame.</li>
+<li>All other characters are added verbatim to the output string.</li>
+</ul>
+<p>
+The <tt>depth</tt> argument gives the number of frames to dump, starting
+at the
