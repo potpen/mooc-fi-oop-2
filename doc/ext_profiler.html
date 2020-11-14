@@ -281,4 +281,42 @@ frame.</li>
 </ul>
 <p>
 The <tt>depth</tt> argument gives the number of frames to dump, starting
-at the
+at the topmost frame of the thread. A negative number dumps the frames in
+inverse order.
+</p>
+<p>
+The first example prints a list of the current module names and line
+numbers of up to 10 frames in separate lines. The second example prints
+semicolon-separated function names for all frames (up to 100) in inverse
+order:
+</p>
+<pre class="code">
+print(profile.dumpstack(thread, "l\n", 10))
+print(profile.dumpstack(thread, "lZ;", -100))
+</pre>
+
+<h2 id="ll_c_api">Low-level C API</h2>
+<p>
+The profiler can be controlled directly from C&nbsp;code, e.g. for
+use by IDEs. The declarations are in <tt>"luajit.h"</tt> (see
+<a href="ext_c_api.html">Lua/C API</a> extensions).
+</p>
+
+<h3 id="luaJIT_profile_start"><tt>luaJIT_profile_start(L, mode, cb, data)</tt>
+&mdash; Start profiler</h3>
+<p>
+This function starts the profiler. <a href="#profile_start">See
+above</a> for a description of the <tt>mode</tt> argument.
+</p>
+<p>
+The <tt>cb</tt> argument is a callback function with the following
+declaration:
+</p>
+<pre class="code">
+typedef void (*luaJIT_profile_callback)(void *data, lua_State *L,
+                                        int samples, int vmstate);
+</pre>
+<p>
+<tt>data</tt> is available for use by the callback. <tt>L</tt> is the
+state that holds the stack to sample for profiling. Note: do
+<em>not</em> modify this stack or call functions on this sta
