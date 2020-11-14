@@ -319,4 +319,41 @@ typedef void (*luaJIT_profile_callback)(void *data, lua_State *L,
 <p>
 <tt>data</tt> is available for use by the callback. <tt>L</tt> is the
 state that holds the stack to sample for profiling. Note: do
-<em>not</em> modify this stack or call functions on this sta
+<em>not</em> modify this stack or call functions on this stack &mdash;
+use a separate coroutine for this purpose. <a href="#profile_start">See
+above</a> for a description of <tt>samples</tt> and <tt>vmstate</tt>.
+</p>
+
+<h3 id="luaJIT_profile_stop"><tt>luaJIT_profile_stop(L)</tt>
+&mdash; Stop profiler</h3>
+<p>
+This function stops the profiler.
+</p>
+
+<h3 id="luaJIT_profile_dumpstack"><tt>p = luaJIT_profile_dumpstack(L, fmt, depth, len)</tt>
+&mdash; Dump stack </h3>
+<p>
+This function allows taking stack dumps in an efficient manner.
+<a href="#profile_dump">See above</a> for a description of <tt>fmt</tt>
+and <tt>depth</tt>.
+</p>
+<p>
+This function returns a <tt>const&nbsp;char&nbsp;*</tt> pointing to a
+private string buffer of the profiler. The <tt>int&nbsp;*len</tt>
+argument returns the length of the output string. The buffer is
+overwritten on the next call and deallocated when the profiler stops.
+You either need to consume the content immediately or copy it for later
+use.
+</p>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
