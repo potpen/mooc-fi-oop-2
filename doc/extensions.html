@@ -371,3 +371,103 @@ LuaJIT supports some extensions from Lua&nbsp;5.3:
 <ul>
 <li>Unicode escape <tt>'\u{XX...}'</tt> embeds the UTF-8 encoding in string literals.</li>
 <li>The argument table <tt>arg</tt> can be read (and modified) by <tt>LUA_INIT</tt> and <tt>-e</tt> chunks.</li>
+<li><tt>io.read()</tt> and <tt>file:read()</tt> accept formats with or without a leading <tt>*</tt>.</li>
+<li><tt>assert()</tt> accepts any type of error object.</li>
+<li><tt>table.move(a1, f, e, t [,a2])</tt>.</li>
+<li><tt>coroutine.isyieldable()</tt>.</li>
+<li>Lua/C API extensions:
+<tt>lua_isyieldable()</tt>
+</li>
+</ul>
+
+<h2 id="exceptions">C++ Exception Interoperability</h2>
+<p>
+LuaJIT has built-in support for interoperating with C++&nbsp;exceptions.
+The available range of features depends on the target platform and
+the toolchain used to compile LuaJIT:
+</p>
+<table class="exc">
+<tr class="exchead">
+<td class="excplatform">Platform</td>
+<td class="exccompiler">Compiler</td>
+<td class="excinterop">Interoperability</td>
+</tr>
+<tr class="odd separate">
+<td class="excplatform">External frame unwinding</td>
+<td class="exccompiler">GCC, Clang, MSVC</td>
+<td class="excinterop"><b style="color: #00a000;">Full</b></td>
+</tr>
+<tr class="even">
+<td class="excplatform">Internal frame unwinding + DWARF2</td>
+<td class="exccompiler">GCC, Clang</td>
+<td class="excinterop"><b style="color: #c06000;">Limited</b></td>
+</tr>
+<tr class="odd">
+<td class="excplatform">Windows 64 bit</td>
+<td class="exccompiler">non-MSVC</td>
+<td class="excinterop"><b style="color: #c06000;">Limited</b></td>
+</tr>
+<tr class="even">
+<td class="excplatform">Other platforms</td>
+<td class="exccompiler">Other compilers</td>
+<td class="excinterop"><b style="color: #a00000;">No</b></td>
+</tr>
+</table>
+<p>
+<b style="color: #00a000;">Full interoperability</b> means:
+</p>
+<ul>
+<li>C++&nbsp;exceptions can be caught on the Lua side with <tt>pcall()</tt>,
+<tt>lua_pcall()</tt> etc.</li>
+<li>C++&nbsp;exceptions will be converted to the generic Lua error
+<tt>"C++&nbsp;exception"</tt>, unless you use the
+<a href="ext_c_api.html#mode_wrapcfunc">C&nbsp;call wrapper</a> feature.</li>
+<li>It's safe to throw C++&nbsp;exceptions across non-protected Lua frames
+on the C&nbsp;stack. The contents of the C++&nbsp;exception object
+pass through unmodified.</li>
+<li>Lua errors can be caught on the C++ side with <tt>catch(...)</tt>.
+The corresponding Lua error message can be retrieved from the Lua stack.<br>
+For MSVC for Windows 64 bit this requires compilation of your C++ code
+with <tt>/EHa</tt>.</li>
+<li>Throwing Lua errors across C++ frames is safe. C++ destructors
+will be called.</li>
+</ul>
+<p>
+<b style="color: #c06000;">Limited interoperability</b> means:
+</p>
+<ul>
+<li>C++&nbsp;exceptions can be caught on the Lua side with <tt>pcall()</tt>,
+<tt>lua_pcall()</tt> etc.</li>
+<li>C++&nbsp;exceptions will be converted to the generic Lua error
+<tt>"C++&nbsp;exception"</tt>, unless you use the
+<a href="ext_c_api.html#mode_wrapcfunc">C&nbsp;call wrapper</a> feature.</li>
+<li>C++&nbsp;exceptions will be caught by non-protected Lua frames and
+are rethrown as a generic Lua error. The C++&nbsp;exception object will
+be destroyed.</li>
+<li>Lua errors <b>cannot</b> be caught on the C++ side.</li>
+<li>Throwing Lua errors across C++ frames will <b>not</b> call
+C++ destructors.</li>
+</ul>
+
+<p>
+<b style="color: #a00000;">No interoperability</b> means:
+</p>
+<ul>
+<li>It's <b>not</b> safe to throw C++&nbsp;exceptions across Lua frames.</li>
+<li>C++&nbsp;exceptions <b>cannot</b> be caught on the Lua side.</li>
+<li>Lua errors <b>cannot</b> be caught on the C++ side.</li>
+<li>Throwing Lua errors across C++ frames will <b>not</b> call
+C++ destructors.</li>
+</ul>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
