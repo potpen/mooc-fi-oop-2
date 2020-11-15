@@ -78,4 +78,22 @@ has information about diverse topics.</li>
 <dl id="tech">
 <dt>Q: Where can I learn more about the compiler technology used by LuaJIT?</dt>
 <dd>
-Please use the following Google Scholar searches to find relevant pa
+Please use the following Google Scholar searches to find relevant papers:<br>
+Search for: <a href="https://scholar.google.com/scholar?q=Trace+Compiler"><span class="ext">&raquo;</span>&nbsp;Trace Compiler</a><br>
+Search for: <a href="https://scholar.google.com/scholar?q=JIT+Compiler"><span class="ext">&raquo;</span>&nbsp;JIT Compiler</a><br>
+Search for: <a href="https://scholar.google.com/scholar?q=Dynamic+Language+Optimizations"><span class="ext">&raquo;</span>&nbsp;Dynamic Language Optimizations</a><br>
+Search for: <a href="https://scholar.google.com/scholar?q=SSA+Form"><span class="ext">&raquo;</span>&nbsp;SSA Form</a><br>
+Search for: <a href="https://scholar.google.com/scholar?q=Linear+Scan+Register+Allocation"><span class="ext">&raquo;</span>&nbsp;Linear Scan Register Allocation</a><br>
+Here is a list of the <a href="http://lua-users.org/lists/lua-l/2009-11/msg00089.html"><span class="ext">&raquo;</span>&nbsp;innovative features in LuaJIT</a>.<br>
+And, you know, reading the source is of course the only way to enlightenment.
+</dd>
+</dl>
+
+<dl id="arg">
+<dt>Q: Why do I get this error: "attempt to index global 'arg' (a nil value)"?<br>
+Q: My vararg functions fail after switching to LuaJIT!</dt>
+<dd>LuaJIT is compatible to the Lua 5.1 language standard. It doesn't
+support the implicit <tt>arg</tt> parameter for old-style vararg
+functions from Lua 5.0.<br>Please convert your code to the
+<a href="https://www.lua.org/manual/5.1/manual.html#2.5.9"><span class="ext">&raquo;</span>&nbsp;Lua 5.1
+var
