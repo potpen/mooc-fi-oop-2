@@ -96,4 +96,39 @@ Q: My vararg functions fail after switching to LuaJIT!</dt>
 support the implicit <tt>arg</tt> parameter for old-style vararg
 functions from Lua 5.0.<br>Please convert your code to the
 <a href="https://www.lua.org/manual/5.1/manual.html#2.5.9"><span class="ext">&raquo;</span>&nbsp;Lua 5.1
-var
+vararg syntax</a>.</dd>
+</dl>
+
+<dl id="x87">
+<dt>Q: Why do I get this error: "bad FPU precision"?<br>
+<dt>Q: I get weird behavior after initializing Direct3D.<br>
+<dt>Q: Some FPU operations crash after I load a Delphi DLL.<br>
+</dt>
+<dd>
+
+DirectX/Direct3D (up to version 9) sets the x87 FPU to single-precision
+mode by default. This violates the Windows ABI and interferes with the
+operation of many programs &mdash; LuaJIT is affected, too. Please make
+sure you always use the <tt>D3DCREATE_FPU_PRESERVE</tt> flag when
+initializing Direct3D.<br>
+
+Direct3D version 10 or higher do not show this behavior anymore.
+Consider testing your application with older versions, too.<br>
+
+Similarly, the Borland/Delphi runtime modifies the FPU control word and
+enables FP exceptions. Of course, this violates the Windows ABI, too.
+Please check the Delphi docs for the Set8087CW method.</dd>
+</dl>
+
+<dl id="ctrlc">
+<dt>Q: Sometimes Ctrl-C fails to stop my Lua program. Why?</dt>
+<dd>The interrupt signal handler sets a Lua debug hook. But this is
+ignored by compiled code. If your program is running in a tight loop
+and never falls back to the interpreter, the debug hook never runs and
+can't throw the "interrupted!" error.<br>
+You have to press Ctrl-C twice to stop your program. That's similar
+to when it's stuck running inside a C function under the Lua interpreter.</dd>
+</dl>
+
+<dl id="order">
+<dt>Q: Table iteration with <tt>pairs()</tt> does not result in t
