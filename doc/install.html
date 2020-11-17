@@ -1,0 +1,101 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Installation</title>
+<meta charset="utf-8">
+<meta name="Copyright" content="Copyright (C) 2005-2022">
+<meta name="Language" content="en">
+<link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
+<link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
+<style type="text/css">
+table.compat {
+  line-height: 1.2;
+  font-size: 80%;
+}
+table.compat td {
+  border: 1px solid #bfcfff;
+  height: 1.5em;
+}
+table.compat tr.compathead td {
+  font-weight: bold;
+  border-bottom: 2px solid #bfcfff;
+}
+td.compatname, td.compatver {
+  width: 10%;
+}
+td.compatbits {
+  width: 5%;
+}
+td.compatx {
+  width: 21%;
+}
+</style>
+</head>
+<body>
+<div id="site">
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+</div>
+<div id="head">
+<h1>Installation</h1>
+</div>
+<div id="nav">
+<ul><li>
+<a href="luajit.html">LuaJIT</a>
+<ul><li>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+</li><li>
+<a class="current" href="install.html">Installation</a>
+</li><li>
+<a href="running.html">Running</a>
+</li></ul>
+</li><li>
+<a href="extensions.html">Extensions</a>
+<ul><li>
+<a href="ext_ffi.html">FFI Library</a>
+<ul><li>
+<a href="ext_ffi_tutorial.html">FFI Tutorial</a>
+</li><li>
+<a href="ext_ffi_api.html">ffi.* API</a>
+</li><li>
+<a href="ext_ffi_semantics.html">FFI Semantics</a>
+</li></ul>
+</li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
+<a href="ext_jit.html">jit.* Library</a>
+</li><li>
+<a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
+</li></ul>
+</li><li>
+<a href="status.html">Status</a>
+</li><li>
+<a href="faq.html">FAQ</a>
+</li><li>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+</li></ul>
+</div>
+<div id="main">
+<p>
+LuaJIT is only distributed as a source package. This page explains
+how to build and install LuaJIT with different operating systems
+and C&nbsp;compilers.
+</p>
+<p>
+For the impatient (on POSIX systems):
+</p>
+<pre class="code">
+make &amp;&amp; sudo make install
+</pre>
+
+<h2 id="req">Requirements</h2>
+<h3 id="systems">Systems</h3>
+<p>
+LuaJIT currently builds out-of-the box on most systems:
+</p>
+<table class="compat">
+<tr class="compathead">
+<td class="compatname">OS</td>
+<td class="compatver">Min. Version</td>

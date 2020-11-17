@@ -156,4 +156,40 @@ that are inherently unsafe, e.g. the <a href="ext_ffi.html">FFI library</a>.<br>
 
 More reading material at the <a href="http://lua-users.org/wiki/SandBoxes"><span class="ext">&raquo;</span>&nbsp;Lua Wiki</a> and <a href="https://en.wikipedia.org/wiki/Sandbox_(computer_security)"><span class="ext">&raquo;</span>&nbsp;Wikipedia</a>.<br><br>
 
-Relatedly, <b>loading untrusted
+Relatedly, <b>loading untrusted bytecode is not safe!</b><br>
+
+It's trivial to crash the Lua or LuaJIT VM with maliciously crafted bytecode.
+This is well known and there's no bytecode verification on purpose, so please
+don't report a bug about it. Check the <tt>mode</tt> parameter for the
+<tt>load*()</tt> functions to disable loading of bytecode.<br><br>
+
+<b>In general, the only promising approach is to sandbox Lua code at the
+process level and not the VM level.</b>
+</dd>
+</dl>
+
+<dl id="arch">
+<dt>Q: Lua runs everywhere. Why doesn't LuaJIT support my CPU?</dt>
+<dd>Because it's a compiler &mdash; it needs to generate native
+machine code. This means the code generator must be ported to each
+architecture. And the fast interpreter is written in assembler and
+must be ported, too. This is quite an undertaking.<br>
+The <a href="install.html">install documentation</a> shows the supported
+architectures.<br>
+Other architectures may follow based on sufficient user demand and
+market-relevance of the architecture. Sponsoring is required to develop
+the port itself, to integrate it and to continuously maintain it in the
+actively developed branches.</dd>
+</dl>
+<br class="flush">
+</div>
+<div id="foot">
+<hr class="hide">
+Copyright &copy; 2005-2022
+<span class="noprint">
+&middot;
+<a href="contact.html">Contact</a>
+</span>
+</div>
+</body>
+</html>
