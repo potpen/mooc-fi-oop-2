@@ -47,4 +47,40 @@ enum {
 #define DASM_POS2BIAS(pos)	((pos)&0xff000000)
 #define DASM_SEC2POS(sec)	((sec)<<24)
 #define DASM_POS2SEC(pos)	((pos)>>24)
-#define
+#define DASM_POS2PTR(D, pos)	(D->sections[DASM_POS2SEC(pos)].rbuf + (pos))
+
+/* Action list type. */
+typedef const unsigned int *dasm_ActList;
+
+/* Per-section structure. */
+typedef struct dasm_Section {
+  int *rbuf;		/* Biased buffer pointer (negative section bias). */
+  int *buf;		/* True buffer pointer. */
+  size_t bsize;		/* Buffer size in bytes. */
+  int pos;		/* Biased buffer position. */
+  int epos;		/* End of biased buffer position - max single put. */
+  int ofs;		/* Byte offset into section. */
+} dasm_Section;
+
+/* Core structure holding the DynASM encoding state. */
+struct dasm_State {
+  size_t psize;			/* Allocated size of this structure. */
+  dasm_ActList actionlist;	/* Current actionlist pointer. */
+  int *lglabels;		/* Local/global chain/pos ptrs. */
+  size_t lgsize;
+  int *pclabels;		/* PC label chains/pos ptrs. */
+  size_t pcsize;
+  void **globals;		/* Array of globals (bias -10). */
+  dasm_Section *section;	/* Pointer to active section. */
+  size_t codesize;		/* Total size of all code sections. */
+  int maxsection;		/* 0 <= sectionidx < maxsection. */
+  int status;			/* Status code. */
+  dasm_Section sections[1];	/* All sections. Alloc-extended. */
+};
+
+/* The size of the core structure depends on the max. number of sections. */
+#define DASM_PSZ(ms)	(sizeof(dasm_State)+(ms-1)*sizeof(dasm_Section))
+
+
+/* Initialize DynASM state. */
+void
