@@ -83,4 +83,49 @@ struct dasm_State {
 
 
 /* Initialize DynASM state. */
-void
+void dasm_init(Dst_DECL, int maxsection)
+{
+  dasm_State *D;
+  size_t psz = 0;
+  int i;
+  Dst_REF = NULL;
+  DASM_M_GROW(Dst, struct dasm_State, Dst_REF, psz, DASM_PSZ(maxsection));
+  D = Dst_REF;
+  D->psize = psz;
+  D->lglabels = NULL;
+  D->lgsize = 0;
+  D->pclabels = NULL;
+  D->pcsize = 0;
+  D->globals = NULL;
+  D->maxsection = maxsection;
+  for (i = 0; i < maxsection; i++) {
+    D->sections[i].buf = NULL;  /* Need this for pass3. */
+    D->sections[i].rbuf = D->sections[i].buf - DASM_SEC2POS(i);
+    D->sections[i].bsize = 0;
+    D->sections[i].epos = 0;  /* Wrong, but is recalculated after resize. */
+  }
+}
+
+/* Free DynASM state. */
+void dasm_free(Dst_DECL)
+{
+  dasm_State *D = Dst_REF;
+  int i;
+  for (i = 0; i < D->maxsection; i++)
+    if (D->sections[i].buf)
+      DASM_M_FREE(Dst, D->sections[i].buf, D->sections[i].bsize);
+  if (D->pclabels) DASM_M_FREE(Dst, D->pclabels, D->pcsize);
+  if (D->lglabels) DASM_M_FREE(Dst, D->lglabels, D->lgsize);
+  DASM_M_FREE(Dst, D, D->psize);
+}
+
+/* Setup global label array. Must be called before dasm_setup(). */
+void dasm_setupglobal(Dst_DECL, void **gl, unsigned int maxgl)
+{
+  dasm_State *D = Dst_REF;
+  D->globals = gl - 10;  /* Negative bias to compensate for locals. */
+  DASM_M_GROW(Dst, int, D->lglabels, D->lgsize, (10+maxgl)*sizeof(int));
+}
+
+/* Grow PC label array. Can be called after dasm_setup(), too. */
+void das
