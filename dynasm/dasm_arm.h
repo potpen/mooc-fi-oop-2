@@ -223,4 +223,65 @@ void dasm_put(Dst_DECL, int start, ...)
 	if (n < 0) {  /* Label exists. Get label pos and store it. */
 	  b[pos] = -n;
 	} else {
- 
+      linkrel:
+	  b[pos] = n;  /* Else link to rel chain, anchored at label. */
+	  *pl = pos;
+	}
+	pos++;
+	break;
+      case DASM_LABEL_LG:
+	pl = D->lglabels + (ins & 2047) - 10; CKPL(lg, LG); goto putlabel;
+      case DASM_LABEL_PC:
+	pl = D->pclabels + n; CKPL(pc, PC);
+      putlabel:
+	n = *pl;  /* n > 0: Collapse rel chain and replace with label pos. */
+	while (n > 0) { int *pb = DASM_POS2PTR(D, n); n = *pb; *pb = pos;
+	}
+	*pl = -pos;  /* Label exists now. */
+	b[pos++] = ofs;  /* Store pass1 offset estimate. */
+	break;
+      case DASM_IMM:
+      case DASM_IMM16:
+#ifdef DASM_CHECKS
+	CK((n & ((1<<((ins>>10)&31))-1)) == 0, RANGE_I);
+	if ((ins & 0x8000))
+	  CK(((n + (1<<(((ins>>5)&31)-1)))>>((ins>>5)&31)) == 0, RANGE_I);
+	else
+	  CK((n>>((ins>>5)&31)) == 0, RANGE_I);
+#endif
+	b[pos++] = n;
+	break;
+      case DASM_IMMV8:
+	CK((n & 3) == 0, RANGE_I);
+	n >>= 2;
+	/* fallthrough */
+      case DASM_IMML8:
+      case DASM_IMML12:
+	CK(n >= 0 ? ((n>>((ins>>5)&31)) == 0) :
+		    (((-n)>>((ins>>5)&31)) == 0), RANGE_I);
+	b[pos++] = n;
+	break;
+      case DASM_IMM12:
+	CK(dasm_imm12((unsigned int)n) != -1, RANGE_I);
+	b[pos++] = n;
+	break;
+      }
+    }
+  }
+stop:
+  va_end(ap);
+  sec->pos = pos;
+  sec->ofs = ofs;
+}
+#undef CK
+
+/* Pass 2: Link sections, shrink aligns, fix label offsets. */
+int dasm_link(Dst_DECL, size_t *szp)
+{
+  dasm_State *D = Dst_REF;
+  int secnum;
+  int ofs = 0;
+
+#ifdef DASM_CHECKS
+  *szp = 0;
+  if (D->
