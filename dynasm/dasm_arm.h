@@ -284,4 +284,46 @@ int dasm_link(Dst_DECL, size_t *szp)
 
 #ifdef DASM_CHECKS
   *szp = 0;
-  if (D->
+  if (D->status != DASM_S_OK) return D->status;
+  {
+    int pc;
+    for (pc = 0; pc*sizeof(int) < D->pcsize; pc++)
+      if (D->pclabels[pc] > 0) return DASM_S_UNDEF_PC|pc;
+  }
+#endif
+
+  { /* Handle globals not defined in this translation unit. */
+    int idx;
+    for (idx = 10; idx*sizeof(int) < D->lgsize; idx++) {
+      int n = D->lglabels[idx];
+      /* Undefined label: Collapse rel chain and replace with marker (< 0). */
+      while (n > 0) { int *pb = DASM_POS2PTR(D, n); n = *pb; *pb = -idx; }
+    }
+  }
+
+  /* Combine all code sections. No support for data sections (yet). */
+  for (secnum = 0; secnum < D->maxsection; secnum++) {
+    dasm_Section *sec = D->sections + secnum;
+    int *b = sec->rbuf;
+    int pos = DASM_SEC2POS(secnum);
+    int lastpos = sec->pos;
+
+    while (pos != lastpos) {
+      dasm_ActList p = D->actionlist + b[pos++];
+      while (1) {
+	unsigned int ins = *p++;
+	unsigned int action = (ins >> 16);
+	switch (action) {
+	case DASM_STOP: case DASM_SECTION: goto stop;
+	case DASM_ESC: p++; break;
+	case DASM_REL_EXT: break;
+	case DASM_ALIGN: ofs -= (b[pos++] + ofs) & (ins & 255); break;
+	case DASM_REL_LG: case DASM_REL_PC: pos++; break;
+	case DASM_LABEL_LG: case DASM_LABEL_PC: b[pos++] += ofs; break;
+	case DASM_IMM: case DASM_IMM12: case DASM_IMM16:
+	case DASM_IMML8: case DASM_IMML12: case DASM_IMMV8: pos++; break;
+	}
+      }
+      stop: (void)0;
+    }
+    ofs += sec->ofs;  /* Next section starts right after current se
