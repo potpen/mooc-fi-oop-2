@@ -178,4 +178,49 @@ void dasm_put(Dst_DECL, int start, ...)
 {
   va_list ap;
   dasm_State *D = Dst_REF;
-  dasm_ActList p = D->a
+  dasm_ActList p = D->actionlist + start;
+  dasm_Section *sec = D->section;
+  int pos = sec->pos, ofs = sec->ofs;
+  int *b;
+
+  if (pos >= sec->epos) {
+    DASM_M_GROW(Dst, int, sec->buf, sec->bsize,
+      sec->bsize + 2*DASM_MAXSECPOS*sizeof(int));
+    sec->rbuf = sec->buf - DASM_POS2BIAS(pos);
+    sec->epos = (int)sec->bsize/sizeof(int) - DASM_MAXSECPOS+DASM_POS2BIAS(pos);
+  }
+
+  b = sec->rbuf;
+  b[pos++] = start;
+
+  va_start(ap, start);
+  while (1) {
+    unsigned int ins = *p++;
+    unsigned int action = (ins >> 16);
+    if (action >= DASM__MAX) {
+      ofs += 4;
+    } else {
+      int *pl, n = action >= DASM_REL_PC ? va_arg(ap, int) : 0;
+      switch (action) {
+      case DASM_STOP: goto stop;
+      case DASM_SECTION:
+	n = (ins & 255); CK(n < D->maxsection, RANGE_SEC);
+	D->section = &D->sections[n]; goto stop;
+      case DASM_ESC: p++; ofs += 4; break;
+      case DASM_REL_EXT: break;
+      case DASM_ALIGN: ofs += (ins & 255); b[pos++] = ofs; break;
+      case DASM_REL_LG:
+	n = (ins & 2047) - 10; pl = D->lglabels + n;
+	/* Bkwd rel or global. */
+	if (n >= 0) { CK(n>=10||*pl<0, RANGE_LG); CKPL(lg, LG); goto putrel; }
+	pl += 10; n = *pl;
+	if (n < 0) n = 0;  /* Start new chain for fwd rel if label exists. */
+	goto linkrel;
+      case DASM_REL_PC:
+	pl = D->pclabels + n; CKPL(pc, PC);
+      putrel:
+	n = *pl;
+	if (n < 0) {  /* Label exists. Get label pos and store it. */
+	  b[pos] = -n;
+	} else {
+ 
