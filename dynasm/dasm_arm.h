@@ -128,4 +128,54 @@ void dasm_setupglobal(Dst_DECL, void **gl, unsigned int maxgl)
 }
 
 /* Grow PC label array. Can be called after dasm_setup(), too. */
-void das
+void dasm_growpc(Dst_DECL, unsigned int maxpc)
+{
+  dasm_State *D = Dst_REF;
+  size_t osz = D->pcsize;
+  DASM_M_GROW(Dst, int, D->pclabels, D->pcsize, maxpc*sizeof(int));
+  memset((void *)(((unsigned char *)D->pclabels)+osz), 0, D->pcsize-osz);
+}
+
+/* Setup encoder. */
+void dasm_setup(Dst_DECL, const void *actionlist)
+{
+  dasm_State *D = Dst_REF;
+  int i;
+  D->actionlist = (dasm_ActList)actionlist;
+  D->status = DASM_S_OK;
+  D->section = &D->sections[0];
+  memset((void *)D->lglabels, 0, D->lgsize);
+  if (D->pclabels) memset((void *)D->pclabels, 0, D->pcsize);
+  for (i = 0; i < D->maxsection; i++) {
+    D->sections[i].pos = DASM_SEC2POS(i);
+    D->sections[i].ofs = 0;
+  }
+}
+
+
+#ifdef DASM_CHECKS
+#define CK(x, st) \
+  do { if (!(x)) { \
+    D->status = DASM_S_##st|(p-D->actionlist-1); return; } } while (0)
+#define CKPL(kind, st) \
+  do { if ((size_t)((char *)pl-(char *)D->kind##labels) >= D->kind##size) { \
+    D->status = DASM_S_RANGE_##st|(p-D->actionlist-1); return; } } while (0)
+#else
+#define CK(x, st)	((void)0)
+#define CKPL(kind, st)	((void)0)
+#endif
+
+static int dasm_imm12(unsigned int n)
+{
+  int i;
+  for (i = 0; i < 16; i++, n = (n << 2) | (n >> 30))
+    if (n <= 255) return (int)(n + (i << 8));
+  return -1;
+}
+
+/* Pass 1: Store actions and args, link branches/labels, estimate offsets. */
+void dasm_put(Dst_DECL, int start, ...)
+{
+  va_list ap;
+  dasm_State *D = Dst_REF;
+  dasm_ActList p = D->a
