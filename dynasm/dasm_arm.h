@@ -326,4 +326,56 @@ int dasm_link(Dst_DECL, size_t *szp)
       }
       stop: (void)0;
     }
-    ofs += sec->ofs;  /* Next section starts right after current se
+    ofs += sec->ofs;  /* Next section starts right after current section. */
+  }
+
+  D->codesize = ofs;  /* Total size of all code sections */
+  *szp = ofs;
+  return DASM_S_OK;
+}
+
+#ifdef DASM_CHECKS
+#define CK(x, st) \
+  do { if (!(x)) return DASM_S_##st|(p-D->actionlist-1); } while (0)
+#else
+#define CK(x, st)	((void)0)
+#endif
+
+/* Pass 3: Encode sections. */
+int dasm_encode(Dst_DECL, void *buffer)
+{
+  dasm_State *D = Dst_REF;
+  char *base = (char *)buffer;
+  unsigned int *cp = (unsigned int *)buffer;
+  int secnum;
+
+  /* Encode all code sections. No support for data sections (yet). */
+  for (secnum = 0; secnum < D->maxsection; secnum++) {
+    dasm_Section *sec = D->sections + secnum;
+    int *b = sec->buf;
+    int *endb = sec->rbuf + sec->pos;
+
+    while (b != endb) {
+      dasm_ActList p = D->actionlist + *b++;
+      while (1) {
+	unsigned int ins = *p++;
+	unsigned int action = (ins >> 16);
+	int n = (action >= DASM_ALIGN && action < DASM__MAX) ? *b++ : 0;
+	switch (action) {
+	case DASM_STOP: case DASM_SECTION: goto stop;
+	case DASM_ESC: *cp++ = *p++; break;
+	case DASM_REL_EXT:
+	  n = DASM_EXTERN(Dst, (unsigned char *)cp, (ins&2047), !(ins&2048));
+	  goto patchrel;
+	case DASM_ALIGN:
+	  ins &= 255; while ((((char *)cp - base) & ins)) *cp++ = 0xe1a00000;
+	  break;
+	case DASM_REL_LG:
+	  if (n < 0) {
+	    n = (int)((ptrdiff_t)D->globals[-n] - (ptrdiff_t)cp - 4);
+	    goto patchrel;
+	  }
+	  /* fallthrough */
+	case DASM_REL_PC:
+	  CK(n >= 0, UNDEF_PC);
+	  n = *DASM_POS2PTR(D, n)
