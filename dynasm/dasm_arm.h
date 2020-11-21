@@ -431,4 +431,31 @@ int dasm_encode(Dst_DECL, void *buffer)
 /* Get PC label offset. */
 int dasm_getpclabel(Dst_DECL, unsigned int pc)
 {
-  dasm_State *D = D
+  dasm_State *D = Dst_REF;
+  if (pc*sizeof(int) < D->pcsize) {
+    int pos = D->pclabels[pc];
+    if (pos < 0) return *DASM_POS2PTR(D, -pos);
+    if (pos > 0) return -1;  /* Undefined. */
+  }
+  return -2;  /* Unused or out of range. */
+}
+
+#ifdef DASM_CHECKS
+/* Optional sanity checker to call between isolated encoding steps. */
+int dasm_checkstep(Dst_DECL, int secmatch)
+{
+  dasm_State *D = Dst_REF;
+  if (D->status == DASM_S_OK) {
+    int i;
+    for (i = 1; i <= 9; i++) {
+      if (D->lglabels[i] > 0) { D->status = DASM_S_UNDEF_LG|i; break; }
+      D->lglabels[i] = 0;
+    }
+  }
+  if (D->status == DASM_S_OK && secmatch >= 0 &&
+      D->section != &D->sections[secmatch])
+    D->status = DASM_S_MATCH_SEC|(D->section-D->sections);
+  return D->status;
+}
+#endif
+
