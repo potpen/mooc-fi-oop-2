@@ -378,4 +378,57 @@ int dasm_encode(Dst_DECL, void *buffer)
 	  /* fallthrough */
 	case DASM_REL_PC:
 	  CK(n >= 0, UNDEF_PC);
-	  n = *DASM_POS2PTR(D, n)
+	  n = *DASM_POS2PTR(D, n) - (int)((char *)cp - base) - 4;
+	patchrel:
+	  if ((ins & 0x800) == 0) {
+	    CK((n & 3) == 0 && ((n+0x02000000) >> 26) == 0, RANGE_REL);
+	    cp[-1] |= ((n >> 2) & 0x00ffffff);
+	  } else if ((ins & 0x1000)) {
+	    CK((n & 3) == 0 && -256 <= n && n <= 256, RANGE_REL);
+	    goto patchimml8;
+	  } else if ((ins & 0x2000) == 0) {
+	    CK((n & 3) == 0 && -4096 <= n && n <= 4096, RANGE_REL);
+	    goto patchimml;
+	  } else {
+	    CK((n & 3) == 0 && -1020 <= n && n <= 1020, RANGE_REL);
+	    n >>= 2;
+	    goto patchimml;
+	  }
+	  break;
+	case DASM_LABEL_LG:
+	  ins &= 2047; if (ins >= 20) D->globals[ins-10] = (void *)(base + n);
+	  break;
+	case DASM_LABEL_PC: break;
+	case DASM_IMM:
+	  cp[-1] |= ((n>>((ins>>10)&31)) & ((1<<((ins>>5)&31))-1)) << (ins&31);
+	  break;
+	case DASM_IMM12:
+	  cp[-1] |= dasm_imm12((unsigned int)n);
+	  break;
+	case DASM_IMM16:
+	  cp[-1] |= ((n & 0xf000) << 4) | (n & 0x0fff);
+	  break;
+	case DASM_IMML8: patchimml8:
+	  cp[-1] |= n >= 0 ? (0x00800000 | (n & 0x0f) | ((n & 0xf0) << 4)) :
+			     ((-n & 0x0f) | ((-n & 0xf0) << 4));
+	  break;
+	case DASM_IMML12: case DASM_IMMV8: patchimml:
+	  cp[-1] |= n >= 0 ? (0x00800000 | n) : (-n);
+	  break;
+	default: *cp++ = ins; break;
+	}
+      }
+      stop: (void)0;
+    }
+  }
+
+  if (base + D->codesize != (char *)cp)  /* Check for phase errors. */
+    return DASM_S_PHASE;
+  return DASM_S_OK;
+}
+#undef CK
+
+/* Get PC label offset. */
+int dasm_getpclabel(Dst_DECL, unsigned int pc)
+{
+  dasm_State *D = D
