@@ -244,4 +244,51 @@ local map_cond = {
   hs = 2, lo = 3,
 }
 
-------------------------------------------------------
+------------------------------------------------------------------------------
+
+local parse_reg_type
+
+local function parse_reg(expr, shift, no_vreg)
+  if not expr then werror("expected register name") end
+  local tname, ovreg = match(expr, "^([%w_]+):(@?%l%d+)$")
+  if not tname then
+    tname, ovreg = match(expr, "^([%w_]+):(R[xwqdshb]%b())$")
+  end
+  local tp = map_type[tname or expr]
+  if tp then
+    local reg = ovreg or tp.reg
+    if not reg then
+      werror("type `"..(tname or expr).."' needs a register override")
+    end
+    expr = reg
+  end
+  local ok31, rt, r = match(expr, "^(@?)([xwqdshb])([123]?[0-9])$")
+  if r then
+    r = tonumber(r)
+    if r <= 30 or (r == 31 and ok31 ~= "" or (rt ~= "w" and rt ~= "x")) then
+      if not parse_reg_type then
+	parse_reg_type = rt
+      elseif parse_reg_type ~= rt then
+	werror("register size mismatch")
+      end
+      return shl(r, shift), tp
+    end
+  end
+  local vrt, vreg = match(expr, "^R([xwqdshb])(%b())$")
+  if vreg then
+    if not parse_reg_type then
+      parse_reg_type = vrt
+    elseif parse_reg_type ~= vrt then
+      werror("register size mismatch")
+    end
+    if not no_vreg then waction("VREG", shift, vreg) end
+    return 0
+  end
+  werror("bad register name `"..expr.."'")
+end
+
+local function parse_reg_base(expr)
+  if expr == "sp" then return 0x3e0 end
+  local base, tp = parse_reg(expr, 5)
+  if parse_reg_type ~= "x" then werror("bad register type") end
+  parse_reg_type = fa
