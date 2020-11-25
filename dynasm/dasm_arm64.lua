@@ -140,4 +140,52 @@ end
 local next_global = 20
 local map_global = setmetatable({}, { __index = function(t, name)
   if not match(name, "^[%a_][%w_]*$") then werror("bad global label") end
-  local n = 
+  local n = next_global
+  if n > 2047 then werror("too many global labels") end
+  next_global = n + 1
+  t[name] = n
+  return n
+end})
+
+-- Dump global labels.
+local function dumpglobals(out, lvl)
+  local t = {}
+  for name, n in pairs(map_global) do t[n] = name end
+  out:write("Global labels:\n")
+  for i=20,next_global-1 do
+    out:write(format("  %s\n", t[i]))
+  end
+  out:write("\n")
+end
+
+-- Write global label enum.
+local function writeglobals(out, prefix)
+  local t = {}
+  for name, n in pairs(map_global) do t[n] = name end
+  out:write("enum {\n")
+  for i=20,next_global-1 do
+    out:write("  ", prefix, t[i], ",\n")
+  end
+  out:write("  ", prefix, "_MAX\n};\n")
+end
+
+-- Write global label names.
+local function writeglobalnames(out, name)
+  local t = {}
+  for name, n in pairs(map_global) do t[n] = name end
+  out:write("static const char *const ", name, "[] = {\n")
+  for i=20,next_global-1 do
+    out:write("  \"", t[i], "\",\n")
+  end
+  out:write("  (const char *)0\n};\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Extern label name -> extern label number. With auto assignment on 1st use.
+local next_extern = 0
+local map_extern_ = {}
+local map_extern = setmetatable({}, { __index = function(t, name)
+  -- No restrictions on the name for now.
+  local n = next_extern
+  if n > 2047 then werror("too many extern labels")
