@@ -188,4 +188,60 @@ local map_extern_ = {}
 local map_extern = setmetatable({}, { __index = function(t, name)
   -- No restrictions on the name for now.
   local n = next_extern
-  if n > 2047 then werror("too many extern labels")
+  if n > 2047 then werror("too many extern labels") end
+  next_extern = n + 1
+  t[name] = n
+  map_extern_[n] = name
+  return n
+end})
+
+-- Dump extern labels.
+local function dumpexterns(out, lvl)
+  out:write("Extern labels:\n")
+  for i=0,next_extern-1 do
+    out:write(format("  %s\n", map_extern_[i]))
+  end
+  out:write("\n")
+end
+
+-- Write extern label names.
+local function writeexternnames(out, name)
+  out:write("static const char *const ", name, "[] = {\n")
+  for i=0,next_extern-1 do
+    out:write("  \"", map_extern_[i], "\",\n")
+  end
+  out:write("  (const char *)0\n};\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Arch-specific maps.
+
+-- Ext. register name -> int. name.
+local map_archdef = { xzr = "@x31", wzr = "@w31", lr = "x30", }
+
+-- Int. register name -> ext. name.
+local map_reg_rev = { ["@x31"] = "xzr", ["@w31"] = "wzr", x30 = "lr", }
+
+local map_type = {}		-- Type name -> { ctype, reg }
+local ctypenum = 0		-- Type number (for Dt... macros).
+
+-- Reverse defines for registers.
+function _M.revdef(s)
+  return map_reg_rev[s] or s
+end
+
+local map_shift = { lsl = 0, lsr = 1, asr = 2, }
+
+local map_extend = {
+  uxtb = 0, uxth = 1, uxtw = 2, uxtx = 3,
+  sxtb = 4, sxth = 5, sxtw = 6, sxtx = 7,
+}
+
+local map_cond = {
+  eq = 0, ne = 1, cs = 2, cc = 3, mi = 4, pl = 5, vs = 6, vc = 7,
+  hi = 8, ls = 9, ge = 10, lt = 11, gt = 12, le = 13, al = 14,
+  hs = 2, lo = 3,
+}
+
+------------------------------------------------------
