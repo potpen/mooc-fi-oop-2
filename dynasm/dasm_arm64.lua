@@ -392,4 +392,53 @@ local function parse_imm13(imm)
   end
 end
 
-local function parse_imm6(i
+local function parse_imm6(imm)
+  imm = match(imm, "^#(.*)$")
+  if not imm then werror("expected immediate operand") end
+  local n = parse_number(imm)
+  if n then
+    if n >= 0 and n <= 63 then
+      return shl(band(n, 0x1f), 19) + (n >= 32 and 0x80000000 or 0)
+    end
+    werror("out of range immediate `"..imm.."'")
+  else
+    waction("IMM6", 0, imm)
+    return 0
+  end
+end
+
+local function parse_imm_load(imm, scale)
+  local n = parse_number(imm)
+  if n then
+    local m = sar(n, scale)
+    if shl(m, scale) == n and m >= 0 and m < 0x1000 then
+      return shl(m, 10) + 0x01000000 -- Scaled, unsigned 12 bit offset.
+    elseif n >= -256 and n < 256 then
+      return shl(band(n, 511), 12) -- Unscaled, signed 9 bit offset.
+    end
+    werror("out of range immediate `"..imm.."'")
+  else
+    waction("IMML", scale, imm)
+    return 0
+  end
+end
+
+local function parse_fpimm(imm)
+  imm = match(imm, "^#(.*)$")
+  if not imm then werror("expected immediate operand") end
+  local n = parse_number(imm)
+  if n then
+    local m, e = math.frexp(n)
+    local s, e2 = 0, band(e-2, 7)
+    if m < 0 then m = -m; s = 0x00100000 end
+    m = m*32-16
+    if m % 1 == 0 and m >= 0 and m <= 15 and sar(shl(e2, 29), 29)+2 == e then
+      return s + shl(e2, 17) + shl(m, 13)
+    end
+    werror("out of range immediate `"..imm.."'")
+  else
+    werror("NYI fpimm action")
+  end
+end
+
+local function p
