@@ -346,4 +346,50 @@ local function parse_imm12(imm)
   if n then
     if shr(n, 12) == 0 then
       return shl(n, 10)
- 
+    elseif band(n, 0xff000fff) == 0 then
+      return shr(n, 2) + 0x00400000
+    end
+    werror("out of range immediate `"..imm.."'")
+  else
+    waction("IMM12", 0, imm)
+    return 0
+  end
+end
+
+local function parse_imm13(imm)
+  imm = match(imm, "^#(.*)$")
+  if not imm then werror("expected immediate operand") end
+  local n = parse_number(imm)
+  local r64 = parse_reg_type == "x"
+  if n and n % 1 == 0 and n >= 0 and n <= 0xffffffff then
+    local inv = false
+    if band(n, 1) == 1 then n = bit.bnot(n); inv = true end
+    local t = {}
+    for i=1,32 do t[i] = band(n, 1); n = shr(n, 1) end
+    local b = table.concat(t)
+    b = b..(r64 and (inv and "1" or "0"):rep(32) or b)
+    local p0, p1, p0a, p1a = b:match("^(0+)(1+)(0*)(1*)")
+    if p0 then
+      local w = p1a == "" and (r64 and 64 or 32) or #p1+#p0a
+      if band(w, w-1) == 0 and b == b:sub(1, w):rep(64/w) then
+	local s = band(-2*w, 0x3f) - 1
+	if w == 64 then s = s + 0x1000 end
+	if inv then
+	  return shl(w-#p1-#p0, 16) + shl(s+w-#p1, 10)
+	else
+	  return shl(w-#p0, 16) + shl(s+#p1, 10)
+	end
+      end
+    end
+    werror("out of range immediate `"..imm.."'")
+  elseif r64 then
+    waction("IMM13X", 0, format("(unsigned int)(%s)", imm))
+    actargs[#actargs+1] = format("(unsigned int)((unsigned long long)(%s)>>32)", imm)
+    return 0
+  else
+    waction("IMM13W", 0, imm)
+    return 0
+  end
+end
+
+local function parse_imm6(i
