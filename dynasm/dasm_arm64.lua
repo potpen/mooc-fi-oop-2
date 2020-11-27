@@ -291,4 +291,59 @@ local function parse_reg_base(expr)
   if expr == "sp" then return 0x3e0 end
   local base, tp = parse_reg(expr, 5)
   if parse_reg_type ~= "x" then werror("bad register type") end
-  parse_reg_type = fa
+  parse_reg_type = false
+  return base, tp
+end
+
+local parse_ctx = {}
+
+local loadenv = setfenv and function(s)
+  local code = loadstring(s, "")
+  if code then setfenv(code, parse_ctx) end
+  return code
+end or function(s)
+  return load(s, "", nil, parse_ctx)
+end
+
+-- Try to parse simple arithmetic, too, since some basic ops are aliases.
+local function parse_number(n)
+  local x = tonumber(n)
+  if x then return x end
+  local code = loadenv("return "..n)
+  if code then
+    local ok, y = pcall(code)
+    if ok and type(y) == "number" then return y end
+  end
+  return nil
+end
+
+local function parse_imm(imm, bits, shift, scale, signed)
+  imm = match(imm, "^#(.*)$")
+  if not imm then werror("expected immediate operand") end
+  local n = parse_number(imm)
+  if n then
+    local m = sar(n, scale)
+    if shl(m, scale) == n then
+      if signed then
+	local s = sar(m, bits-1)
+	if s == 0 then return shl(m, shift)
+	elseif s == -1 then return shl(m + shl(1, bits), shift) end
+      else
+	if sar(m, bits) == 0 then return shl(m, shift) end
+      end
+    end
+    werror("out of range immediate `"..imm.."'")
+  else
+    waction("IMM", (signed and 32768 or 0)+scale*1024+bits*32+shift, imm)
+    return 0
+  end
+end
+
+local function parse_imm12(imm)
+  imm = match(imm, "^#(.*)$")
+  if not imm then werror("expected immediate operand") end
+  local n = parse_number(imm)
+  if n then
+    if shr(n, 12) == 0 then
+      return shl(n, 10)
+ 
