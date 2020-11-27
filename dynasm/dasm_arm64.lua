@@ -441,4 +441,49 @@ local function parse_fpimm(imm)
   end
 end
 
-local function p
+local function parse_shift(expr)
+  local s, s2 = match(expr, "^(%S+)%s*(.*)$")
+  s = map_shift[s]
+  if not s then werror("expected shift operand") end
+  return parse_imm(s2, 6, 10, 0, false) + shl(s, 22)
+end
+
+local function parse_lslx16(expr)
+  local n = match(expr, "^lsl%s*#(%d+)$")
+  n = tonumber(n)
+  if not n then werror("expected shift operand") end
+  if band(n, parse_reg_type == "x" and 0xffffffcf or 0xffffffef) ~= 0 then
+    werror("bad shift amount")
+  end
+  return shl(n, 17)
+end
+
+local function parse_extend(expr)
+  local s, s2 = match(expr, "^(%S+)%s*(.*)$")
+  if s == "lsl" then
+    s = parse_reg_type == "x" and 3 or 2
+  else
+    s = map_extend[s]
+  end
+  if not s then werror("expected extend operand") end
+  return (s2 == "" and 0 or parse_imm(s2, 3, 10, 0, false)) + shl(s, 13)
+end
+
+local function parse_cond(expr, inv)
+  local c = map_cond[expr]
+  if not c then werror("expected condition operand") end
+  return shl(bit.bxor(c, inv), 12)
+end
+
+local function parse_load(params, nparams, n, op)
+  if params[n+2] then werror("too many operands") end
+  local scale = shr(op, 30)
+  local pn, p2 = params[n], params[n+1]
+  local p1, wb = match(pn, "^%[%s*(.-)%s*%](!?)$")
+  if not p1 then
+    if not p2 then
+      local reg, tailr = match(pn, "^([%w_:]+)%s*(.*)$")
+      if reg and tailr ~= "" then
+	local base, tp = parse_reg_base(reg)
+	if tp then
+	  waction("IMML", scale, format(tp.ctypefmt,
