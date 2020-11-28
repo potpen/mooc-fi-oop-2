@@ -585,4 +585,48 @@ local function parse_label(label, def)
   if prefix == "->" then
     return "LG", map_global[label:sub(3)]
   end
-  
+  if def then
+    -- [1-9] (local label definition)
+    if match(label, "^[1-9]$") then
+      return "LG", 10+tonumber(label)
+    end
+  else
+    -- [<>][1-9] (local label reference)
+    local dir, lnum = match(label, "^([<>])([1-9])$")
+    if dir then -- Fwd: 1-9, Bkwd: 11-19.
+      return "LG", lnum + (dir == ">" and 0 or 10)
+    end
+    -- extern label (extern label reference)
+    local extname = match(label, "^extern%s+(%S+)$")
+    if extname then
+      return "EXT", map_extern[extname]
+    end
+    -- &expr (pointer)
+    if label:sub(1, 1) == "&" then
+      return "A", 0, format("(ptrdiff_t)(%s)", label:sub(2))
+    end
+  end
+end
+
+local function branch_type(op)
+  if band(op, 0x7c000000) == 0x14000000 then return 0 -- B, BL
+  elseif shr(op, 24) == 0x54 or band(op, 0x7e000000) == 0x34000000 or
+	 band(op, 0x3b000000) == 0x18000000 then
+    return 0x800 -- B.cond, CBZ, CBNZ, LDR* literal
+  elseif band(op, 0x7e000000) == 0x36000000 then return 0x1000 -- TBZ, TBNZ
+  elseif band(op, 0x9f000000) == 0x10000000 then return 0x2000 -- ADR
+  elseif band(op, 0x9f000000) == band(0x90000000) then return 0x3000 -- ADRP
+  else
+    assert(false, "unknown branch type")
+  end
+end
+
+------------------------------------------------------------------------------
+
+local map_op, op_template
+
+local function op_alias(opname, f)
+  return function(params, nparams)
+    if not params then return "-> "..opname:sub(1, -3) end
+    f(params, nparams)
+    op_template(params,
