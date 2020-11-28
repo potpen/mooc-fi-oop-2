@@ -532,4 +532,57 @@ local function parse_load(params, nparams, n, op)
 	  else
 	    if p3b == "uxtw" then op = op + 0x4000
 	    elseif p3b == "sxtw" then op = op + 0xc000
-	   
+	    else
+	      werror("bad extend/shift specifier")
+	    end
+	  end
+	end
+      end
+    else
+      if wb == "!" then werror("bad use of '!'") end
+      op = op + 0x01000000
+    end
+  end
+  return op
+end
+
+local function parse_load_pair(params, nparams, n, op)
+  if params[n+2] then werror("too many operands") end
+  local pn, p2 = params[n], params[n+1]
+  local scale = shr(op, 30) == 0 and 2 or 3
+  local p1, wb = match(pn, "^%[%s*(.-)%s*%](!?)$")
+  if not p1 then
+    if not p2 then
+      local reg, tailr = match(pn, "^([%w_:]+)%s*(.*)$")
+      if reg and tailr ~= "" then
+	local base, tp = parse_reg_base(reg)
+	if tp then
+	  waction("IMM", 32768+7*32+15+scale*1024, format(tp.ctypefmt, tailr))
+	  return op + base + 0x01000000
+	end
+      end
+    end
+    werror("expected address operand")
+  end
+  if p2 then
+    if wb == "!" then werror("bad use of '!'") end
+    op = op + 0x00800000
+  else
+    local p1a, p2a = match(p1, "^([^,%s]*)%s*,%s*(.*)$")
+    if p1a then p1, p2 = p1a, p2a else p2 = "#0" end
+    op = op + (wb == "!" and 0x01800000 or 0x01000000)
+  end
+  return op + parse_reg_base(p1) + parse_imm(p2, 7, 15, scale, true)
+end
+
+local function parse_label(label, def)
+  local prefix = label:sub(1, 2)
+  -- =>label (pc label reference)
+  if prefix == "=>" then
+    return "PC", 0, label:sub(3)
+  end
+  -- ->name (global label reference)
+  if prefix == "->" then
+    return "LG", map_global[label:sub(3)]
+  end
+  
