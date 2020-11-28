@@ -486,4 +486,50 @@ local function parse_load(params, nparams, n, op)
       if reg and tailr ~= "" then
 	local base, tp = parse_reg_base(reg)
 	if tp then
-	  waction("IMML", scale, format(tp.ctypefmt,
+	  waction("IMML", scale, format(tp.ctypefmt, tailr))
+	  return op + base
+	end
+      end
+    end
+    werror("expected address operand")
+  end
+  if p2 then
+    if wb == "!" then werror("bad use of '!'") end
+    op = op + parse_reg_base(p1) + parse_imm(p2, 9, 12, 0, true) + 0x400
+  elseif wb == "!" then
+    local p1a, p2a = match(p1, "^([^,%s]*)%s*,%s*(.*)$")
+    if not p1a then werror("bad use of '!'") end
+    op = op + parse_reg_base(p1a) + parse_imm(p2a, 9, 12, 0, true) + 0xc00
+  else
+    local p1a, p2a = match(p1, "^([^,%s]*)%s*(.*)$")
+    op = op + parse_reg_base(p1a)
+    if p2a ~= "" then
+      local imm = match(p2a, "^,%s*#(.*)$")
+      if imm then
+	op = op + parse_imm_load(imm, scale)
+      else
+	local p2b, p3b, p3s = match(p2a, "^,%s*([^,%s]*)%s*,?%s*(%S*)%s*(.*)$")
+	op = op + parse_reg(p2b, 16) + 0x00200800
+	if parse_reg_type ~= "x" and parse_reg_type ~= "w" then
+	  werror("bad index register type")
+	end
+	if p3b == "" then
+	  if parse_reg_type ~= "x" then werror("bad index register type") end
+	  op = op + 0x6000
+	else
+	  if p3s == "" or p3s == "#0" then
+	  elseif p3s == "#"..scale then
+	    op = op + 0x1000
+	  else
+	    werror("bad scale")
+	  end
+	  if parse_reg_type == "x" then
+	    if p3b == "lsl" and p3s ~= "" then op = op + 0x6000
+	    elseif p3b == "sxtx" then op = op + 0xe000
+	    else
+	      werror("bad extend/shift specifier")
+	    end
+	  else
+	    if p3b == "uxtw" then op = op + 0x4000
+	    elseif p3b == "sxtw" then op = op + 0xc000
+	   
