@@ -728,4 +728,53 @@ map_op = {
   csel_4  = "1a800000DNMCg",
   csinc_4 = "1a800400DNMCg",
   csinv_4 = "5a800000DNMCg",
-  c
+  csneg_4 = "5a800400DNMCg",
+  cset_2  = "1a9f07e0Dcg",
+  csetm_2 = "5a9f03e0Dcg",
+  cinc_3  = "1a800400DNmcg",
+  cinv_3  = "5a800000DNmcg",
+  cneg_3  = "5a800400DNmcg",
+
+  ccmn_4 = "3a400000NMVCg|3a400800N5VCg",
+  ccmp_4 = "7a400000NMVCg|7a400800N5VCg",
+
+  madd_4 = "1b000000DNMAg",
+  msub_4 = "1b008000DNMAg",
+  mul_3  = "1b007c00DNMg",
+  mneg_3 = "1b00fc00DNMg",
+
+  smaddl_4 = "9b200000DxNMwAx",
+  smsubl_4 = "9b208000DxNMwAx",
+  smull_3  = "9b207c00DxNMw",
+  smnegl_3 = "9b20fc00DxNMw",
+  smulh_3  = "9b407c00DNMx",
+  umaddl_4 = "9ba00000DxNMwAx",
+  umsubl_4 = "9ba08000DxNMwAx",
+  umull_3  = "9ba07c00DxNMw",
+  umnegl_3 = "9ba0fc00DxNMw",
+  umulh_3  = "9bc07c00DNMx",
+
+  udiv_3 = "1ac00800DNMg",
+  sdiv_3 = "1ac00c00DNMg",
+
+  -- Bit operations.
+  sbfm_4 = "13000000DN12w|93400000DN12x",
+  bfm_4  = "33000000DN12w|b3400000DN12x",
+  ubfm_4 = "53000000DN12w|d3400000DN12x",
+  extr_4 = "13800000DNM2w|93c00000DNM2x",
+
+  sxtb_2 = "13001c00DNw|93401c00DNx",
+  sxth_2 = "13003c00DNw|93403c00DNx",
+  sxtw_2 = "93407c00DxNw",
+  uxtb_2 = "53001c00DNw",
+  uxth_2 = "53003c00DNw",
+
+  sbfx_4  = op_alias("sbfm_4", alias_bfx),
+  bfxil_4 = op_alias("bfm_4", alias_bfx),
+  ubfx_4  = op_alias("ubfm_4", alias_bfx),
+  sbfiz_4 = op_alias("sbfm_4", alias_bfiz),
+  bfi_4   = op_alias("bfm_4", alias_bfiz),
+  ubfiz_4 = op_alias("ubfm_4", alias_bfiz),
+
+  lsl_3  = function(params, nparams)
+    if params and param
