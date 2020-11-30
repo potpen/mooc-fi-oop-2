@@ -629,4 +629,49 @@ local function op_alias(opname, f)
   return function(params, nparams)
     if not params then return "-> "..opname:sub(1, -3) end
     f(params, nparams)
-    op_template(params,
+    op_template(params, map_op[opname], nparams)
+  end
+end
+
+local function alias_bfx(p)
+  p[4] = "#("..p[3]:sub(2)..")+("..p[4]:sub(2)..")-1"
+end
+
+local function alias_bfiz(p)
+  parse_reg(p[1], 0, true)
+  if parse_reg_type == "w" then
+    p[3] = "#(32-("..p[3]:sub(2).."))%32"
+    p[4] = "#("..p[4]:sub(2)..")-1"
+  else
+    p[3] = "#(64-("..p[3]:sub(2).."))%64"
+    p[4] = "#("..p[4]:sub(2)..")-1"
+  end
+end
+
+local alias_lslimm = op_alias("ubfm_4", function(p)
+  parse_reg(p[1], 0, true)
+  local sh = p[3]:sub(2)
+  if parse_reg_type == "w" then
+    p[3] = "#(32-("..sh.."))%32"
+    p[4] = "#31-("..sh..")"
+  else
+    p[3] = "#(64-("..sh.."))%64"
+    p[4] = "#63-("..sh..")"
+  end
+end)
+
+-- Template strings for ARM instructions.
+map_op = {
+  -- Basic data processing instructions.
+  add_3  = "0b000000DNMg|11000000pDpNIg|8b206000pDpNMx",
+  add_4  = "0b000000DNMSg|0b200000DNMXg|8b200000pDpNMXx|8b200000pDpNxMwX",
+  adds_3 = "2b000000DNMg|31000000DpNIg|ab206000DpNMx",
+  adds_4 = "2b000000DNMSg|2b200000DNMXg|ab200000DpNMXx|ab200000DpNxMwX",
+  cmn_2  = "2b00001fNMg|3100001fpNIg|ab20601fpNMx",
+  cmn_3  = "2b00001fNMSg|2b20001fNMXg|ab20001fpNMXx|ab20001fpNxMwX",
+
+  sub_3  = "4b000000DNMg|51000000pDpNIg|cb206000pDpNMx",
+  sub_4  = "4b000000DNMSg|4b200000DNMXg|cb200000pDpNMXx|cb200000pDpNxMwX",
+  subs_3 = "6b000000DNMg|71000000DpNIg|eb206000DpNMx",
+  subs_4 = "6b000000DNMSg|6b200000DNMXg|eb200000DpNMXx|eb200000DpNxMwX",
+  cmp_2  = "6b00001fNMg|7100001fpNIg|e
