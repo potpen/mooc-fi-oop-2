@@ -674,4 +674,58 @@ map_op = {
   sub_4  = "4b000000DNMSg|4b200000DNMXg|cb200000pDpNMXx|cb200000pDpNxMwX",
   subs_3 = "6b000000DNMg|71000000DpNIg|eb206000DpNMx",
   subs_4 = "6b000000DNMSg|6b200000DNMXg|eb200000DpNMXx|eb200000DpNxMwX",
-  cmp_2  = "6b00001fNMg|7100001fpNIg|e
+  cmp_2  = "6b00001fNMg|7100001fpNIg|eb20601fpNMx",
+  cmp_3  = "6b00001fNMSg|6b20001fNMXg|eb20001fpNMXx|eb20001fpNxMwX",
+
+  neg_2  = "4b0003e0DMg",
+  neg_3  = "4b0003e0DMSg",
+  negs_2 = "6b0003e0DMg",
+  negs_3 = "6b0003e0DMSg",
+
+  adc_3  = "1a000000DNMg",
+  adcs_3 = "3a000000DNMg",
+  sbc_3  = "5a000000DNMg",
+  sbcs_3 = "7a000000DNMg",
+  ngc_2  = "5a0003e0DMg",
+  ngcs_2 = "7a0003e0DMg",
+
+  and_3  = "0a000000DNMg|12000000pDNig",
+  and_4  = "0a000000DNMSg",
+  orr_3  = "2a000000DNMg|32000000pDNig",
+  orr_4  = "2a000000DNMSg",
+  eor_3  = "4a000000DNMg|52000000pDNig",
+  eor_4  = "4a000000DNMSg",
+  ands_3 = "6a000000DNMg|72000000DNig",
+  ands_4 = "6a000000DNMSg",
+  tst_2  = "6a00001fNMg|7200001fNig",
+  tst_3  = "6a00001fNMSg",
+
+  bic_3  = "0a200000DNMg",
+  bic_4  = "0a200000DNMSg",
+  orn_3  = "2a200000DNMg",
+  orn_4  = "2a200000DNMSg",
+  eon_3  = "4a200000DNMg",
+  eon_4  = "4a200000DNMSg",
+  bics_3 = "6a200000DNMg",
+  bics_4 = "6a200000DNMSg",
+
+  movn_2 = "12800000DWg",
+  movn_3 = "12800000DWRg",
+  movz_2 = "52800000DWg",
+  movz_3 = "52800000DWRg",
+  movk_2 = "72800000DWg",
+  movk_3 = "72800000DWRg",
+
+  -- TODO: this doesn't cover all valid immediates for mov reg, #imm.
+  mov_2  = "2a0003e0DMg|52800000DW|320003e0pDig|11000000pDpNg",
+  mov_3  = "2a0003e0DMSg",
+  mvn_2  = "2a2003e0DMg",
+  mvn_3  = "2a2003e0DMSg",
+
+  adr_2  = "10000000DBx",
+  adrp_2 = "90000000DBx",
+
+  csel_4  = "1a800000DNMCg",
+  csinc_4 = "1a800400DNMCg",
+  csinv_4 = "5a800000DNMCg",
+  c
