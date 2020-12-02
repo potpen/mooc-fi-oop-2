@@ -818,4 +818,38 @@ map_op = {
   ret_0  = "d65f03c0",
   ret_1  = "d65f0000Nx",
   -- b.cond is added below.
-  cbz_2  = "34000000
+  cbz_2  = "34000000DBg",
+  cbnz_2 = "35000000DBg",
+  tbz_3  = "36000000DTBw|36000000DTBx",
+  tbnz_3 = "37000000DTBw|37000000DTBx",
+
+  -- Miscellaneous instructions.
+  -- TODO: hlt, hvc, smc, svc, eret, dcps[123], drps, mrs, msr
+  -- TODO: sys, sysl, ic, dc, at, tlbi
+  -- TODO: hint, yield, wfe, wfi, sev, sevl
+  -- TODO: clrex, dsb, dmb, isb
+  nop_0  = "d503201f",
+  brk_0  = "d4200000",
+  brk_1  = "d4200000W",
+
+  -- Floating point instructions.
+  fmov_2  = "1e204000DNf|1e260000DwNs|1e270000DsNw|9e660000DxNd|9e670000DdNx|1e201000DFf",
+  fabs_2  = "1e20c000DNf",
+  fneg_2  = "1e214000DNf",
+  fsqrt_2 = "1e21c000DNf",
+
+  fcvt_2  = "1e22c000DdNs|1e624000DsNd",
+
+  -- TODO: half-precision and fixed-point conversions.
+  fcvtas_2 = "1e240000DwNs|9e240000DxNs|1e640000DwNd|9e640000DxNd",
+  fcvtau_2 = "1e250000DwNs|9e250000DxNs|1e650000DwNd|9e650000DxNd",
+  fcvtms_2 = "1e300000DwNs|9e300000DxNs|1e700000DwNd|9e700000DxNd",
+  fcvtmu_2 = "1e310000DwNs|9e310000DxNs|1e710000DwNd|9e710000DxNd",
+  fcvtns_2 = "1e200000DwNs|9e200000DxNs|1e600000DwNd|9e600000DxNd",
+  fcvtnu_2 = "1e210000DwNs|9e210000DxNs|1e610000DwNd|9e610000DxNd",
+  fcvtps_2 = "1e280000DwNs|9e280000DxNs|1e680000DwNd|9e680000DxNd",
+  fcvtpu_2 = "1e290000DwNs|9e290000DxNs|1e690000DwNd|9e690000DxNd",
+  fcvtzs_2 = "1e380000DwNs|9e380000DxNs|1e780000DwNd|9e780000DxNd",
+  fcvtzu_2 = "1e390000DwNs|9e390000DxNs|1e790000DwNd|9e790000DxNd",
+
+  scvtf_2  = "1e220000DsNw|9e220000DsNx|1e6200
