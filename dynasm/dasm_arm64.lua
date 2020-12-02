@@ -852,4 +852,60 @@ map_op = {
   fcvtzs_2 = "1e380000DwNs|9e380000DxNs|1e780000DwNd|9e780000DxNd",
   fcvtzu_2 = "1e390000DwNs|9e390000DxNs|1e790000DwNd|9e790000DxNd",
 
-  scvtf_2  = "1e220000DsNw|9e220000DsNx|1e6200
+  scvtf_2  = "1e220000DsNw|9e220000DsNx|1e620000DdNw|9e620000DdNx",
+  ucvtf_2  = "1e230000DsNw|9e230000DsNx|1e630000DdNw|9e630000DdNx",
+
+  frintn_2 = "1e244000DNf",
+  frintp_2 = "1e24c000DNf",
+  frintm_2 = "1e254000DNf",
+  frintz_2 = "1e25c000DNf",
+  frinta_2 = "1e264000DNf",
+  frintx_2 = "1e274000DNf",
+  frinti_2 = "1e27c000DNf",
+
+  fadd_3   = "1e202800DNMf",
+  fsub_3   = "1e203800DNMf",
+  fmul_3   = "1e200800DNMf",
+  fnmul_3  = "1e208800DNMf",
+  fdiv_3   = "1e201800DNMf",
+
+  fmadd_4  = "1f000000DNMAf",
+  fmsub_4  = "1f008000DNMAf",
+  fnmadd_4 = "1f200000DNMAf",
+  fnmsub_4 = "1f208000DNMAf",
+
+  fmax_3   = "1e204800DNMf",
+  fmaxnm_3 = "1e206800DNMf",
+  fmin_3   = "1e205800DNMf",
+  fminnm_3 = "1e207800DNMf",
+
+  fcmp_2   = "1e202000NMf|1e202008NZf",
+  fcmpe_2  = "1e202010NMf|1e202018NZf",
+
+  fccmp_4  = "1e200400NMVCf",
+  fccmpe_4 = "1e200410NMVCf",
+
+  fcsel_4  = "1e200c00DNMCf",
+
+  -- TODO: crc32*, aes*, sha*, pmull
+  -- TODO: SIMD instructions.
+}
+
+for cond,c in pairs(map_cond) do
+  map_op["b"..cond.."_1"] = tohex(0x54000000+c).."B"
+end
+
+------------------------------------------------------------------------------
+
+-- Handle opcodes defined with template strings.
+local function parse_template(params, template, nparams, pos)
+  local op = tonumber(template:sub(1, 8), 16)
+  local n = 1
+  local rtt = {}
+
+  parse_reg_type = false
+
+  -- Process each character.
+  for p in gmatch(template:sub(9), ".") do
+    local q = params[n]
+    if p == "D" th
