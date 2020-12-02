@@ -777,4 +777,45 @@ map_op = {
   ubfiz_4 = op_alias("ubfm_4", alias_bfiz),
 
   lsl_3  = function(params, nparams)
-    if params and param
+    if params and params[3]:byte() == 35 then
+      return alias_lslimm(params, nparams)
+    else
+      return op_template(params, "1ac02000DNMg", nparams)
+    end
+  end,
+  lsr_3  = "1ac02400DNMg|53007c00DN1w|d340fc00DN1x",
+  asr_3  = "1ac02800DNMg|13007c00DN1w|9340fc00DN1x",
+  ror_3  = "1ac02c00DNMg|13800000DNm2w|93c00000DNm2x",
+
+  clz_2   = "5ac01000DNg",
+  cls_2   = "5ac01400DNg",
+  rbit_2  = "5ac00000DNg",
+  rev_2   = "5ac00800DNw|dac00c00DNx",
+  rev16_2 = "5ac00400DNg",
+  rev32_2 = "dac00800DNx",
+
+  -- Loads and stores.
+  ["strb_*"]  = "38000000DwL",
+  ["ldrb_*"]  = "38400000DwL",
+  ["ldrsb_*"] = "38c00000DwL|38800000DxL",
+  ["strh_*"]  = "78000000DwL",
+  ["ldrh_*"]  = "78400000DwL",
+  ["ldrsh_*"] = "78c00000DwL|78800000DxL",
+  ["str_*"]   = "b8000000DwL|f8000000DxL|bc000000DsL|fc000000DdL",
+  ["ldr_*"]   = "18000000DwB|58000000DxB|1c000000DsB|5c000000DdB|b8400000DwL|f8400000DxL|bc400000DsL|fc400000DdL",
+  ["ldrsw_*"] = "98000000DxB|b8800000DxL",
+  -- NOTE: ldur etc. are handled by ldr et al.
+
+  ["stp_*"]   = "28000000DAwP|a8000000DAxP|2c000000DAsP|6c000000DAdP",
+  ["ldp_*"]   = "28400000DAwP|a8400000DAxP|2c400000DAsP|6c400000DAdP",
+  ["ldpsw_*"] = "68400000DAxP",
+
+  -- Branches.
+  b_1    = "14000000B",
+  bl_1   = "94000000B",
+  blr_1  = "d63f0000Nx",
+  br_1   = "d61f0000Nx",
+  ret_0  = "d65f03c0",
+  ret_1  = "d65f0000Nx",
+  -- b.cond is added below.
+  cbz_2  = "34000000
