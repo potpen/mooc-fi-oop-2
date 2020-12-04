@@ -953,4 +953,51 @@ local function parse_template(params, template, nparams, pos)
       if mode == "A" then
 	waction("REL_"..mode, v+m, format("(unsigned int)(%s)", s))
 	actargs[#actargs+1] = format("(unsigned int)((%s)>>32)", s)
-      el
+      else
+	waction("REL_"..mode, v+m, s, 1)
+      end
+
+    elseif p == "I" then
+      op = op + parse_imm12(q); n = n + 1
+    elseif p == "i" then
+      op = op + parse_imm13(q); n = n + 1
+    elseif p == "W" then
+      op = op + parse_imm(q, 16, 5, 0, false); n = n + 1
+    elseif p == "T" then
+      op = op + parse_imm6(q); n = n + 1
+    elseif p == "1" then
+      op = op + parse_imm(q, 6, 16, 0, false); n = n + 1
+    elseif p == "2" then
+      op = op + parse_imm(q, 6, 10, 0, false); n = n + 1
+    elseif p == "5" then
+      op = op + parse_imm(q, 5, 16, 0, false); n = n + 1
+    elseif p == "V" then
+      op = op + parse_imm(q, 4, 0, 0, false); n = n + 1
+    elseif p == "F" then
+      op = op + parse_fpimm(q); n = n + 1
+    elseif p == "Z" then
+      if q ~= "#0" and q ~= "#0.0" then werror("expected zero immediate") end
+      n = n + 1
+
+    elseif p == "S" then
+      op = op + parse_shift(q); n = n + 1
+    elseif p == "X" then
+      op = op + parse_extend(q); n = n + 1
+    elseif p == "R" then
+      op = op + parse_lslx16(q); n = n + 1
+    elseif p == "C" then
+      op = op + parse_cond(q, 0); n = n + 1
+    elseif p == "c" then
+      op = op + parse_cond(q, 1); n = n + 1
+
+    else
+      assert(false)
+    end
+  end
+  wputpos(pos, op)
+end
+
+function op_template(params, template, nparams)
+  if not params then return template:gsub("%x%x%x%x%x%x%x%x", "") end
+
+  -- Limit number of section buffer positions used by a sin
