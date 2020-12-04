@@ -908,4 +908,49 @@ local function parse_template(params, template, nparams, pos)
   -- Process each character.
   for p in gmatch(template:sub(9), ".") do
     local q = params[n]
-    if p == "D" th
+    if p == "D" then
+      op = op + parse_reg(q, 0); n = n + 1
+    elseif p == "N" then
+      op = op + parse_reg(q, 5); n = n + 1
+    elseif p == "M" then
+      op = op + parse_reg(q, 16); n = n + 1
+    elseif p == "A" then
+      op = op + parse_reg(q, 10); n = n + 1
+    elseif p == "m" then
+      op = op + parse_reg(params[n-1], 16)
+
+    elseif p == "p" then
+      if q == "sp" then params[n] = "@x31" end
+    elseif p == "g" then
+      if parse_reg_type == "x" then
+	op = op + 0x80000000
+      elseif parse_reg_type ~= "w" then
+	werror("bad register type")
+      end
+      parse_reg_type = false
+    elseif p == "f" then
+      if parse_reg_type == "d" then
+	op = op + 0x00400000
+      elseif parse_reg_type ~= "s" then
+	werror("bad register type")
+      end
+      parse_reg_type = false
+    elseif p == "x" or p == "w" or p == "d" or p == "s" then
+      if parse_reg_type ~= p then
+	werror("register size mismatch")
+      end
+      parse_reg_type = false
+
+    elseif p == "L" then
+      op = parse_load(params, nparams, n, op)
+    elseif p == "P" then
+      op = parse_load_pair(params, nparams, n, op)
+
+    elseif p == "B" then
+      local mode, v, s = parse_label(q, false); n = n + 1
+      if not mode then werror("bad label `"..q.."'") end
+      local m = branch_type(op)
+      if mode == "A" then
+	waction("REL_"..mode, v+m, format("(unsigned int)(%s)", s))
+	actargs[#actargs+1] = format("(unsigned int)((%s)>>32)", s)
+      el
