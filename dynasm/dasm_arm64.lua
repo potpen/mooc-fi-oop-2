@@ -1000,4 +1000,47 @@ end
 function op_template(params, template, nparams)
   if not params then return template:gsub("%x%x%x%x%x%x%x%x", "") end
 
-  -- Limit number of section buffer positions used by a sin
+  -- Limit number of section buffer positions used by a single dasm_put().
+  -- A single opcode needs a maximum of 4 positions.
+  if secpos+4 > maxsecpos then wflush() end
+  local pos = wpos()
+  local lpos, apos, spos = #actlist, #actargs, secpos
+
+  local ok, err
+  for t in gmatch(template, "[^|]+") do
+    ok, err = pcall(parse_template, params, t, nparams, pos)
+    if ok then return end
+    secpos = spos
+    actlist[lpos+1] = nil
+    actlist[lpos+2] = nil
+    actlist[lpos+3] = nil
+    actlist[lpos+4] = nil
+    actargs[apos+1] = nil
+    actargs[apos+2] = nil
+    actargs[apos+3] = nil
+    actargs[apos+4] = nil
+  end
+  error(err, 0)
+end
+
+map_op[".template__"] = op_template
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode to mark the position where the action list is to be emitted.
+map_op[".actionlist_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeactions(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the global enum is to be emitted.
+map_op[".globals_1"] = function(params)
+  if not params then return "prefix" end
+  local prefix = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobals(out, prefix) end)
+end
+
+-- Pseudo-opcode to mark the position where the global names are to be emitted.
+map_op[".globalnames_1"] = function(params)
+  if not params then return "
