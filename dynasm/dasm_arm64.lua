@@ -1043,4 +1043,42 @@ end
 
 -- Pseudo-opcode to mark the position where the global names are to be emitted.
 map_op[".globalnames_1"] = function(params)
-  if not params then return "
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobalnames(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the extern names are to be emitted.
+map_op[".externnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeexternnames(out, name) end)
+end
+
+------------------------------------------------------------------------------
+
+-- Label pseudo-opcode (converted from trailing colon form).
+map_op[".label_1"] = function(params)
+  if not params then return "[1-9] | ->global | =>pcexpr" end
+  if secpos+1 > maxsecpos then wflush() end
+  local mode, n, s = parse_label(params[1], true)
+  if not mode or mode == "EXT" then werror("bad label definition") end
+  waction("LABEL_"..mode, n, s, 1)
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcodes for data storage.
+local function op_data(params)
+  if not params then return "imm..." end
+  local sz = params.op == ".long" and 4 or 8
+  for _,p in ipairs(params) do
+    local imm = parse_number(p)
+    if imm then
+      local n = tobit(imm)
+      if n == imm or (n < 0 and n + 2^32 == imm) then
+	wputw(n < 0 and n + 2^32 or n)
+	if sz == 8 then
+	  wputw(imm < 0 and 0xffffffff or 0)
+	end
+     
