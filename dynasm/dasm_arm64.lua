@@ -1133,4 +1133,52 @@ map_op[".type_3"] = function(params, nparams)
   if not params then
     return nparams == 2 and "name, ctype" or "name, ctype, reg"
   end
-  local name, ctype, reg = params[1], params[2], params[
+  local name, ctype, reg = params[1], params[2], params[3]
+  if not match(name, "^[%a_][%w_]*$") then
+    werror("bad type name `"..name.."'")
+  end
+  local tp = map_type[name]
+  if tp then
+    werror("duplicate type `"..name.."'")
+  end
+  -- Add #type to defines. A bit unclean to put it in map_archdef.
+  map_archdef["#"..name] = "sizeof("..ctype..")"
+  -- Add new type and emit shortcut define.
+  local num = ctypenum + 1
+  map_type[name] = {
+    ctype = ctype,
+    ctypefmt = format("Dt%X(%%s)", num),
+    reg = reg,
+  }
+  wline(format("#define Dt%X(_V) (int)(ptrdiff_t)&(((%s *)0)_V)", num, ctype))
+  ctypenum = num
+end
+map_op[".type_2"] = map_op[".type_3"]
+
+-- Dump type definitions.
+local function dumptypes(out, lvl)
+  local t = {}
+  for name in pairs(map_type) do t[#t+1] = name end
+  sort(t)
+  out:write("Type definitions:\n")
+  for _,name in ipairs(t) do
+    local tp = map_type[name]
+    local reg = tp.reg or ""
+    out:write(format("  %-20s %-20s %s\n", name, tp.ctype, reg))
+  end
+  out:write("\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Set the current section.
+function _M.section(num)
+  waction("SECTION", num)
+  wflush(true) -- SECTION is a terminal action.
+end
+
+------------------------------------------------------------------------------
+
+-- Dump architecture description.
+function _M.dumparch(out)
+  out:write(format("DynASM %s versi
