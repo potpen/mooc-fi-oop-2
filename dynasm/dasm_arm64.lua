@@ -1081,4 +1081,56 @@ local function op_data(params)
 	if sz == 8 then
 	  wputw(imm < 0 and 0xffffffff or 0)
 	end
-     
+      elseif sz == 4 then
+	werror("bad immediate `"..p.."'")
+      else
+	imm = nil
+      end
+    end
+    if not imm then
+      local mode, v, s = parse_label(p, false)
+      if sz == 4 then
+	if mode then werror("label does not fit into .long") end
+	waction("IMMV", 0, p)
+      elseif mode and mode ~= "A" then
+	waction("REL_"..mode, v+0x8000, s, 1)
+      else
+	if mode == "A" then p = s end
+	waction("IMMV", 0, format("(unsigned int)(%s)", p))
+	waction("IMMV", 0, format("(unsigned int)((unsigned long long)(%s)>>32)", p))
+      end
+    end
+    if secpos+2 > maxsecpos then wflush() end
+  end
+end
+map_op[".long_*"] = op_data
+map_op[".quad_*"] = op_data
+map_op[".addr_*"] = op_data
+
+-- Alignment pseudo-opcode.
+map_op[".align_1"] = function(params)
+  if not params then return "numpow2" end
+  if secpos+1 > maxsecpos then wflush() end
+  local align = tonumber(params[1])
+  if align then
+    local x = align
+    -- Must be a power of 2 in the range (2 ... 256).
+    for i=1,8 do
+      x = x / 2
+      if x == 1 then
+	waction("ALIGN", align-1, nil, 1) -- Action byte is 2**n-1.
+	return
+      end
+    end
+  end
+  werror("bad alignment")
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode for (primitive) type definitions (map to C types).
+map_op[".type_3"] = function(params, nparams)
+  if not params then
+    return nparams == 2 and "name, ctype" or "name, ctype, reg"
+  end
+  local name, ctype, reg = params[1], params[2], params[
