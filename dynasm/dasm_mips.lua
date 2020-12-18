@@ -47,4 +47,52 @@ local action_names = {
 
 -- Maximum number of section buffer positions for dasm_put().
 -- CHECK: Keep this in sync with the C code!
-local maxsecpo
+local maxsecpos = 25 -- Keep this low, to avoid excessively long C lines.
+
+-- Action name -> action number.
+local map_action = {}
+for n,name in ipairs(action_names) do
+  map_action[name] = n-1
+end
+
+-- Action list buffer.
+local actlist = {}
+
+-- Argument list for next dasm_put(). Start with offset 0 into action list.
+local actargs = { 0 }
+
+-- Current number of section buffer positions for dasm_put().
+local secpos = 1
+
+------------------------------------------------------------------------------
+
+-- Dump action names and numbers.
+local function dumpactions(out)
+  out:write("DynASM encoding engine action codes:\n")
+  for n,name in ipairs(action_names) do
+    local num = map_action[name]
+    out:write(format("  %-10s %02X  %d\n", name, num, num))
+  end
+  out:write("\n")
+end
+
+-- Write action list buffer as a huge static C array.
+local function writeactions(out, name)
+  local nn = #actlist
+  if nn == 0 then nn = 1; actlist[0] = map_action.STOP end
+  out:write("static const unsigned int ", name, "[", nn, "] = {\n")
+  for i = 1,nn-1 do
+    assert(out:write("0x", tohex(actlist[i]), ",\n"))
+  end
+  assert(out:write("0x", tohex(actlist[nn]), "\n};\n\n"))
+end
+
+------------------------------------------------------------------------------
+
+-- Add word to action list.
+local function wputxw(n)
+  assert(n >= 0 and n <= 0xffffffff and n % 1 == 0, "word out of range")
+  actlist[#actlist+1] = n
+end
+
+-- Add act
