@@ -95,4 +95,45 @@ local function wputxw(n)
   actlist[#actlist+1] = n
 end
 
--- Add act
+-- Add action to list with optional arg. Advance buffer pos, too.
+local function waction(action, val, a, num)
+  local w = assert(map_action[action], "bad action name `"..action.."'")
+  wputxw(0xff000000 + w * 0x10000 + (val or 0))
+  if a then actargs[#actargs+1] = a end
+  if a or num then secpos = secpos + (num or 1) end
+end
+
+-- Flush action list (intervening C code or buffer pos overflow).
+local function wflush(term)
+  if #actlist == actargs[1] then return end -- Nothing to flush.
+  if not term then waction("STOP") end -- Terminate action list.
+  wline(format("dasm_put(Dst, %s);", concat(actargs, ", ")), true)
+  actargs = { #actlist } -- Actionlist offset is 1st arg to next dasm_put().
+  secpos = 1 -- The actionlist offset occupies a buffer position, too.
+end
+
+-- Put escaped word.
+local function wputw(n)
+  if n >= 0xff000000 then waction("ESC") end
+  wputxw(n)
+end
+
+-- Reserve position for word.
+local function wpos()
+  local pos = #actlist+1
+  actlist[pos] = ""
+  return pos
+end
+
+-- Store word to reserved position.
+local function wputpos(pos, n)
+  assert(n >= 0 and n <= 0xffffffff and n % 1 == 0, "word out of range")
+  actlist[pos] = n
+end
+
+------------------------------------------------------------------------------
+
+-- Global label name -> global label number. With auto assignment on 1st use.
+local next_global = 20
+local map_global = setmetatable({}, { __index = function(t, name)
+  if not match(name, "^[%a_][%w_]*$") th
