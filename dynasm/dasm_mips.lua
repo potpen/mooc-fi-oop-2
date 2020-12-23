@@ -186,4 +186,58 @@ local map_extern = setmetatable({}, { __index = function(t, name)
   -- No restrictions on the name for now.
   local n = next_extern
   if n > 2047 then werror("too many extern labels") end
-  ne
+  next_extern = n + 1
+  t[name] = n
+  map_extern_[n] = name
+  return n
+end})
+
+-- Dump extern labels.
+local function dumpexterns(out, lvl)
+  out:write("Extern labels:\n")
+  for i=0,next_extern-1 do
+    out:write(format("  %s\n", map_extern_[i]))
+  end
+  out:write("\n")
+end
+
+-- Write extern label names.
+local function writeexternnames(out, name)
+  out:write("static const char *const ", name, "[] = {\n")
+  for i=0,next_extern-1 do
+    out:write("  \"", map_extern_[i], "\",\n")
+  end
+  out:write("  (const char *)0\n};\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Arch-specific maps.
+local map_archdef = { sp="r29", ra="r31" } -- Ext. register name -> int. name.
+
+local map_type = {}		-- Type name -> { ctype, reg }
+local ctypenum = 0		-- Type number (for Dt... macros).
+
+-- Reverse defines for registers.
+function _M.revdef(s)
+  if s == "r29" then return "sp"
+  elseif s == "r31" then return "ra" end
+  return s
+end
+
+------------------------------------------------------------------------------
+
+-- Template strings for MIPS instructions.
+local map_op = {
+  -- First-level opcodes.
+  j_1 =		"08000000J",
+  jal_1 =	"0c000000J",
+  b_1 =		"10000000B",
+  beqz_2 =	"10000000SB",
+  beq_3 =	"10000000STB",
+  bnez_2 =	"14000000SB",
+  bne_3 =	"14000000STB",
+  blez_2 =	"18000000SB",
+  bgtz_2 =	"1c000000SB",
+  li_2 =	"24000000TI",
+  addiu_3 =
