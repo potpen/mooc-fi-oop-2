@@ -337,4 +337,50 @@ local map_op = {
 
   -- Opcode SPECIAL3.
   ext_4 =	"7c000000TSAM", -- Note: last arg is msbd = size-1
-  dextm_4 =	mips64 and "7c000001TSAM", -- Args: pos    | size
+  dextm_4 =	mips64 and "7c000001TSAM", -- Args: pos    | size-1-32
+  dextu_4 =	mips64 and "7c000002TSAM", -- Args: pos-32 | size-1
+  dext_4 =	mips64 and "7c000003TSAM", -- Args: pos    | size-1
+  zextw_2 =	mips64 and "7c00f803TS",
+  ins_4 =	"7c000004TSAM", -- Note: last arg is msb = pos+size-1
+  dinsm_4 =	mips64 and "7c000005TSAM", -- Args: pos    | pos+size-33
+  dinsu_4 =	mips64 and "7c000006TSAM", -- Args: pos-32 | pos+size-33
+  dins_4 =	mips64 and "7c000007TSAM", -- Args: pos    | pos+size-1
+  wsbh_2 =	"7c0000a0DT",
+  dsbh_2 =	mips64 and "7c0000a4DT",
+  dshd_2 =	mips64 and "7c000164DT",
+  seb_2 =	"7c000420DT",
+  seh_2 =	"7c000620DT",
+  rdhwr_2 =	"7c00003bTD",
+
+  -- Opcode COP0.
+  mfc0_2 =	"40000000TD",
+  mfc0_3 =	"40000000TDW",
+  dmfc0_2 =	mips64 and "40200000TD",
+  dmfc0_3 =	mips64 and "40200000TDW",
+  mtc0_2 =	"40800000TD",
+  mtc0_3 =	"40800000TDW",
+  dmtc0_2 =	mips64 and "40a00000TD",
+  dmtc0_3 =	mips64 and "40a00000TDW",
+  rdpgpr_2 =	"41400000DT",
+  di_0 =	"41606000",
+  di_1 =	"41606000T",
+  ei_0 =	"41606020",
+  ei_1 =	"41606020T",
+  wrpgpr_2 =	"41c00000DT",
+  tlbr_0 =	"42000001",
+  tlbwi_0 =	"42000002",
+  tlbwr_0 =	"42000006",
+  tlbp_0 =	"42000008",
+  eret_0 =	"42000018",
+  deret_0 =	"4200001f",
+  wait_0 =	"42000020",
+
+  -- Opcode COP1.
+  mfc1_2 =	"44000000TG",
+  dmfc1_2 =	mips64 and "44200000TG",
+  cfc1_2 =	"44400000TG",
+  mfhc1_2 =	"44600000TG",
+  mtc1_2 =	"44800000TG",
+  dmtc1_2 =	mips64 and "44a00000TG",
+  ctc1_2 =	"44c00000TG",
+  mthc1_2 =	"44e00000
