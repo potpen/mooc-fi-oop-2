@@ -428,4 +428,50 @@ local map_op = {
   ["cvt.w.d_2"] =	"46200024FG",
   ["cvt.l.d_2"] =	"46200025FG",
   ["cvt.s.w_2"] =	"46800020FG",
-  ["cvt.d.w_2"
+  ["cvt.d.w_2"] =	"46800021FG",
+  ["cvt.s.l_2"] =	"46a00020FG",
+  ["cvt.d.l_2"] =	"46a00021FG",
+}
+
+if mipsr6 then -- Instructions added with MIPSR6.
+
+  for k,v in pairs({
+
+    -- Add immediate to upper bits.
+    aui_3 =	"3c000000TSI",
+    daui_3 =	mips64 and "74000000TSI",
+    dahi_2 =	mips64 and "04060000SI",
+    dati_2 =	mips64 and "041e0000SI",
+
+    -- TODO: addiupc, auipc, aluipc, lwpc, lwupc, ldpc.
+
+    -- Compact branches.
+    blezalc_2 =	"18000000TB",	-- rt != 0.
+    bgezalc_2 =	"18000000T=SB",	-- rt != 0.
+    bgtzalc_2 =	"1c000000TB",	-- rt != 0.
+    bltzalc_2 =	"1c000000T=SB",	-- rt != 0.
+
+    blezc_2 =	"58000000TB",	-- rt != 0.
+    bgezc_2 =	"58000000T=SB",	-- rt != 0.
+    bgec_3 =	"58000000STB",	-- rs != rt.
+    blec_3 =	"58000000TSB",	-- rt != rs.
+
+    bgtzc_2 =	"5c000000TB",	-- rt != 0.
+    bltzc_2 =	"5c000000T=SB",	-- rt != 0.
+    bltc_3 =	"5c000000STB",	-- rs != rt.
+    bgtc_3 =	"5c000000TSB",	-- rt != rs.
+
+    bgeuc_3 =	"18000000STB",	-- rs != rt.
+    bleuc_3 =	"18000000TSB",	-- rt != rs.
+    bltuc_3 =	"1c000000STB",	-- rs != rt.
+    bgtuc_3 =	"1c000000TSB",	-- rt != rs.
+
+    beqzalc_2 =	"20000000TB",	-- rt != 0.
+    bnezalc_2 =	"60000000TB",	-- rt != 0.
+    beqc_3 =	"20000000STB",	-- rs < rt.
+    bnec_3 =	"60000000STB",	-- rs < rt.
+    bovc_3 =	"20000000STB",	-- rs >= rt.
+    bnvc_3 =	"60000000STB",	-- rs >= rt.
+
+    beqzc_2 =	"d8000000SK",	-- rs != 0.
+    bnezc_2 =	"f8000000SK",
