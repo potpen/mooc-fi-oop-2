@@ -474,4 +474,54 @@ if mipsr6 then -- Instructions added with MIPSR6.
     bnvc_3 =	"60000000STB",	-- rs >= rt.
 
     beqzc_2 =	"d8000000SK",	-- rs != 0.
-    bnezc_2 =	"f8000000SK",
+    bnezc_2 =	"f8000000SK",	-- rs != 0.
+    jic_2 =	"d8000000TI",
+    jialc_2 =	"f8000000TI",
+    bc_1 =	"c8000000L",
+    balc_1 =	"e8000000L",
+
+    -- Opcode SPECIAL.
+    jr_1 =	"00000009S",
+    sdbbp_0 =	"0000000e",
+    sdbbp_1 =	"0000000eY",
+    lsa_4 =	"00000005DSTA",
+    dlsa_4 =	mips64 and "00000015DSTA",
+    seleqz_3 =	"00000035DST",
+    selnez_3 =	"00000037DST",
+    clz_2 =	"00000050DS",
+    clo_2 =	"00000051DS",
+    dclz_2 =	mips64 and "00000052DS",
+    dclo_2 =	mips64 and "00000053DS",
+    mul_3 =	"00000098DST",
+    muh_3 =	"000000d8DST",
+    mulu_3 =	"00000099DST",
+    muhu_3 =	"000000d9DST",
+    div_3 =	"0000009aDST",
+    mod_3 =	"000000daDST",
+    divu_3 =	"0000009bDST",
+    modu_3 =	"000000dbDST",
+    dmul_3 =	mips64 and "0000009cDST",
+    dmuh_3 =	mips64 and "000000dcDST",
+    dmulu_3 =	mips64 and "0000009dDST",
+    dmuhu_3 =	mips64 and "000000ddDST",
+    ddiv_3 =	mips64 and "0000009eDST",
+    dmod_3 =	mips64 and "000000deDST",
+    ddivu_3 =	mips64 and "0000009fDST",
+    dmodu_3 =	mips64 and "000000dfDST",
+
+    -- Opcode SPECIAL3.
+    align_4 =		"7c000220DSTA",
+    dalign_4 =		mips64 and "7c000224DSTA",
+    bitswap_2 =		"7c000020DT",
+    dbitswap_2 =	mips64 and "7c000024DT",
+
+    -- Opcode COP1.
+    bc1eqz_2 =	"45200000HB",
+    bc1nez_2 =	"45a00000HB",
+
+    ["sel.s_3"] =	"46000010FGH",
+    ["seleqz.s_3"] =	"46000014FGH",
+    ["selnez.s_3"] =	"46000017FGH",
+    ["maddf.s_3"] =	"46000018FGH",
+    ["msubf.s_3"] =	"46000019FGH",
+    ["rint.s_2"] =	"
