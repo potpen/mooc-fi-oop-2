@@ -565,4 +565,51 @@ if mipsr6 then -- Instructions added with MIPSR6.
     ["max.d_3"] =	"4620001eFGH",
     ["maxa.d_3"] =	"4620001fFGH",
     ["cmp.af.d_3"] =	"46a00000FGH",
-    ["cmp.un.d_3"] =
+    ["cmp.un.d_3"] =	"46a00001FGH",
+    ["cmp.or.d_3"] =	"46a00011FGH",
+    ["cmp.eq.d_3"] =	"46a00002FGH",
+    ["cmp.une.d_3"] =	"46a00012FGH",
+    ["cmp.ueq.d_3"] =	"46a00003FGH",
+    ["cmp.ne.d_3"] =	"46a00013FGH",
+    ["cmp.lt.d_3"] =	"46a00004FGH",
+    ["cmp.ult.d_3"] =	"46a00005FGH",
+    ["cmp.le.d_3"] =	"46a00006FGH",
+    ["cmp.ule.d_3"] =	"46a00007FGH",
+    ["cmp.saf.d_3"] =	"46a00008FGH",
+    ["cmp.sun.d_3"] =	"46a00009FGH",
+    ["cmp.sor.d_3"] =	"46a00019FGH",
+    ["cmp.seq.d_3"] =	"46a0000aFGH",
+    ["cmp.sune.d_3"] =	"46a0001aFGH",
+    ["cmp.sueq.d_3"] =	"46a0000bFGH",
+    ["cmp.sne.d_3"] =	"46a0001bFGH",
+    ["cmp.slt.d_3"] =	"46a0000cFGH",
+    ["cmp.sult.d_3"] =	"46a0000dFGH",
+    ["cmp.sle.d_3"] =	"46a0000eFGH",
+    ["cmp.sule.d_3"] =	"46a0000fFGH",
+
+  }) do map_op[k] = v end
+
+else -- Instructions removed by MIPSR6.
+
+  for k,v in pairs({
+    -- Traps, don't use.
+    addi_3 =	"20000000TSI",
+    daddi_3 =	mips64 and "60000000TSI",
+
+    -- Branch on likely, don't use.
+    beqzl_2 =	"50000000SB",
+    beql_3 =	"50000000STB",
+    bnezl_2 =	"54000000SB",
+    bnel_3 =	"54000000STB",
+    blezl_2 =	"58000000SB",
+    bgtzl_2 =	"5c000000SB",
+
+    lwl_2 =	"88000000TO",
+    lwr_2 =	"98000000TO",
+    swl_2 =	"a8000000TO",
+    sdl_2 =	mips64 and "b0000000TO",
+    sdr_2 =	mips64 and "b1000000TO",
+    swr_2 =	"b8000000TO",
+    cache_2 =	"bc000000NO",
+    ll_2 =	"c0000000TO",
+    pref_2 =	"cc000000NO"
