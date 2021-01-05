@@ -792,4 +792,50 @@ else -- Instructions removed by MIPSR6.
     ["c.ngl.ps_2"] =	"46c0003bGH",
     ["c.ngl.ps_3"] =	"46c0003bVGH",
     ["c.lt.ps_2"] =	"46c0003cGH",
-    ["c.lt.ps_3
+    ["c.lt.ps_3"] =	"46c0003cVGH",
+    ["c.nge.ps_2"] =	"46c0003dGH",
+    ["c.nge.ps_3"] =	"46c0003dVGH",
+    ["c.le.ps_2"] =	"46c0003eGH",
+    ["c.le.ps_3"] =	"46c0003eVGH",
+    ["c.ngt.ps_2"] =	"46c0003fGH",
+    ["c.ngt.ps_3"] =	"46c0003fVGH",
+
+    -- Opcode COP1X.
+    lwxc1_2 =	"4c000000FX",
+    ldxc1_2 =	"4c000001FX",
+    luxc1_2 =	"4c000005FX",
+    swxc1_2 =	"4c000008FX",
+    sdxc1_2 =	"4c000009FX",
+    suxc1_2 =	"4c00000dFX",
+    prefx_2 =	"4c00000fMX",
+    ["alnv.ps_4"] =	"4c00001eFGHS",
+    ["madd.s_4"] =	"4c000020FRGH",
+    ["madd.d_4"] =	"4c000021FRGH",
+    ["madd.ps_4"] =	"4c000026FRGH",
+    ["msub.s_4"] =	"4c000028FRGH",
+    ["msub.d_4"] =	"4c000029FRGH",
+    ["msub.ps_4"] =	"4c00002eFRGH",
+    ["nmadd.s_4"] =	"4c000030FRGH",
+    ["nmadd.d_4"] =	"4c000031FRGH",
+    ["nmadd.ps_4"] =	"4c000036FRGH",
+    ["nmsub.s_4"] =	"4c000038FRGH",
+    ["nmsub.d_4"] =	"4c000039FRGH",
+    ["nmsub.ps_4"] =	"4c00003eFRGH",
+
+  }) do map_op[k] = v end
+
+end
+
+------------------------------------------------------------------------------
+
+local function parse_gpr(expr)
+  local tname, ovreg = match(expr, "^([%w_]+):(r[1-3]?[0-9])$")
+  local tp = map_type[tname or expr]
+  if tp then
+    local reg = ovreg or tp.reg
+    if not reg then
+      werror("type `"..(tname or expr).."' needs a register override")
+    end
+    expr = reg
+  end
+  local r = mat
