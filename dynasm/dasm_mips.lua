@@ -838,4 +838,54 @@ local function parse_gpr(expr)
     end
     expr = reg
   end
-  local r = mat
+  local r = match(expr, "^r([1-3]?[0-9])$")
+  if r then
+    r = tonumber(r)
+    if r <= 31 then return r, tp end
+  end
+  werror("bad register name `"..expr.."'")
+end
+
+local function parse_fpr(expr)
+  local r = match(expr, "^f([1-3]?[0-9])$")
+  if r then
+    r = tonumber(r)
+    if r <= 31 then return r end
+  end
+  werror("bad register name `"..expr.."'")
+end
+
+local function parse_imm(imm, bits, shift, scale, signed, action)
+  local n = tonumber(imm)
+  if n then
+    local m = sar(n, scale)
+    if shl(m, scale) == n then
+      if signed then
+	local s = sar(m, bits-1)
+	if s == 0 then return shl(m, shift)
+	elseif s == -1 then return shl(m + shl(1, bits), shift) end
+      else
+	if sar(m, bits) == 0 then return shl(m, shift) end
+      end
+    end
+    werror("out of range immediate `"..imm.."'")
+  elseif match(imm, "^[rf]([1-3]?[0-9])$") or
+	 match(imm, "^([%w_]+):([rf][1-3]?[0-9])$") then
+    werror("expected immediate operand, got register")
+  else
+    waction(action or "IMM",
+	    (signed and 32768 or 0)+shl(scale, 10)+shl(bits, 5)+shift, imm)
+    return 0
+  end
+end
+
+local function parse_disp(disp)
+  local imm, reg = match(disp, "^(.*)%(([%w_:]+)%)$")
+  if imm then
+    local r = shl(parse_gpr(reg), 21)
+    local extname = match(imm, "^extern%s+(%S+)$")
+    if extname then
+      waction("REL_EXT", map_extern[extname], nil, 1)
+      return r
+    else
+      return r + parse_imm(imm, 16, 0, 0,
