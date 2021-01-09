@@ -979,4 +979,41 @@ map_op[".template__"] = function(params, template, nparams)
       op = op + parse_disp(params[n]); n = n + 1
     elseif p == "X" then
       op = op + parse_index(params[n]); n = n + 1
-    elseif p == "B" or p =
+    elseif p == "B" or p == "J" or p == "K" or p == "L" then
+      local mode, m, s = parse_label(params[n], false)
+      if p == "J" then m = m + 0xa800
+      elseif p == "K" then m = m + 0x5000
+      elseif p == "L" then m = m + 0xa000 end
+      waction("REL_"..mode, m, s, 1)
+      n = n + 1
+    elseif p == "A" then
+      op = op + parse_imm(params[n], 5, 6, 0, false); n = n + 1
+    elseif p == "a" then
+      local m = parse_imm(params[n], 6, 6, 0, false, "IMMS"); n = n + 1
+      op = op + band(m, 0x7c0) + band(shr(m, 9), 4)
+    elseif p == "M" then
+      op = op + parse_imm(params[n], 5, 11, 0, false); n = n + 1
+    elseif p == "N" then
+      op = op + parse_imm(params[n], 5, 16, 0, false); n = n + 1
+    elseif p == "C" then
+      op = op + parse_imm(params[n], 3, 18, 0, false); n = n + 1
+    elseif p == "V" then
+      op = op + parse_imm(params[n], 3, 8, 0, false); n = n + 1
+    elseif p == "W" then
+      op = op + parse_imm(params[n], 3, 0, 0, false); n = n + 1
+    elseif p == "Y" then
+      op = op + parse_imm(params[n], 20, 6, 0, false); n = n + 1
+    elseif p == "Z" then
+      op = op + parse_imm(params[n], 10, 6, 0, false); n = n + 1
+    elseif p == "=" then
+      n = n - 1 -- Re-use previous parameter for next template char.
+    else
+      assert(false)
+    end
+  end
+  wputpos(pos, op)
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode to mark the position where th
