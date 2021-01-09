@@ -888,4 +888,58 @@ local function parse_disp(disp)
       waction("REL_EXT", map_extern[extname], nil, 1)
       return r
     else
-      return r + parse_imm(imm, 16, 0, 0,
+      return r + parse_imm(imm, 16, 0, 0, true)
+    end
+  end
+  local reg, tailr = match(disp, "^([%w_:]+)%s*(.*)$")
+  if reg and tailr ~= "" then
+    local r, tp = parse_gpr(reg)
+    if tp then
+      waction("IMM", 32768+16*32, format(tp.ctypefmt, tailr))
+      return shl(r, 21)
+    end
+  end
+  werror("bad displacement `"..disp.."'")
+end
+
+local function parse_index(idx)
+  local rt, rs = match(idx, "^(.*)%(([%w_:]+)%)$")
+  if rt then
+    rt = parse_gpr(rt)
+    rs = parse_gpr(rs)
+    return shl(rt, 16) + shl(rs, 21)
+  end
+  werror("bad index `"..idx.."'")
+end
+
+local function parse_label(label, def)
+  local prefix = sub(label, 1, 2)
+  -- =>label (pc label reference)
+  if prefix == "=>" then
+    return "PC", 0, sub(label, 3)
+  end
+  -- ->name (global label reference)
+  if prefix == "->" then
+    return "LG", map_global[sub(label, 3)]
+  end
+  if def then
+    -- [1-9] (local label definition)
+    if match(label, "^[1-9]$") then
+      return "LG", 10+tonumber(label)
+    end
+  else
+    -- [<>][1-9] (local label reference)
+    local dir, lnum = match(label, "^([<>])([1-9])$")
+    if dir then -- Fwd: 1-9, Bkwd: 11-19.
+      return "LG", lnum + (dir == ">" and 0 or 10)
+    end
+    -- extern label (extern label reference)
+    local extname = match(label, "^extern%s+(%S+)$")
+    if extname then
+      return "EXT", map_extern[extname]
+    end
+  end
+  werror("bad label `"..label.."'")
+end
+
+-----------------------------------------
