@@ -942,4 +942,41 @@ local function parse_label(label, def)
   werror("bad label `"..label.."'")
 end
 
------------------------------------------
+------------------------------------------------------------------------------
+
+-- Handle opcodes defined with template strings.
+map_op[".template__"] = function(params, template, nparams)
+  if not params then return sub(template, 9) end
+  local op = tonumber(sub(template, 1, 8), 16)
+  local n = 1
+
+  -- Limit number of section buffer positions used by a single dasm_put().
+  -- A single opcode needs a maximum of 2 positions (ins/ext).
+  if secpos+2 > maxsecpos then wflush() end
+  local pos = wpos()
+
+  -- Process each character.
+  for p in gmatch(sub(template, 9), ".") do
+    if p == "D" then
+      op = op + shl(parse_gpr(params[n]), 11); n = n + 1
+    elseif p == "T" then
+      op = op + shl(parse_gpr(params[n]), 16); n = n + 1
+    elseif p == "S" then
+      op = op + shl(parse_gpr(params[n]), 21); n = n + 1
+    elseif p == "F" then
+      op = op + shl(parse_fpr(params[n]), 6); n = n + 1
+    elseif p == "G" then
+      op = op + shl(parse_fpr(params[n]), 11); n = n + 1
+    elseif p == "H" then
+      op = op + shl(parse_fpr(params[n]), 16); n = n + 1
+    elseif p == "R" then
+      op = op + shl(parse_fpr(params[n]), 21); n = n + 1
+    elseif p == "I" then
+      op = op + parse_imm(params[n], 16, 0, 0, true); n = n + 1
+    elseif p == "U" then
+      op = op + parse_imm(params[n], 16, 0, 0, false); n = n + 1
+    elseif p == "O" then
+      op = op + parse_disp(params[n]); n = n + 1
+    elseif p == "X" then
+      op = op + parse_index(params[n]); n = n + 1
+    elseif p == "B" or p =
