@@ -1016,4 +1016,37 @@ end
 
 ------------------------------------------------------------------------------
 
--- Pseudo-opcode to mark the position where th
+-- Pseudo-opcode to mark the position where the action list is to be emitted.
+map_op[".actionlist_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeactions(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the global enum is to be emitted.
+map_op[".globals_1"] = function(params)
+  if not params then return "prefix" end
+  local prefix = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobals(out, prefix) end)
+end
+
+-- Pseudo-opcode to mark the position where the global names are to be emitted.
+map_op[".globalnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobalnames(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the extern names are to be emitted.
+map_op[".externnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeexternnames(out, name) end)
+end
+
+------------------------------------------------------------------------------
+
+-- Label pseudo-opcode (converted from trailing colon form).
+map_op[".label_1"] = function(params)
+  if not params then return "[1-9] | ->global | =>pcexpr" end
+  if secpos+1 > ma
