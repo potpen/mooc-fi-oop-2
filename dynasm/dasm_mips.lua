@@ -1049,4 +1049,52 @@ end
 -- Label pseudo-opcode (converted from trailing colon form).
 map_op[".label_1"] = function(params)
   if not params then return "[1-9] | ->global | =>pcexpr" end
-  if secpos+1 > ma
+  if secpos+1 > maxsecpos then wflush() end
+  local mode, n, s = parse_label(params[1], true)
+  if mode == "EXT" then werror("bad label definition") end
+  waction("LABEL_"..mode, n, s, 1)
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcodes for data storage.
+map_op[".long_*"] = function(params)
+  if not params then return "imm..." end
+  for _,p in ipairs(params) do
+    local n = tonumber(p)
+    if not n then werror("bad immediate `"..p.."'") end
+    if n < 0 then n = n + 2^32 end
+    wputw(n)
+    if secpos+2 > maxsecpos then wflush() end
+  end
+end
+
+-- Alignment pseudo-opcode.
+map_op[".align_1"] = function(params)
+  if not params then return "numpow2" end
+  if secpos+1 > maxsecpos then wflush() end
+  local align = tonumber(params[1])
+  if align then
+    local x = align
+    -- Must be a power of 2 in the range (2 ... 256).
+    for i=1,8 do
+      x = x / 2
+      if x == 1 then
+	waction("ALIGN", align-1, nil, 1) -- Action byte is 2**n-1.
+	return
+      end
+    end
+  end
+  werror("bad alignment")
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode for (primitive) type definitions (map to C types).
+map_op[".type_3"] = function(params, nparams)
+  if not params then
+    return nparams == 2 and "name, ctype" or "name, ctype, reg"
+  end
+  local name, ctype, reg = params[1], params[2], params[3]
+  if not match(name, "^[%a_][%w_]*$") then
+    werr
