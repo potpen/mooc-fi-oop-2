@@ -1148,4 +1148,34 @@ function _M.dumparch(out)
   dumpactions(out)
 end
 
--- Dump all 
+-- Dump all user defined elements.
+function _M.dumpdef(out, lvl)
+  dumptypes(out, lvl)
+  dumpglobals(out, lvl)
+  dumpexterns(out, lvl)
+end
+
+------------------------------------------------------------------------------
+
+-- Pass callbacks from/to the DynASM core.
+function _M.passcb(wl, we, wf, ww)
+  wline, werror, wfatal, wwarn = wl, we, wf, ww
+  return wflush
+end
+
+-- Setup the arch-specific module.
+function _M.setup(arch, opt)
+  g_arch, g_opt = arch, opt
+end
+
+-- Merge the core maps and the arch-specific maps.
+function _M.mergemaps(map_coreop, map_def)
+  setmetatable(map_op, { __index = map_coreop })
+  setmetatable(map_def, { __index = map_archdef })
+  return map_op, map_def
+end
+
+return _M
+
+------------------------------------------------------------------------------
+
