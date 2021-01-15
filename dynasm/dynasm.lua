@@ -1,0 +1,7 @@
+------------------------------------------------------------------------------
+-- DynASM. A dynamic assembler for code generation engines.
+-- Originally designed and implemented for LuaJIT.
+--
+-- Copyright (C) 2005-2022 Mike Pall. All rights reserved.
+-- See below for full copyright notice.
+-----------------------------------------------------------------

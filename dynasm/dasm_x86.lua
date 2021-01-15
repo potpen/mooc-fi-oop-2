@@ -1351,3 +1351,1038 @@ local map_op = {
   rcpps_2 =	"rmo:0F53rM",
   rcpss_2 =	"rro:F30F53rM|rx/od:",
   rsqrtps_2 =	"rmo:0F52rM",
+  rsqrtss_2 =	"rmo:F30F52rM",
+  sfence_0 =	"0FAEF8",
+  shufpd_3 =	"rmio:660FC6rMU",
+  shufps_3 =	"rmio:0FC6rMU",
+  stmxcsr_1 =   "xd:0FAE3m",
+  ucomisd_2 =	"rro:660F2ErM|rx/oq:",
+  ucomiss_2 =	"rro:0F2ErM|rx/od:",
+  unpckhpd_2 =	"rmo:660F15rM",
+  unpckhps_2 =	"rmo:0F15rM",
+  unpcklpd_2 =	"rmo:660F14rM",
+  unpcklps_2 =	"rmo:0F14rM",
+  xorpd_2 =	"rmo:660F57rM",
+  xorps_2 =	"rmo:0F57rM",
+
+  -- SSE3 ops
+  fisttp_1 =	"xw:nDF1m|xd:DB1m|xq:nDD1m",
+  addsubpd_2 =	"rmo:660FD0rM",
+  addsubps_2 =	"rmo:F20FD0rM",
+  haddpd_2 =	"rmo:660F7CrM",
+  haddps_2 =	"rmo:F20F7CrM",
+  hsubpd_2 =	"rmo:660F7DrM",
+  hsubps_2 =	"rmo:F20F7DrM",
+  lddqu_2 =	"rxo:F20FF0rM",
+  movddup_2 =	"rmo:F20F12rM",
+  movshdup_2 =	"rmo:F30F16rM",
+  movsldup_2 =	"rmo:F30F12rM",
+
+  -- SSSE3 ops
+  pabsb_2 =	"rmo:660F381CrM",
+  pabsd_2 =	"rmo:660F381ErM",
+  pabsw_2 =	"rmo:660F381DrM",
+  palignr_3 =	"rmio:660F3A0FrMU",
+  phaddd_2 =	"rmo:660F3802rM",
+  phaddsw_2 =	"rmo:660F3803rM",
+  phaddw_2 =	"rmo:660F3801rM",
+  phsubd_2 =	"rmo:660F3806rM",
+  phsubsw_2 =	"rmo:660F3807rM",
+  phsubw_2 =	"rmo:660F3805rM",
+  pmaddubsw_2 =	"rmo:660F3804rM",
+  pmulhrsw_2 =	"rmo:660F380BrM",
+  pshufb_2 =	"rmo:660F3800rM",
+  psignb_2 =	"rmo:660F3808rM",
+  psignd_2 =	"rmo:660F380ArM",
+  psignw_2 =	"rmo:660F3809rM",
+
+  -- SSE4.1 ops
+  blendpd_3 =	"rmio:660F3A0DrMU",
+  blendps_3 =	"rmio:660F3A0CrMU",
+  blendvpd_3 =	"rmRo:660F3815rM",
+  blendvps_3 =	"rmRo:660F3814rM",
+  dppd_3 =	"rmio:660F3A41rMU",
+  dpps_3 =	"rmio:660F3A40rMU",
+  extractps_3 =	"mri/do:660F3A17RmU|rri/qo:660F3A17RXmU",
+  insertps_3 =	"rrio:660F3A41rMU|rxi/od:",
+  movntdqa_2 =	"rxo:660F382ArM",
+  mpsadbw_3 =	"rmio:660F3A42rMU",
+  packusdw_2 =	"rmo:660F382BrM",
+  pblendvb_3 =	"rmRo:660F3810rM",
+  pblendw_3 =	"rmio:660F3A0ErMU",
+  pcmpeqq_2 =	"rmo:660F3829rM",
+  pextrb_3 =	"rri/do:660F3A14nRmU|rri/qo:|xri/bo:",
+  pextrd_3 =	"mri/do:660F3A16RmU",
+  pextrq_3 =	"mri/qo:660F3A16RmU",
+  -- pextrw is SSE2, mem operand is SSE4.1 only
+  phminposuw_2 = "rmo:660F3841rM",
+  pinsrb_3 =	"rri/od:660F3A20nrMU|rxi/ob:",
+  pinsrd_3 =	"rmi/od:660F3A22rMU",
+  pinsrq_3 =	"rmi/oq:660F3A22rXMU",
+  pmaxsb_2 =	"rmo:660F383CrM",
+  pmaxsd_2 =	"rmo:660F383DrM",
+  pmaxud_2 =	"rmo:660F383FrM",
+  pmaxuw_2 =	"rmo:660F383ErM",
+  pminsb_2 =	"rmo:660F3838rM",
+  pminsd_2 =	"rmo:660F3839rM",
+  pminud_2 =	"rmo:660F383BrM",
+  pminuw_2 =	"rmo:660F383ArM",
+  pmovsxbd_2 =	"rro:660F3821rM|rx/od:",
+  pmovsxbq_2 =	"rro:660F3822rM|rx/ow:",
+  pmovsxbw_2 =	"rro:660F3820rM|rx/oq:",
+  pmovsxdq_2 =	"rro:660F3825rM|rx/oq:",
+  pmovsxwd_2 =	"rro:660F3823rM|rx/oq:",
+  pmovsxwq_2 =	"rro:660F3824rM|rx/od:",
+  pmovzxbd_2 =	"rro:660F3831rM|rx/od:",
+  pmovzxbq_2 =	"rro:660F3832rM|rx/ow:",
+  pmovzxbw_2 =	"rro:660F3830rM|rx/oq:",
+  pmovzxdq_2 =	"rro:660F3835rM|rx/oq:",
+  pmovzxwd_2 =	"rro:660F3833rM|rx/oq:",
+  pmovzxwq_2 =	"rro:660F3834rM|rx/od:",
+  pmuldq_2 =	"rmo:660F3828rM",
+  pmulld_2 =	"rmo:660F3840rM",
+  ptest_2 =	"rmo:660F3817rM",
+  roundpd_3 =	"rmio:660F3A09rMU",
+  roundps_3 =	"rmio:660F3A08rMU",
+  roundsd_3 =	"rrio:660F3A0BrMU|rxi/oq:",
+  roundss_3 =	"rrio:660F3A0ArMU|rxi/od:",
+
+  -- SSE4.2 ops
+  crc32_2 =	"rmqd:F20F38F1rM|rm/dw:66F20F38F1rM|rm/db:F20F38F0rM|rm/qb:",
+  pcmpestri_3 =	"rmio:660F3A61rMU",
+  pcmpestrm_3 =	"rmio:660F3A60rMU",
+  pcmpgtq_2 =	"rmo:660F3837rM",
+  pcmpistri_3 =	"rmio:660F3A63rMU",
+  pcmpistrm_3 =	"rmio:660F3A62rMU",
+  popcnt_2 =	"rmqdw:F30FB8rM",
+
+  -- SSE4a
+  extrq_2 =	"rro:660F79rM",
+  extrq_3 =	"riio:660F780mUU",
+  insertq_2 =	"rro:F20F79rM",
+  insertq_4 =	"rriio:F20F78rMUU",
+  lzcnt_2 =	"rmqdw:F30FBDrM",
+  movntsd_2 =	"xr/qo:nF20F2BRm",
+  movntss_2 =	"xr/do:F30F2BRm",
+  -- popcnt is also in SSE4.2
+
+  -- AES-NI
+  aesdec_2 =	"rmo:660F38DErM",
+  aesdeclast_2 = "rmo:660F38DFrM",
+  aesenc_2 =	"rmo:660F38DCrM",
+  aesenclast_2 = "rmo:660F38DDrM",
+  aesimc_2 =	"rmo:660F38DBrM",
+  aeskeygenassist_3 = "rmio:660F3ADFrMU",
+  pclmulqdq_3 =	"rmio:660F3A44rMU",
+
+   -- AVX FP ops
+  vaddsubpd_3 =	"rrmoy:660FVD0rM",
+  vaddsubps_3 =	"rrmoy:F20FVD0rM",
+  vandpd_3 =	"rrmoy:660FV54rM",
+  vandps_3 =	"rrmoy:0FV54rM",
+  vandnpd_3 =	"rrmoy:660FV55rM",
+  vandnps_3 =	"rrmoy:0FV55rM",
+  vblendpd_4 =	"rrmioy:660F3AV0DrMU",
+  vblendps_4 =	"rrmioy:660F3AV0CrMU",
+  vblendvpd_4 =	"rrmroy:660F3AV4BrMs",
+  vblendvps_4 =	"rrmroy:660F3AV4ArMs",
+  vbroadcastf128_2 = "rx/yo:660F38u1ArM",
+  vcmppd_4 =	"rrmioy:660FVC2rMU",
+  vcmpps_4 =	"rrmioy:0FVC2rMU",
+  vcmpsd_4 =	"rrrio:F20FVC2rMU|rrxi/ooq:",
+  vcmpss_4 =	"rrrio:F30FVC2rMU|rrxi/ood:",
+  vcomisd_2 =	"rro:660Fu2FrM|rx/oq:",
+  vcomiss_2 =	"rro:0Fu2FrM|rx/od:",
+  vcvtdq2pd_2 =	"rro:F30FuE6rM|rx/oq:|rm/yo:",
+  vcvtdq2ps_2 =	"rmoy:0Fu5BrM",
+  vcvtpd2dq_2 =	"rmoy:F20FuE6rM",
+  vcvtpd2ps_2 =	"rmoy:660Fu5ArM",
+  vcvtps2dq_2 =	"rmoy:660Fu5BrM",
+  vcvtps2pd_2 =	"rro:0Fu5ArM|rx/oq:|rm/yo:",
+  vcvtsd2si_2 =	"rr/do:F20Fu2DrM|rx/dq:|rr/qo:|rxq:",
+  vcvtsd2ss_3 =	"rrro:F20FV5ArM|rrx/ooq:",
+  vcvtsi2sd_3 =	"rrm/ood:F20FV2ArM|rrm/ooq:F20FVX2ArM",
+  vcvtsi2ss_3 =	"rrm/ood:F30FV2ArM|rrm/ooq:F30FVX2ArM",
+  vcvtss2sd_3 =	"rrro:F30FV5ArM|rrx/ood:",
+  vcvtss2si_2 =	"rr/do:F30Fu2DrM|rxd:|rr/qo:|rx/qd:",
+  vcvttpd2dq_2 = "rmo:660FuE6rM|rm/oy:660FuLE6rM",
+  vcvttps2dq_2 = "rmoy:F30Fu5BrM",
+  vcvttsd2si_2 = "rr/do:F20Fu2CrM|rx/dq:|rr/qo:|rxq:",
+  vcvttss2si_2 = "rr/do:F30Fu2CrM|rxd:|rr/qo:|rx/qd:",
+  vdppd_4 =	"rrmio:660F3AV41rMU",
+  vdpps_4 =	"rrmioy:660F3AV40rMU",
+  vextractf128_3 = "mri/oy:660F3AuL19RmU",
+  vextractps_3 = "mri/do:660F3Au17RmU",
+  vhaddpd_3 =	"rrmoy:660FV7CrM",
+  vhaddps_3 =	"rrmoy:F20FV7CrM",
+  vhsubpd_3 =	"rrmoy:660FV7DrM",
+  vhsubps_3 =	"rrmoy:F20FV7DrM",
+  vinsertf128_4 = "rrmi/yyo:660F3AV18rMU",
+  vinsertps_4 =	"rrrio:660F3AV21rMU|rrxi/ood:",
+  vldmxcsr_1 =	"xd:0FuAE2m",
+  vmaskmovps_3 = "rrxoy:660F38V2CrM|xrroy:660F38V2ERm",
+  vmaskmovpd_3 = "rrxoy:660F38V2DrM|xrroy:660F38V2FRm",
+  vmovapd_2 =	"rmoy:660Fu28rM|mroy:660Fu29Rm",
+  vmovaps_2 =	"rmoy:0Fu28rM|mroy:0Fu29Rm",
+  vmovd_2 =	"rm/od:660Fu6ErM|rm/oq:660FuX6ErM|mr/do:660Fu7ERm|mr/qo:",
+  vmovq_2 =	"rro:F30Fu7ErM|rx/oq:|xr/qo:660FuD6Rm",
+  vmovddup_2 =	"rmy:F20Fu12rM|rro:|rx/oq:",
+  vmovhlps_3 =	"rrro:0FV12rM",
+  vmovhpd_2 =	"xr/qo:660Fu17Rm",
+  vmovhpd_3 =	"rrx/ooq:660FV16rM",
+  vmovhps_2 =	"xr/qo:0Fu17Rm",
+  vmovhps_3 =	"rrx/ooq:0FV16rM",
+  vmovlhps_3 =	"rrro:0FV16rM",
+  vmovlpd_2 =	"xr/qo:660Fu13Rm",
+  vmovlpd_3 =	"rrx/ooq:660FV12rM",
+  vmovlps_2 =	"xr/qo:0Fu13Rm",
+  vmovlps_3 =	"rrx/ooq:0FV12rM",
+  vmovmskpd_2 =	"rr/do:660Fu50rM|rr/dy:660FuL50rM",
+  vmovmskps_2 =	"rr/do:0Fu50rM|rr/dy:0FuL50rM",
+  vmovntpd_2 =	"xroy:660Fu2BRm",
+  vmovntps_2 =	"xroy:0Fu2BRm",
+  vmovsd_2 =	"rx/oq:F20Fu10rM|xr/qo:F20Fu11Rm",
+  vmovsd_3 =	"rrro:F20FV10rM",
+  vmovshdup_2 =	"rmoy:F30Fu16rM",
+  vmovsldup_2 =	"rmoy:F30Fu12rM",
+  vmovss_2 =	"rx/od:F30Fu10rM|xr/do:F30Fu11Rm",
+  vmovss_3 =	"rrro:F30FV10rM",
+  vmovupd_2 =	"rmoy:660Fu10rM|mroy:660Fu11Rm",
+  vmovups_2 =	"rmoy:0Fu10rM|mroy:0Fu11Rm",
+  vorpd_3 =	"rrmoy:660FV56rM",
+  vorps_3 =	"rrmoy:0FV56rM",
+  vpermilpd_3 =	"rrmoy:660F38V0DrM|rmioy:660F3Au05rMU",
+  vpermilps_3 =	"rrmoy:660F38V0CrM|rmioy:660F3Au04rMU",
+  vperm2f128_4 = "rrmiy:660F3AV06rMU",
+  vptestpd_2 =	"rmoy:660F38u0FrM",
+  vptestps_2 =	"rmoy:660F38u0ErM",
+  vrcpps_2 =	"rmoy:0Fu53rM",
+  vrcpss_3 =	"rrro:F30FV53rM|rrx/ood:",
+  vrsqrtps_2 =	"rmoy:0Fu52rM",
+  vrsqrtss_3 =	"rrro:F30FV52rM|rrx/ood:",
+  vroundpd_3 =	"rmioy:660F3Au09rMU",
+  vroundps_3 =	"rmioy:660F3Au08rMU",
+  vroundsd_4 =	"rrrio:660F3AV0BrMU|rrxi/ooq:",
+  vroundss_4 =	"rrrio:660F3AV0ArMU|rrxi/ood:",
+  vshufpd_4 =	"rrmioy:660FVC6rMU",
+  vshufps_4 =	"rrmioy:0FVC6rMU",
+  vsqrtps_2 =	"rmoy:0Fu51rM",
+  vsqrtss_2 =	"rro:F30Fu51rM|rx/od:",
+  vsqrtpd_2 =	"rmoy:660Fu51rM",
+  vsqrtsd_2 =	"rro:F20Fu51rM|rx/oq:",
+  vstmxcsr_1 =	"xd:0FuAE3m",
+  vucomisd_2 =	"rro:660Fu2ErM|rx/oq:",
+  vucomiss_2 =	"rro:0Fu2ErM|rx/od:",
+  vunpckhpd_3 =	"rrmoy:660FV15rM",
+  vunpckhps_3 =	"rrmoy:0FV15rM",
+  vunpcklpd_3 =	"rrmoy:660FV14rM",
+  vunpcklps_3 =	"rrmoy:0FV14rM",
+  vxorpd_3 =	"rrmoy:660FV57rM",
+  vxorps_3 =	"rrmoy:0FV57rM",
+  vzeroall_0 =	"0FuL77",
+  vzeroupper_0 = "0Fu77",
+
+  -- AVX2 FP ops
+  vbroadcastss_2 = "rx/od:660F38u18rM|rx/yd:|rro:|rr/yo:",
+  vbroadcastsd_2 = "rx/yq:660F38u19rM|rr/yo:",
+  -- *vgather* (!vsib)
+  vpermpd_3 =	"rmiy:660F3AuX01rMU",
+  vpermps_3 =	"rrmy:660F38V16rM",
+
+  -- AVX, AVX2 integer ops
+  -- In general, xmm requires AVX, ymm requires AVX2.
+  vaesdec_3 =  "rrmo:660F38VDErM",
+  vaesdeclast_3 = "rrmo:660F38VDFrM",
+  vaesenc_3 =  "rrmo:660F38VDCrM",
+  vaesenclast_3 = "rrmo:660F38VDDrM",
+  vaesimc_2 =  "rmo:660F38uDBrM",
+  vaeskeygenassist_3 = "rmio:660F3AuDFrMU",
+  vlddqu_2 =	"rxoy:F20FuF0rM",
+  vmaskmovdqu_2 = "rro:660FuF7rM",
+  vmovdqa_2 =	"rmoy:660Fu6FrM|mroy:660Fu7FRm",
+  vmovdqu_2 =	"rmoy:F30Fu6FrM|mroy:F30Fu7FRm",
+  vmovntdq_2 =	"xroy:660FuE7Rm",
+  vmovntdqa_2 =	"rxoy:660F38u2ArM",
+  vmpsadbw_4 =	"rrmioy:660F3AV42rMU",
+  vpabsb_2 =	"rmoy:660F38u1CrM",
+  vpabsd_2 =	"rmoy:660F38u1ErM",
+  vpabsw_2 =	"rmoy:660F38u1DrM",
+  vpackusdw_3 =	"rrmoy:660F38V2BrM",
+  vpalignr_4 =	"rrmioy:660F3AV0FrMU",
+  vpblendvb_4 =	"rrmroy:660F3AV4CrMs",
+  vpblendw_4 =	"rrmioy:660F3AV0ErMU",
+  vpclmulqdq_4 = "rrmio:660F3AV44rMU",
+  vpcmpeqq_3 =	"rrmoy:660F38V29rM",
+  vpcmpestri_3 = "rmio:660F3Au61rMU",
+  vpcmpestrm_3 = "rmio:660F3Au60rMU",
+  vpcmpgtq_3 =	"rrmoy:660F38V37rM",
+  vpcmpistri_3 = "rmio:660F3Au63rMU",
+  vpcmpistrm_3 = "rmio:660F3Au62rMU",
+  vpextrb_3 =	"rri/do:660F3Au14nRmU|rri/qo:|xri/bo:",
+  vpextrw_3 =	"rri/do:660FuC5rMU|xri/wo:660F3Au15nRmU",
+  vpextrd_3 =	"mri/do:660F3Au16RmU",
+  vpextrq_3 =	"mri/qo:660F3Au16RmU",
+  vphaddw_3 =	"rrmoy:660F38V01rM",
+  vphaddd_3 =	"rrmoy:660F38V02rM",
+  vphaddsw_3 =	"rrmoy:660F38V03rM",
+  vphminposuw_2 = "rmo:660F38u41rM",
+  vphsubw_3 =	"rrmoy:660F38V05rM",
+  vphsubd_3 =	"rrmoy:660F38V06rM",
+  vphsubsw_3 =	"rrmoy:660F38V07rM",
+  vpinsrb_4 =	"rrri/ood:660F3AV20rMU|rrxi/oob:",
+  vpinsrw_4 =	"rrri/ood:660FVC4rMU|rrxi/oow:",
+  vpinsrd_4 =	"rrmi/ood:660F3AV22rMU",
+  vpinsrq_4 =	"rrmi/ooq:660F3AVX22rMU",
+  vpmaddubsw_3 = "rrmoy:660F38V04rM",
+  vpmaxsb_3 =	"rrmoy:660F38V3CrM",
+  vpmaxsd_3 =	"rrmoy:660F38V3DrM",
+  vpmaxuw_3 =	"rrmoy:660F38V3ErM",
+  vpmaxud_3 =	"rrmoy:660F38V3FrM",
+  vpminsb_3 =	"rrmoy:660F38V38rM",
+  vpminsd_3 =	"rrmoy:660F38V39rM",
+  vpminuw_3 =	"rrmoy:660F38V3ArM",
+  vpminud_3 =	"rrmoy:660F38V3BrM",
+  vpmovmskb_2 =	"rr/do:660FuD7rM|rr/dy:660FuLD7rM",
+  vpmovsxbw_2 =	"rroy:660F38u20rM|rx/oq:|rx/yo:",
+  vpmovsxbd_2 =	"rroy:660F38u21rM|rx/od:|rx/yq:",
+  vpmovsxbq_2 =	"rroy:660F38u22rM|rx/ow:|rx/yd:",
+  vpmovsxwd_2 =	"rroy:660F38u23rM|rx/oq:|rx/yo:",
+  vpmovsxwq_2 =	"rroy:660F38u24rM|rx/od:|rx/yq:",
+  vpmovsxdq_2 =	"rroy:660F38u25rM|rx/oq:|rx/yo:",
+  vpmovzxbw_2 =	"rroy:660F38u30rM|rx/oq:|rx/yo:",
+  vpmovzxbd_2 =	"rroy:660F38u31rM|rx/od:|rx/yq:",
+  vpmovzxbq_2 =	"rroy:660F38u32rM|rx/ow:|rx/yd:",
+  vpmovzxwd_2 =	"rroy:660F38u33rM|rx/oq:|rx/yo:",
+  vpmovzxwq_2 =	"rroy:660F38u34rM|rx/od:|rx/yq:",
+  vpmovzxdq_2 =	"rroy:660F38u35rM|rx/oq:|rx/yo:",
+  vpmuldq_3 =	"rrmoy:660F38V28rM",
+  vpmulhrsw_3 =	"rrmoy:660F38V0BrM",
+  vpmulld_3 =	"rrmoy:660F38V40rM",
+  vpshufb_3 =	"rrmoy:660F38V00rM",
+  vpshufd_3 =	"rmioy:660Fu70rMU",
+  vpshufhw_3 =	"rmioy:F30Fu70rMU",
+  vpshuflw_3 =	"rmioy:F20Fu70rMU",
+  vpsignb_3 =	"rrmoy:660F38V08rM",
+  vpsignw_3 =	"rrmoy:660F38V09rM",
+  vpsignd_3 =	"rrmoy:660F38V0ArM",
+  vpslldq_3 =	"rrioy:660Fv737mU",
+  vpsllw_3 =	"rrmoy:660FVF1rM|rrioy:660Fv716mU",
+  vpslld_3 =	"rrmoy:660FVF2rM|rrioy:660Fv726mU",
+  vpsllq_3 =	"rrmoy:660FVF3rM|rrioy:660Fv736mU",
+  vpsraw_3 =	"rrmoy:660FVE1rM|rrioy:660Fv714mU",
+  vpsrad_3 =	"rrmoy:660FVE2rM|rrioy:660Fv724mU",
+  vpsrldq_3 =	"rrioy:660Fv733mU",
+  vpsrlw_3 =	"rrmoy:660FVD1rM|rrioy:660Fv712mU",
+  vpsrld_3 =	"rrmoy:660FVD2rM|rrioy:660Fv722mU",
+  vpsrlq_3 =	"rrmoy:660FVD3rM|rrioy:660Fv732mU",
+  vptest_2 =	"rmoy:660F38u17rM",
+
+  -- AVX2 integer ops
+  vbroadcasti128_2 = "rx/yo:660F38u5ArM",
+  vinserti128_4 = "rrmi/yyo:660F3AV38rMU",
+  vextracti128_3 = "mri/oy:660F3AuL39RmU",
+  vpblendd_4 =	"rrmioy:660F3AV02rMU",
+  vpbroadcastb_2 = "rro:660F38u78rM|rx/ob:|rr/yo:|rx/yb:",
+  vpbroadcastw_2 = "rro:660F38u79rM|rx/ow:|rr/yo:|rx/yw:",
+  vpbroadcastd_2 = "rro:660F38u58rM|rx/od:|rr/yo:|rx/yd:",
+  vpbroadcastq_2 = "rro:660F38u59rM|rx/oq:|rr/yo:|rx/yq:",
+  vpermd_3 =	"rrmy:660F38V36rM",
+  vpermq_3 =	"rmiy:660F3AuX00rMU",
+  -- *vpgather* (!vsib)
+  vperm2i128_4 = "rrmiy:660F3AV46rMU",
+  vpmaskmovd_3 = "rrxoy:660F38V8CrM|xrroy:660F38V8ERm",
+  vpmaskmovq_3 = "rrxoy:660F38VX8CrM|xrroy:660F38VX8ERm",
+  vpsllvd_3 =	"rrmoy:660F38V47rM",
+  vpsllvq_3 =	"rrmoy:660F38VX47rM",
+  vpsravd_3 =	"rrmoy:660F38V46rM",
+  vpsrlvd_3 =	"rrmoy:660F38V45rM",
+  vpsrlvq_3 =	"rrmoy:660F38VX45rM",
+
+  -- Intel ADX
+  adcx_2 =	"rmqd:660F38F6rM",
+  adox_2 =	"rmqd:F30F38F6rM",
+
+  -- BMI1
+  andn_3 =	"rrmqd:0F38VF2rM",
+  bextr_3 =	"rmrqd:0F38wF7rM",
+  blsi_2 =	"rmqd:0F38vF33m",
+  blsmsk_2 =	"rmqd:0F38vF32m",
+  blsr_2 =	"rmqd:0F38vF31m",
+  tzcnt_2 =	"rmqdw:F30FBCrM",
+
+  -- BMI2
+  bzhi_3 =	"rmrqd:0F38wF5rM",
+  mulx_3 =	"rrmqd:F20F38VF6rM",
+  pdep_3 =	"rrmqd:F20F38VF5rM",
+  pext_3 =	"rrmqd:F30F38VF5rM",
+  rorx_3 =	"rmSqd:F20F3AuF0rMS",
+  sarx_3 =	"rmrqd:F30F38wF7rM",
+  shrx_3 =	"rmrqd:F20F38wF7rM",
+  shlx_3 =	"rmrqd:660F38wF7rM",
+
+  -- FMA3
+  vfmaddsub132pd_3 = "rrmoy:660F38VX96rM",
+  vfmaddsub132ps_3 = "rrmoy:660F38V96rM",
+  vfmaddsub213pd_3 = "rrmoy:660F38VXA6rM",
+  vfmaddsub213ps_3 = "rrmoy:660F38VA6rM",
+  vfmaddsub231pd_3 = "rrmoy:660F38VXB6rM",
+  vfmaddsub231ps_3 = "rrmoy:660F38VB6rM",
+
+  vfmsubadd132pd_3 = "rrmoy:660F38VX97rM",
+  vfmsubadd132ps_3 = "rrmoy:660F38V97rM",
+  vfmsubadd213pd_3 = "rrmoy:660F38VXA7rM",
+  vfmsubadd213ps_3 = "rrmoy:660F38VA7rM",
+  vfmsubadd231pd_3 = "rrmoy:660F38VXB7rM",
+  vfmsubadd231ps_3 = "rrmoy:660F38VB7rM",
+
+  vfmadd132pd_3 = "rrmoy:660F38VX98rM",
+  vfmadd132ps_3 = "rrmoy:660F38V98rM",
+  vfmadd132sd_3 = "rrro:660F38VX99rM|rrx/ooq:",
+  vfmadd132ss_3 = "rrro:660F38V99rM|rrx/ood:",
+  vfmadd213pd_3 = "rrmoy:660F38VXA8rM",
+  vfmadd213ps_3 = "rrmoy:660F38VA8rM",
+  vfmadd213sd_3 = "rrro:660F38VXA9rM|rrx/ooq:",
+  vfmadd213ss_3 = "rrro:660F38VA9rM|rrx/ood:",
+  vfmadd231pd_3 = "rrmoy:660F38VXB8rM",
+  vfmadd231ps_3 = "rrmoy:660F38VB8rM",
+  vfmadd231sd_3 = "rrro:660F38VXB9rM|rrx/ooq:",
+  vfmadd231ss_3 = "rrro:660F38VB9rM|rrx/ood:",
+
+  vfmsub132pd_3 = "rrmoy:660F38VX9ArM",
+  vfmsub132ps_3 = "rrmoy:660F38V9ArM",
+  vfmsub132sd_3 = "rrro:660F38VX9BrM|rrx/ooq:",
+  vfmsub132ss_3 = "rrro:660F38V9BrM|rrx/ood:",
+  vfmsub213pd_3 = "rrmoy:660F38VXAArM",
+  vfmsub213ps_3 = "rrmoy:660F38VAArM",
+  vfmsub213sd_3 = "rrro:660F38VXABrM|rrx/ooq:",
+  vfmsub213ss_3 = "rrro:660F38VABrM|rrx/ood:",
+  vfmsub231pd_3 = "rrmoy:660F38VXBArM",
+  vfmsub231ps_3 = "rrmoy:660F38VBArM",
+  vfmsub231sd_3 = "rrro:660F38VXBBrM|rrx/ooq:",
+  vfmsub231ss_3 = "rrro:660F38VBBrM|rrx/ood:",
+
+  vfnmadd132pd_3 = "rrmoy:660F38VX9CrM",
+  vfnmadd132ps_3 = "rrmoy:660F38V9CrM",
+  vfnmadd132sd_3 = "rrro:660F38VX9DrM|rrx/ooq:",
+  vfnmadd132ss_3 = "rrro:660F38V9DrM|rrx/ood:",
+  vfnmadd213pd_3 = "rrmoy:660F38VXACrM",
+  vfnmadd213ps_3 = "rrmoy:660F38VACrM",
+  vfnmadd213sd_3 = "rrro:660F38VXADrM|rrx/ooq:",
+  vfnmadd213ss_3 = "rrro:660F38VADrM|rrx/ood:",
+  vfnmadd231pd_3 = "rrmoy:660F38VXBCrM",
+  vfnmadd231ps_3 = "rrmoy:660F38VBCrM",
+  vfnmadd231sd_3 = "rrro:660F38VXBDrM|rrx/ooq:",
+  vfnmadd231ss_3 = "rrro:660F38VBDrM|rrx/ood:",
+
+  vfnmsub132pd_3 = "rrmoy:660F38VX9ErM",
+  vfnmsub132ps_3 = "rrmoy:660F38V9ErM",
+  vfnmsub132sd_3 = "rrro:660F38VX9FrM|rrx/ooq:",
+  vfnmsub132ss_3 = "rrro:660F38V9FrM|rrx/ood:",
+  vfnmsub213pd_3 = "rrmoy:660F38VXAErM",
+  vfnmsub213ps_3 = "rrmoy:660F38VAErM",
+  vfnmsub213sd_3 = "rrro:660F38VXAFrM|rrx/ooq:",
+  vfnmsub213ss_3 = "rrro:660F38VAFrM|rrx/ood:",
+  vfnmsub231pd_3 = "rrmoy:660F38VXBErM",
+  vfnmsub231ps_3 = "rrmoy:660F38VBErM",
+  vfnmsub231sd_3 = "rrro:660F38VXBFrM|rrx/ooq:",
+  vfnmsub231ss_3 = "rrro:660F38VBFrM|rrx/ood:",
+}
+
+------------------------------------------------------------------------------
+
+-- Arithmetic ops.
+for name,n in pairs{ add = 0, ["or"] = 1, adc = 2, sbb = 3,
+		     ["and"] = 4, sub = 5, xor = 6, cmp = 7 } do
+  local n8 = shl(n, 3)
+  map_op[name.."_2"] = format(
+    "mr:%02XRm|rm:%02XrM|mI1qdw:81%XmI|mS1qdw:83%XmS|Ri1qdwb:%02Xri|mi1qdwb:81%Xmi",
+    1+n8, 3+n8, n, n, 5+n8, n)
+end
+
+-- Shift ops.
+for name,n in pairs{ rol = 0, ror = 1, rcl = 2, rcr = 3,
+		     shl = 4, shr = 5,          sar = 7, sal = 4 } do
+  map_op[name.."_2"] = format("m1:D1%Xm|mC1qdwb:D3%Xm|mi:C1%XmU", n, n, n)
+end
+
+-- Conditional ops.
+for cc,n in pairs(map_cc) do
+  map_op["j"..cc.."_1"] = format("J.:n0F8%XJ", n) -- short: 7%X
+  map_op["set"..cc.."_1"] = format("mb:n0F9%X2m", n)
+  map_op["cmov"..cc.."_2"] = format("rmqdw:0F4%XrM", n) -- P6+
+end
+
+-- FP arithmetic ops.
+for name,n in pairs{ add = 0, mul = 1, com = 2, comp = 3,
+		     sub = 4, subr = 5, div = 6, divr = 7 } do
+  local nc = 0xc0 + shl(n, 3)
+  local nr = nc + (n < 4 and 0 or (n % 2 == 0 and 8 or -8))
+  local fn = "f"..name
+  map_op[fn.."_1"] = format("ff:D8%02Xr|xd:D8%Xm|xq:nDC%Xm", nc, n, n)
+  if n == 2 or n == 3 then
+    map_op[fn.."_2"] = format("Fff:D8%02XR|Fx2d:D8%XM|Fx2q:nDC%XM", nc, n, n)
+  else
+    map_op[fn.."_2"] = format("Fff:D8%02XR|fFf:DC%02Xr|Fx2d:D8%XM|Fx2q:nDC%XM", nc, nr, n, n)
+    map_op[fn.."p_1"] = format("ff:DE%02Xr", nr)
+    map_op[fn.."p_2"] = format("fFf:DE%02Xr", nr)
+  end
+  map_op["fi"..name.."_1"] = format("xd:DA%Xm|xw:nDE%Xm", n, n)
+end
+
+-- FP conditional moves.
+for cc,n in pairs{ b=0, e=1, be=2, u=3, nb=4, ne=5, nbe=6, nu=7 } do
+  local nc = 0xdac0 + shl(band(n, 3), 3) + shl(band(n, 4), 6)
+  map_op["fcmov"..cc.."_1"] = format("ff:%04Xr", nc) -- P6+
+  map_op["fcmov"..cc.."_2"] = format("Fff:%04XR", nc) -- P6+
+end
+
+-- SSE / AVX FP arithmetic ops.
+for name,n in pairs{ sqrt = 1, add = 8, mul = 9,
+		     sub = 12, min = 13, div = 14, max = 15 } do
+  map_op[name.."ps_2"] = format("rmo:0F5%XrM", n)
+  map_op[name.."ss_2"] = format("rro:F30F5%XrM|rx/od:", n)
+  map_op[name.."pd_2"] = format("rmo:660F5%XrM", n)
+  map_op[name.."sd_2"] = format("rro:F20F5%XrM|rx/oq:", n)
+  if n ~= 1 then
+    map_op["v"..name.."ps_3"] = format("rrmoy:0FV5%XrM", n)
+    map_op["v"..name.."ss_3"] = format("rrro:F30FV5%XrM|rrx/ood:", n)
+    map_op["v"..name.."pd_3"] = format("rrmoy:660FV5%XrM", n)
+    map_op["v"..name.."sd_3"] = format("rrro:F20FV5%XrM|rrx/ooq:", n)
+  end
+end
+
+-- SSE2 / AVX / AVX2 integer arithmetic ops (66 0F leaf).
+for name,n in pairs{
+  paddb = 0xFC, paddw = 0xFD, paddd = 0xFE, paddq = 0xD4,
+  paddsb = 0xEC, paddsw = 0xED, packssdw = 0x6B,
+  packsswb = 0x63, packuswb = 0x67, paddusb = 0xDC,
+  paddusw = 0xDD, pand = 0xDB, pandn = 0xDF, pavgb = 0xE0,
+  pavgw = 0xE3, pcmpeqb = 0x74, pcmpeqd = 0x76,
+  pcmpeqw = 0x75, pcmpgtb = 0x64, pcmpgtd = 0x66,
+  pcmpgtw = 0x65, pmaddwd = 0xF5, pmaxsw = 0xEE,
+  pmaxub = 0xDE, pminsw = 0xEA, pminub = 0xDA,
+  pmulhuw = 0xE4, pmulhw = 0xE5, pmullw = 0xD5,
+  pmuludq = 0xF4, por = 0xEB, psadbw = 0xF6, psubb = 0xF8,
+  psubw = 0xF9, psubd = 0xFA, psubq = 0xFB, psubsb = 0xE8,
+  psubsw = 0xE9, psubusb = 0xD8, psubusw = 0xD9,
+  punpckhbw = 0x68, punpckhwd = 0x69, punpckhdq = 0x6A,
+  punpckhqdq = 0x6D, punpcklbw = 0x60, punpcklwd = 0x61,
+  punpckldq = 0x62, punpcklqdq = 0x6C, pxor = 0xEF
+} do
+  map_op[name.."_2"] = format("rmo:660F%02XrM", n)
+  map_op["v"..name.."_3"] = format("rrmoy:660FV%02XrM", n)
+end
+
+------------------------------------------------------------------------------
+
+local map_vexarg = { u = false, v = 1, V = 2, w = 3 }
+
+-- Process pattern string.
+local function dopattern(pat, args, sz, op, needrex)
+  local digit, addin, vex
+  local opcode = 0
+  local szov = sz
+  local narg = 1
+  local rex = 0
+
+  -- Limit number of section buffer positions used by a single dasm_put().
+  -- A single opcode needs a maximum of 6 positions.
+  if secpos+6 > maxsecpos then wflush() end
+
+  -- Process each character.
+  for c in gmatch(pat.."|", ".") do
+    if match(c, "%x") then	-- Hex digit.
+      digit = byte(c) - 48
+      if digit > 48 then digit = digit - 39
+      elseif digit > 16 then digit = digit - 7 end
+      opcode = opcode*16 + digit
+      addin = nil
+    elseif c == "n" then	-- Disable operand size mods for opcode.
+      szov = nil
+    elseif c == "X" then	-- Force REX.W.
+      rex = 8
+    elseif c == "L" then	-- Force VEX.L.
+      vex.l = true
+    elseif c == "r" then	-- Merge 1st operand regno. into opcode.
+      addin = args[1]; opcode = opcode + (addin.reg % 8)
+      if narg < 2 then narg = 2 end
+    elseif c == "R" then	-- Merge 2nd operand regno. into opcode.
+      addin = args[2]; opcode = opcode + (addin.reg % 8)
+      narg = 3
+    elseif c == "m" or c == "M" then	-- Encode ModRM/SIB.
+      local s
+      if addin then
+	s = addin.reg
+	opcode = opcode - band(s, 7)	-- Undo regno opcode merge.
+      else
+	s = band(opcode, 15)	-- Undo last digit.
+	opcode = shr(opcode, 4)
+      end
+      local nn = c == "m" and 1 or 2
+      local t = args[nn]
+      if narg <= nn then narg = nn + 1 end
+      if szov == "q" and rex == 0 then rex = rex + 8 end
+      if t.reg and t.reg > 7 then rex = rex + 1 end
+      if t.xreg and t.xreg > 7 then rex = rex + 2 end
+      if s > 7 then rex = rex + 4 end
+      if needrex then rex = rex + 16 end
+      local psz, sk = wputop(szov, opcode, rex, vex, s < 0, t.vreg or t.vxreg)
+      opcode = nil
+      local imark = sub(pat, -1) -- Force a mark (ugly).
+      -- Put ModRM/SIB with regno/last digit as spare.
+      wputmrmsib(t, imark, s, addin and addin.vreg, psz, sk)
+      addin = nil
+    elseif map_vexarg[c] ~= nil then -- Encode using VEX prefix
+      local b = band(opcode, 255); opcode = shr(opcode, 8)
+      local m = 1
+      if b == 0x38 then m = 2
+      elseif b == 0x3a then m = 3 end
+      if m ~= 1 then b = band(opcode, 255); opcode = shr(opcode, 8) end
+      if b ~= 0x0f then
+	werror("expected `0F', `0F38', or `0F3A' to precede `"..c..
+	  "' in pattern `"..pat.."' for `"..op.."'")
+      end
+      local v = map_vexarg[c]
+      if v then v = remove(args, v) end
+      b = band(opcode, 255)
+      local p = 0
+      if b == 0x66 then p = 1
+      elseif b == 0xf3 then p = 2
+      elseif b == 0xf2 then p = 3 end
+      if p ~= 0 then opcode = shr(opcode, 8) end
+      if opcode ~= 0 then wputop(nil, opcode, 0); opcode = 0 end
+      vex = { m = m, p = p, v = v }
+    else
+      if opcode then -- Flush opcode.
+	if szov == "q" and rex == 0 then rex = rex + 8 end
+	if needrex then rex = rex + 16 end
+	if addin and addin.reg == -1 then
+	  local psz, sk = wputop(szov, opcode - 7, rex, vex, true)
+	  wvreg("opcode", addin.vreg, psz, sk)
+	else
+	  if addin and addin.reg > 7 then rex = rex + 1 end
+	  wputop(szov, opcode, rex, vex)
+	end
+	opcode = nil
+      end
+      if c == "|" then break end
+      if c == "o" then -- Offset (pure 32 bit displacement).
+	wputdarg(args[1].disp); if narg < 2 then narg = 2 end
+      elseif c == "O" then
+	wputdarg(args[2].disp); narg = 3
+      else
+	-- Anything else is an immediate operand.
+	local a = args[narg]
+	narg = narg + 1
+	local mode, imm = a.mode, a.imm
+	if mode == "iJ" and not match(x64 and "J" or "iIJ", c) then
+	  werror("bad operand size for label")
+	end
+	if c == "S" then
+	  wputsbarg(imm)
+	elseif c == "U" then
+	  wputbarg(imm)
+	elseif c == "W" then
+	  wputwarg(imm)
+	elseif c == "i" or c == "I" then
+	  if mode == "iJ" then
+	    wputlabel("IMM_", imm, 1)
+	  elseif mode == "iI" and c == "I" then
+	    waction(sz == "w" and "IMM_WB" or "IMM_DB", imm)
+	  else
+	    wputszarg(sz, imm)
+	  end
+	elseif c == "J" then
+	  if mode == "iPJ" then
+	    waction("REL_A", imm) -- !x64 (secpos)
+	  else
+	    wputlabel("REL_", imm, 2)
+	  end
+	elseif c == "s" then
+	  local reg = a.reg
+	  if reg < 0 then
+	    wputb(0)
+	    wvreg("imm.hi", a.vreg)
+	  else
+	    wputb(shl(reg, 4))
+	  end
+	else
+	  werror("bad char `"..c.."' in pattern `"..pat.."' for `"..op.."'")
+	end
+      end
+    end
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Mapping of operand modes to short names. Suppress output with '#'.
+local map_modename = {
+  r = "reg", R = "eax", C = "cl", x = "mem", m = "mrm", i = "imm",
+  f = "stx", F = "st0", J = "lbl", ["1"] = "1",
+  I = "#", S = "#", O = "#",
+}
+
+-- Return a table/string showing all possible operand modes.
+local function templatehelp(template, nparams)
+  if nparams == 0 then return "" end
+  local t = {}
+  for tm in gmatch(template, "[^%|]+") do
+    local s = map_modename[sub(tm, 1, 1)]
+    s = s..gsub(sub(tm, 2, nparams), ".", function(c)
+      return ", "..map_modename[c]
+    end)
+    if not match(s, "#") then t[#t+1] = s end
+  end
+  return t
+end
+
+-- Match operand modes against mode match part of template.
+local function matchtm(tm, args)
+  for i=1,#args do
+    if not match(args[i].mode, sub(tm, i, i)) then return end
+  end
+  return true
+end
+
+-- Handle opcodes defined with template strings.
+map_op[".template__"] = function(params, template, nparams)
+  if not params then return templatehelp(template, nparams) end
+  local args = {}
+
+  -- Zero-operand opcodes have no match part.
+  if #params == 0 then
+    dopattern(template, args, "d", params.op, nil)
+    return
+  end
+
+  -- Determine common operand size (coerce undefined size) or flag as mixed.
+  local sz, szmix, needrex
+  for i,p in ipairs(params) do
+    args[i] = parseoperand(p)
+    local nsz = args[i].opsize
+    if nsz then
+      if sz and sz ~= nsz then szmix = true else sz = nsz end
+    end
+    local nrex = args[i].needrex
+    if nrex ~= nil then
+      if needrex == nil then
+	needrex = nrex
+      elseif needrex ~= nrex then
+	werror("bad mix of byte-addressable registers")
+      end
+    end
+  end
+
+  -- Try all match:pattern pairs (separated by '|').
+  local gotmatch, lastpat
+  for tm in gmatch(template, "[^%|]+") do
+    -- Split off size match (starts after mode match) and pattern string.
+    local szm, pat = match(tm, "^(.-):(.*)$", #args+1)
+    if pat == "" then pat = lastpat else lastpat = pat end
+    if matchtm(tm, args) then
+      local prefix = sub(szm, 1, 1)
+      if prefix == "/" then -- Exactly match leading operand sizes.
+	for i = #szm,1,-1 do
+	  if i == 1 then
+	    dopattern(pat, args, sz, params.op, needrex) -- Process pattern.
+	    return
+	  elseif args[i-1].opsize ~= sub(szm, i, i) then
+	    break
+	  end
+	end
+      else -- Match common operand size.
+	local szp = sz
+	if szm == "" then szm = x64 and "qdwb" or "dwb" end -- Default sizes.
+	if prefix == "1" then szp = args[1].opsize; szmix = nil
+	elseif prefix == "2" then szp = args[2].opsize; szmix = nil end
+	if not szmix and (prefix == "." or match(szm, szp or "#")) then
+	  dopattern(pat, args, szp, params.op, needrex) -- Process pattern.
+	  return
+	end
+      end
+      gotmatch = true
+    end
+  end
+
+  local msg = "bad operand mode"
+  if gotmatch then
+    if szmix then
+      msg = "mixed operand size"
+    else
+      msg = sz and "bad operand size" or "missing operand size"
+    end
+  end
+
+  werror(msg.." in `"..opmodestr(params.op, args).."'")
+end
+
+------------------------------------------------------------------------------
+
+-- x64-specific opcode for 64 bit immediates and displacements.
+if x64 then
+  function map_op.mov64_2(params)
+    if not params then return { "reg, imm", "reg, [disp]", "[disp], reg" } end
+    if secpos+2 > maxsecpos then wflush() end
+    local opcode, op64, sz, rex, vreg
+    local op64 = match(params[1], "^%[%s*(.-)%s*%]$")
+    if op64 then
+      local a = parseoperand(params[2])
+      if a.mode ~= "rmR" then werror("bad operand mode") end
+      sz = a.opsize
+      rex = sz == "q" and 8 or 0
+      opcode = 0xa3
+    else
+      op64 = match(params[2], "^%[%s*(.-)%s*%]$")
+      local a = parseoperand(params[1])
+      if op64 then
+	if a.mode ~= "rmR" then werror("bad operand mode") end
+	sz = a.opsize
+	rex = sz == "q" and 8 or 0
+	opcode = 0xa1
+      else
+	if sub(a.mode, 1, 1) ~= "r" or a.opsize ~= "q" then
+	  werror("bad operand mode")
+	end
+	op64 = params[2]
+	if a.reg == -1 then
+	  vreg = a.vreg
+	  opcode = 0xb8
+	else
+	  opcode = 0xb8 + band(a.reg, 7)
+	end
+	rex = a.reg > 7 and 9 or 8
+      end
+    end
+    local psz, sk = wputop(sz, opcode, rex, nil, vreg)
+    wvreg("opcode", vreg, psz, sk)
+    waction("IMM_D", format("(unsigned int)(%s)", op64))
+    waction("IMM_D", format("(unsigned int)((%s)>>32)", op64))
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcodes for data storage.
+local function op_data(params)
+  if not params then return "imm..." end
+  local sz = sub(params.op, 2, 2)
+  if sz == "l" then sz = "d" elseif sz == "a" then sz = addrsize end
+  for _,p in ipairs(params) do
+    local a = parseoperand(p, sz == "q")
+    if sub(a.mode, 1, 1) ~= "i" or (a.opsize and a.opsize ~= sz) then
+      werror("bad mode or size in `"..p.."'")
+    end
+    if a.mode == "iJ" then
+      wputlabel("IMM_", a.imm, 1)
+    elseif sz == "q" then
+      wputqarg(a.imm)
+    else
+      wputszarg(sz, a.imm)
+    end
+    if secpos+2 > maxsecpos then wflush() end
+  end
+end
+
+map_op[".byte_*"] = op_data
+map_op[".sbyte_*"] = op_data
+map_op[".word_*"] = op_data
+map_op[".dword_*"] = op_data
+map_op[".qword_*"] = op_data
+map_op[".aword_*"] = op_data
+map_op[".long_*"] = op_data
+map_op[".quad_*"] = op_data
+map_op[".addr_*"] = op_data
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode to mark the position where the action list is to be emitted.
+map_op[".actionlist_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeactions(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the global enum is to be emitted.
+map_op[".globals_1"] = function(params)
+  if not params then return "prefix" end
+  local prefix = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobals(out, prefix) end)
+end
+
+-- Pseudo-opcode to mark the position where the global names are to be emitted.
+map_op[".globalnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobalnames(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the extern names are to be emitted.
+map_op[".externnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeexternnames(out, name) end)
+end
+
+------------------------------------------------------------------------------
+
+-- Label pseudo-opcode (converted from trailing colon form).
+map_op[".label_2"] = function(params)
+  if not params then return "[1-9] | ->global | =>pcexpr  [, addr]" end
+  if secpos+2 > maxsecpos then wflush() end
+  local a = parseoperand(params[1])
+  local mode, imm = a.mode, a.imm
+  if type(imm) == "number" and (mode == "iJ" or (imm >= 1 and imm <= 9)) then
+    -- Local label (1: ... 9:) or global label (->global:).
+    waction("LABEL_LG", nil, 1)
+    wputxb(imm)
+  elseif mode == "iJ" then
+    -- PC label (=>pcexpr:).
+    waction("LABEL_PC", imm)
+  else
+    werror("bad label definition")
+  end
+  -- SETLABEL must immediately follow LABEL_LG/LABEL_PC.
+  local addr = params[2]
+  if addr then
+    local a = parseoperand(addr)
+    if a.mode == "iPJ" then
+      waction("SETLABEL", a.imm)
+    else
+      werror("bad label assignment")
+    end
+  end
+end
+map_op[".label_1"] = map_op[".label_2"]
+
+------------------------------------------------------------------------------
+
+-- Alignment pseudo-opcode.
+map_op[".align_1"] = function(params)
+  if not params then return "numpow2" end
+  if secpos+1 > maxsecpos then wflush() end
+  local align = tonumber(params[1]) or map_opsizenum[map_opsize[params[1]]]
+  if align then
+    local x = align
+    -- Must be a power of 2 in the range (2 ... 256).
+    for i=1,8 do
+      x = x / 2
+      if x == 1 then
+	waction("ALIGN", nil, 1)
+	wputxb(align-1) -- Action byte is 2**n-1.
+	return
+      end
+    end
+  end
+  werror("bad alignment")
+end
+
+-- Spacing pseudo-opcode.
+map_op[".space_2"] = function(params)
+  if not params then return "num [, filler]" end
+  if secpos+1 > maxsecpos then wflush() end
+  waction("SPACE", params[1])
+  local fill = params[2]
+  if fill then
+    fill = tonumber(fill)
+    if not fill or fill < 0 or fill > 255 then werror("bad filler") end
+  end
+  wputxb(fill or 0)
+end
+map_op[".space_1"] = map_op[".space_2"]
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode for (primitive) type definitions (map to C types).
+map_op[".type_3"] = function(params, nparams)
+  if not params then
+    return nparams == 2 and "name, ctype" or "name, ctype, reg"
+  end
+  local name, ctype, reg = params[1], params[2], params[3]
+  if not match(name, "^[%a_][%w_]*$") then
+    werror("bad type name `"..name.."'")
+  end
+  local tp = map_type[name]
+  if tp then
+    werror("duplicate type `"..name.."'")
+  end
+  if reg and not map_reg_valid_base[reg] then
+    werror("bad base register `"..(map_reg_rev[reg] or reg).."'")
+  end
+  -- Add #type to defines. A bit unclean to put it in map_archdef.
+  map_archdef["#"..name] = "sizeof("..ctype..")"
+  -- Add new type and emit shortcut define.
+  local num = ctypenum + 1
+  map_type[name] = {
+    ctype = ctype,
+    ctypefmt = format("Dt%X(%%s)", num),
+    reg = reg,
+  }
+  wline(format("#define Dt%X(_V) (int)(ptrdiff_t)&(((%s *)0)_V)", num, ctype))
+  ctypenum = num
+end
+map_op[".type_2"] = map_op[".type_3"]
+
+-- Dump type definitions.
+local function dumptypes(out, lvl)
+  local t = {}
+  for name in pairs(map_type) do t[#t+1] = name end
+  sort(t)
+  out:write("Type definitions:\n")
+  for _,name in ipairs(t) do
+    local tp = map_type[name]
+    local reg = tp.reg and map_reg_rev[tp.reg] or ""
+    out:write(format("  %-20s %-20s %s\n", name, tp.ctype, reg))
+  end
+  out:write("\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Set the current section.
+function _M.section(num)
+  waction("SECTION")
+  wputxb(num)
+  wflush(true) -- SECTION is a terminal action.
+end
+
+------------------------------------------------------------------------------
+
+-- Dump architecture description.
+function _M.dumparch(out)
+  out:write(format("DynASM %s version %s, released %s\n\n",
+    _info.arch, _info.version, _info.release))
+  dumpregs(out)
+  dumpactions(out)
+end
+
+-- Dump all user defined elements.
+function _M.dumpdef(out, lvl)
+  dumptypes(out, lvl)
+  dumpglobals(out, lvl)
+  dumpexterns(out, lvl)
+end
+
+------------------------------------------------------------------------------
+
+-- Pass callbacks from/to the DynASM core.
+function _M.passcb(wl, we, wf, ww)
+  wline, werror, wfatal, wwarn = wl, we, wf, ww
+  return wflush
+end
+
+-- Setup the arch-specific module.
+function _M.setup(arch, opt)
+  g_arch, g_opt = arch, opt
+end
+
+-- Merge the core maps and the arch-specific maps.
+function _M.mergemaps(map_coreop, map_def)
+  setmetatable(map_op, { __index = map_coreop })
+  setmetatable(map_def, { __index = map_archdef })
+  return map_op, map_def
+end
+
+return _M
+
+------------------------------------------------------------------------------
