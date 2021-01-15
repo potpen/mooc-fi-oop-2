@@ -433,3 +433,96 @@ int dasm_encode(Dst_DECL, void *buffer)
 	  } else if (n & 0x10) {
 	    if (*ex & 0x80) {
 	      *ex = 0xc5; ex[1] = (ex[1] & 0x80) | ex[2]; ex += 2;
+	    }
+	    while (++ex < cp) ex[-1] = *ex;
+	    if (mark) mark--;
+	    cp--;
+	    n &= 7;
+	  }
+	  if (t >= 0xc0) n <<= 4;
+	  else if (t >= 0x40) n <<= 3;
+	  else if (n == 4 && t < 0x20) { cp[-1] ^= n; *cp++ = 0x20; }
+	  cp[-1] ^= n;
+	  break;
+	}
+	case DASM_REL_LG: p++; if (n >= 0) goto rel_pc;
+	  b++; n = (int)(ptrdiff_t)D->globals[-n];
+	  /* fallthrough */
+	case DASM_REL_A: rel_a:
+	  n -= (unsigned int)(ptrdiff_t)(cp+4); goto wd; /* !x64 */
+	case DASM_REL_PC: rel_pc: {
+	  int shrink = *b++;
+	  int *pb = DASM_POS2PTR(D, n); if (*pb < 0) { n = pb[1]; goto rel_a; }
+	  n = *pb - ((int)(cp-base) + 4-shrink);
+	  if (shrink == 0) goto wd;
+	  if (shrink == 4) { cp--; cp[-1] = *cp-0x10; } else cp[-1] = 0xeb;
+	  goto wb;
+	}
+	case DASM_IMM_LG:
+	  p++;
+	  if (n < 0) { dasma((ptrdiff_t)D->globals[-n]); break; }
+	  /* fallthrough */
+	case DASM_IMM_PC: {
+	  int *pb = DASM_POS2PTR(D, n);
+	  dasma(*pb < 0 ? (ptrdiff_t)pb[1] : (*pb + (ptrdiff_t)base));
+	  break;
+	}
+	case DASM_LABEL_LG: {
+	  int idx = *p++;
+	  if (idx >= 10)
+	    D->globals[idx] = (void *)(base + (*p == DASM_SETLABEL ? *b : n));
+	  break;
+	}
+	case DASM_LABEL_PC: case DASM_SETLABEL: break;
+	case DASM_SPACE: { int fill = *p++; while (n--) *cp++ = fill; break; }
+	case DASM_ALIGN:
+	  n = *p++;
+	  while (((cp-base) & n)) *cp++ = 0x90; /* nop */
+	  break;
+	case DASM_EXTERN: n = DASM_EXTERN(Dst, cp, p[1], *p); p += 2; goto wd;
+	case DASM_MARK: mark = cp; break;
+	case DASM_ESC: action = *p++;
+	  /* fallthrough */
+	default: *cp++ = action; break;
+	case DASM_SECTION: case DASM_STOP: goto stop;
+	}
+      }
+      stop: (void)0;
+    }
+  }
+
+  if (base + D->codesize != cp)  /* Check for phase errors. */
+    return DASM_S_PHASE;
+  return DASM_S_OK;
+}
+
+/* Get PC label offset. */
+int dasm_getpclabel(Dst_DECL, unsigned int pc)
+{
+  dasm_State *D = Dst_REF;
+  if (pc*sizeof(int) < D->pcsize) {
+    int pos = D->pclabels[pc];
+    if (pos < 0) return *DASM_POS2PTR(D, -pos);
+    if (pos > 0) return -1;  /* Undefined. */
+  }
+  return -2;  /* Unused or out of range. */
+}
+
+#ifdef DASM_CHECKS
+/* Optional sanity checker to call between isolated encoding steps. */
+int dasm_checkstep(Dst_DECL, int secmatch)
+{
+  dasm_State *D = Dst_REF;
+  if (D->status == DASM_S_OK) {
+    int i;
+    for (i = 1; i <= 9; i++) {
+      if (D->lglabels[i] > 0) { D->status = DASM_S_UNDEF_L|i; break; }
+      D->lglabels[i] = 0;
+    }
+  }
+  if (D->status == DASM_S_OK && secmatch >= 0 &&
+      D->section != &D->sections[secmatch])
+    D->status = DASM_S_MATCH_SEC|(int)(D->section-D->sections);
+  return D->status;
+}
+#endif
