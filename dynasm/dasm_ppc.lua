@@ -1591,3 +1591,329 @@ local function parse_disp(disp)
     if r == 0 then werror("cannot use r0 in displacement") end
     if tp then
       waction("IMM", 32768+16*32, format(tp.ctypefmt, tailr))
+      return shl(r, 16)
+    end
+  end
+  werror("bad displacement `"..disp.."'")
+end
+
+local function parse_u5disp(disp, scale)
+  local imm, reg = match(disp, "^(.*)%(([%w_:]+)%)$")
+  if imm then
+    local r = parse_gpr(reg)
+    if r == 0 then werror("cannot use r0 in displacement") end
+    return shl(r, 16) + parse_imm(imm, 5, 11, scale, false)
+  end
+  local reg, tailr = match(disp, "^([%w_:]+)%s*(.*)$")
+  if reg and tailr ~= "" then
+    local r, tp = parse_gpr(reg)
+    if r == 0 then werror("cannot use r0 in displacement") end
+    if tp then
+      waction("IMM", scale*1024+5*32+11, format(tp.ctypefmt, tailr))
+      return shl(r, 16)
+    end
+  end
+  werror("bad displacement `"..disp.."'")
+end
+
+local function parse_label(label, def)
+  local prefix = sub(label, 1, 2)
+  -- =>label (pc label reference)
+  if prefix == "=>" then
+    return "PC", 0, sub(label, 3)
+  end
+  -- ->name (global label reference)
+  if prefix == "->" then
+    return "LG", map_global[sub(label, 3)]
+  end
+  if def then
+    -- [1-9] (local label definition)
+    if match(label, "^[1-9]$") then
+      return "LG", 10+tonumber(label)
+    end
+  else
+    -- [<>][1-9] (local label reference)
+    local dir, lnum = match(label, "^([<>])([1-9])$")
+    if dir then -- Fwd: 1-9, Bkwd: 11-19.
+      return "LG", lnum + (dir == ">" and 0 or 10)
+    end
+    -- extern label (extern label reference)
+    local extname = match(label, "^extern%s+(%S+)$")
+    if extname then
+      return "EXT", map_extern[extname]
+    end
+  end
+  werror("bad label `"..label.."'")
+end
+
+------------------------------------------------------------------------------
+
+-- Handle opcodes defined with template strings.
+op_template = function(params, template, nparams)
+  if not params then return sub(template, 9) end
+  local op = tonumber(sub(template, 1, 8), 16)
+  local n, rs = 1, 26
+
+  -- Limit number of section buffer positions used by a single dasm_put().
+  -- A single opcode needs a maximum of 3 positions (rlwinm).
+  if secpos+3 > maxsecpos then wflush() end
+  local pos = wpos()
+
+  -- Process each character.
+  for p in gmatch(sub(template, 9), ".") do
+    if p == "R" then
+      rs = rs - 5; op = op + shl(parse_gpr(params[n]), rs); n = n + 1
+    elseif p == "F" then
+      rs = rs - 5; op = op + shl(parse_fpr(params[n]), rs); n = n + 1
+    elseif p == "V" then
+      rs = rs - 5; op = op + shl(parse_vr(params[n]), rs); n = n + 1
+    elseif p == "Q" then
+      local vs = parse_vs(params[n]); n = n + 1; rs = rs - 5
+      local sh = rs == 6 and 2 or 3 + band(shr(rs, 1), 3)
+      op = op + shl(band(vs, 31), rs) + shr(band(vs, 32), sh)
+    elseif p == "q" then
+      local vs = parse_vs(params[n]); n = n + 1
+      op = op + shl(band(vs, 31), 21) + shr(band(vs, 32), 5)
+    elseif p == "A" then
+      rs = rs - 5; op = op + parse_imm(params[n], 5, rs, 0, false); n = n + 1
+    elseif p == "S" then
+      rs = rs - 5; op = op + parse_imm(params[n], 5, rs, 0, true); n = n + 1
+    elseif p == "I" then
+      op = op + parse_imm(params[n], 16, 0, 0, true); n = n + 1
+    elseif p == "U" then
+      op = op + parse_imm(params[n], 16, 0, 0, false); n = n + 1
+    elseif p == "D" then
+      op = op + parse_disp(params[n]); n = n + 1
+    elseif p == "2" then
+      op = op + parse_u5disp(params[n], 1); n = n + 1
+    elseif p == "4" then
+      op = op + parse_u5disp(params[n], 2); n = n + 1
+    elseif p == "8" then
+      op = op + parse_u5disp(params[n], 3); n = n + 1
+    elseif p == "C" then
+      rs = rs - 5; op = op + shl(parse_cond(params[n]), rs); n = n + 1
+    elseif p == "X" then
+      rs = rs - 5; op = op + shl(parse_cr(params[n]), rs+2); n = n + 1
+    elseif p == "1" then
+      rs = rs - 5; op = op + parse_imm(params[n], 1, rs, 0, false); n = n + 1
+    elseif p == "g" then
+      rs = rs - 5; op = op + parse_imm(params[n], 2, rs, 0, false); n = n + 1
+    elseif p == "3" then
+      rs = rs - 5; op = op + parse_imm(params[n], 3, rs, 0, false); n = n + 1
+    elseif p == "P" then
+      rs = rs - 5; op = op + parse_imm(params[n], 4, rs, 0, false); n = n + 1
+    elseif p == "p" then
+      op = op + parse_imm(params[n], 4, rs, 0, false); n = n + 1
+    elseif p == "6" then
+      rs = rs - 6; op = op + parse_imm(params[n], 6, rs, 0, false); n = n + 1
+    elseif p == "Y" then
+      rs = rs - 5; op = op + parse_imm(params[n], 1, rs+4, 0, false); n = n + 1
+    elseif p == "y" then
+      rs = rs - 5; op = op + parse_imm(params[n], 1, rs+3, 0, false); n = n + 1
+    elseif p == "Z" then
+      rs = rs - 5; op = op + parse_imm(params[n], 2, rs+3, 0, false); n = n + 1
+    elseif p == "z" then
+      rs = rs - 5; op = op + parse_imm(params[n], 2, rs+2, 0, false); n = n + 1
+    elseif p == "W" then
+      op = op + parse_cr(params[n]); n = n + 1
+    elseif p == "G" then
+      op = op + parse_imm(params[n], 8, 12, 0, false); n = n + 1
+    elseif p == "H" then
+      op = op + parse_shiftmask(params[n], true); n = n + 1
+    elseif p == "M" then
+      op = op + parse_shiftmask(params[n], false); n = n + 1
+    elseif p == "J" or p == "K" then
+      local mode, m, s = parse_label(params[n], false)
+      if p == "K" then m = m + 2048 end
+      waction("REL_"..mode, m, s, 1)
+      n = n + 1
+    elseif p == "0" then
+      if band(shr(op, rs), 31) == 0 then werror("cannot use r0") end
+    elseif p == "=" or p == "%" then
+      local t = band(shr(op, p == "%" and rs+5 or rs), 31)
+      rs = rs - 5
+      op = op + shl(t, rs)
+    elseif p == "~" then
+      local mm = shl(31, rs)
+      local lo = band(op, mm)
+      local hi = band(op, shl(mm, 5))
+      op = op - lo - hi + shl(lo, 5) + shr(hi, 5)
+    elseif p == ":" then
+      if band(shr(op, rs), 1) ~= 0 then werror("register pair expected") end
+    elseif p == "-" then
+      rs = rs - 5
+    elseif p == "." then
+      -- Ignored.
+    else
+      assert(false)
+    end
+  end
+  wputpos(pos, op)
+end
+
+map_op[".template__"] = op_template
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode to mark the position where the action list is to be emitted.
+map_op[".actionlist_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeactions(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the global enum is to be emitted.
+map_op[".globals_1"] = function(params)
+  if not params then return "prefix" end
+  local prefix = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobals(out, prefix) end)
+end
+
+-- Pseudo-opcode to mark the position where the global names are to be emitted.
+map_op[".globalnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeglobalnames(out, name) end)
+end
+
+-- Pseudo-opcode to mark the position where the extern names are to be emitted.
+map_op[".externnames_1"] = function(params)
+  if not params then return "cvar" end
+  local name = params[1] -- No syntax check. You get to keep the pieces.
+  wline(function(out) writeexternnames(out, name) end)
+end
+
+------------------------------------------------------------------------------
+
+-- Label pseudo-opcode (converted from trailing colon form).
+map_op[".label_1"] = function(params)
+  if not params then return "[1-9] | ->global | =>pcexpr" end
+  if secpos+1 > maxsecpos then wflush() end
+  local mode, n, s = parse_label(params[1], true)
+  if mode == "EXT" then werror("bad label definition") end
+  waction("LABEL_"..mode, n, s, 1)
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcodes for data storage.
+map_op[".long_*"] = function(params)
+  if not params then return "imm..." end
+  for _,p in ipairs(params) do
+    local n = tonumber(p)
+    if not n then werror("bad immediate `"..p.."'") end
+    if n < 0 then n = n + 2^32 end
+    wputw(n)
+    if secpos+2 > maxsecpos then wflush() end
+  end
+end
+
+-- Alignment pseudo-opcode.
+map_op[".align_1"] = function(params)
+  if not params then return "numpow2" end
+  if secpos+1 > maxsecpos then wflush() end
+  local align = tonumber(params[1])
+  if align then
+    local x = align
+    -- Must be a power of 2 in the range (2 ... 256).
+    for i=1,8 do
+      x = x / 2
+      if x == 1 then
+	waction("ALIGN", align-1, nil, 1) -- Action byte is 2**n-1.
+	return
+      end
+    end
+  end
+  werror("bad alignment")
+end
+
+------------------------------------------------------------------------------
+
+-- Pseudo-opcode for (primitive) type definitions (map to C types).
+map_op[".type_3"] = function(params, nparams)
+  if not params then
+    return nparams == 2 and "name, ctype" or "name, ctype, reg"
+  end
+  local name, ctype, reg = params[1], params[2], params[3]
+  if not match(name, "^[%a_][%w_]*$") then
+    werror("bad type name `"..name.."'")
+  end
+  local tp = map_type[name]
+  if tp then
+    werror("duplicate type `"..name.."'")
+  end
+  -- Add #type to defines. A bit unclean to put it in map_archdef.
+  map_archdef["#"..name] = "sizeof("..ctype..")"
+  -- Add new type and emit shortcut define.
+  local num = ctypenum + 1
+  map_type[name] = {
+    ctype = ctype,
+    ctypefmt = format("Dt%X(%%s)", num),
+    reg = reg,
+  }
+  wline(format("#define Dt%X(_V) (int)(ptrdiff_t)&(((%s *)0)_V)", num, ctype))
+  ctypenum = num
+end
+map_op[".type_2"] = map_op[".type_3"]
+
+-- Dump type definitions.
+local function dumptypes(out, lvl)
+  local t = {}
+  for name in pairs(map_type) do t[#t+1] = name end
+  sort(t)
+  out:write("Type definitions:\n")
+  for _,name in ipairs(t) do
+    local tp = map_type[name]
+    local reg = tp.reg or ""
+    out:write(format("  %-20s %-20s %s\n", name, tp.ctype, reg))
+  end
+  out:write("\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Set the current section.
+function _M.section(num)
+  waction("SECTION", num)
+  wflush(true) -- SECTION is a terminal action.
+end
+
+------------------------------------------------------------------------------
+
+-- Dump architecture description.
+function _M.dumparch(out)
+  out:write(format("DynASM %s version %s, released %s\n\n",
+    _info.arch, _info.version, _info.release))
+  dumpactions(out)
+end
+
+-- Dump all user defined elements.
+function _M.dumpdef(out, lvl)
+  dumptypes(out, lvl)
+  dumpglobals(out, lvl)
+  dumpexterns(out, lvl)
+end
+
+------------------------------------------------------------------------------
+
+-- Pass callbacks from/to the DynASM core.
+function _M.passcb(wl, we, wf, ww)
+  wline, werror, wfatal, wwarn = wl, we, wf, ww
+  return wflush
+end
+
+-- Setup the arch-specific module.
+function _M.setup(arch, opt)
+  g_arch, g_opt = arch, opt
+end
+
+-- Merge the core maps and the arch-specific maps.
+function _M.mergemaps(map_coreop, map_def)
+  setmetatable(map_op, { __index = map_coreop })
+  setmetatable(map_def, { __index = map_archdef })
+  return map_op, map_def
+end
+
+return _M
+
+------------------------------------------------------------------------------
