@@ -85,4 +85,56 @@ end
 -- Resync CPP line numbers.
 local function wsync()
   if g_synclineno ~= g_lineno and g_opt.cpp then
-    
+    wline("#line "..g_lineno..' "'..g_fname..'"')
+    g_synclineno = g_lineno
+  end
+end
+
+-- Dummy action flush function. Replaced with arch-specific function later.
+local function wflush(term)
+end
+
+-- Dump all buffered output lines.
+local function wdumplines(out, buf)
+  for _,line in ipairs(buf) do
+    if type(line) == "string" then
+      assert(out:write(line, "\n"))
+    else
+      -- Special callback to dynamically insert lines after end of processing.
+      line(out)
+    end
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Emit an error. Processing continues with next statement.
+local function werror(msg)
+  error(format("%s:%s: error: %s:\n%s", g_fname, g_lineno, msg, g_curline), 0)
+end
+
+-- Emit a fatal error. Processing stops.
+local function wfatal(msg)
+  g_errcount = "fatal"
+  werror(msg)
+end
+
+-- Print a warning. Processing continues.
+local function wwarn(msg)
+  stderr:write(format("%s:%s: warning: %s:\n%s\n",
+    g_fname, g_lineno, msg, g_curline))
+end
+
+-- Print caught error message. But suppress excessive errors.
+local function wprinterr(...)
+  if type(g_errcount) == "number" then
+    -- Regular error.
+    g_errcount = g_errcount + 1
+    if g_errcount < 21 then -- Seems to be a reasonable limit.
+      stderr:write(...)
+    elseif g_errcount == 21 then
+      stderr:write(g_fname,
+	":*: warning: too many errors (suppressed further messages).\n")
+    end
+  else
+    -- Fatal erro
