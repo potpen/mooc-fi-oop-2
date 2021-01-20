@@ -188,4 +188,61 @@ map_coreop[".define_2"] = function(params, nparams)
   if not params then return nparams == 1 and "name" or "name, subst" end
   local name, def = params[1], params[2] or "1"
   if not match(name, "^[%a_][%w_]*$") then werror("bad or duplicate define") end
-  map_d
+  map_def[name] = def
+end
+map_coreop[".define_1"] = map_coreop[".define_2"]
+
+-- Define a substitution on the command line.
+function opt_map.D(args)
+  local namesubst = optparam(args)
+  local name, subst = match(namesubst, "^([%a_][%w_]*)=(.*)$")
+  if name then
+    map_def[name] = subst
+  elseif match(namesubst, "^[%a_][%w_]*$") then
+    map_def[namesubst] = "1"
+  else
+    opterror("bad define")
+  end
+end
+
+-- Undefine a substitution on the command line.
+function opt_map.U(args)
+  local name = optparam(args)
+  if match(name, "^[%a_][%w_]*$") then
+    map_def[name] = nil
+  else
+    opterror("bad define")
+  end
+end
+
+-- Helper for definesubst.
+local gotsubst
+
+local function definesubst_one(word)
+  local subst = map_def[word]
+  if subst then gotsubst = word; return subst else return word end
+end
+
+-- Iteratively substitute defines.
+local function definesubst(stmt)
+  -- Limit number of iterations.
+  for i=1,100 do
+    gotsubst = false
+    stmt = gsub(stmt, "#?[%w_]+", definesubst_one)
+    if not gotsubst then break end
+  end
+  if gotsubst then wfatal("recursive define involving `"..gotsubst.."'") end
+  return stmt
+end
+
+-- Dump all defines.
+local function dumpdefines(out, lvl)
+  local t = {}
+  for name in pairs(map_def) do
+    t[#t+1] = name
+  end
+  sort(t)
+  out:write("Defines:\n")
+  for _,name in ipairs(t) do
+    local subst = map_def[name]
+    if g_arch then subst = g_arch
