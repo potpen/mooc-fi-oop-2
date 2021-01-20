@@ -245,4 +245,57 @@ local function dumpdefines(out, lvl)
   out:write("Defines:\n")
   for _,name in ipairs(t) do
     local subst = map_def[name]
-    if g_arch then subst = g_arch
+    if g_arch then subst = g_arch.revdef(subst) end
+    out:write(format("  %-20s %s\n", name, subst))
+  end
+  out:write("\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Support variables for conditional assembly.
+local condlevel = 0
+local condstack = {}
+
+-- Evaluate condition with a Lua expression. Substitutions already performed.
+local function cond_eval(cond)
+  local func, err
+  if setfenv then
+    func, err = loadstring("return "..cond, "=expr")
+  else
+    -- No globals. All unknown identifiers evaluate to nil.
+    func, err = load("return "..cond, "=expr", "t", {})
+  end
+  if func then
+    if setfenv then
+      setfenv(func, {}) -- No globals. All unknown identifiers evaluate to nil.
+    end
+    local ok, res = pcall(func)
+    if ok then
+      if res == 0 then return false end -- Oh well.
+      return not not res
+    end
+    err = res
+  end
+  wfatal("bad condition: "..err)
+end
+
+-- Skip statements until next conditional pseudo-opcode at the same level.
+local function stmtskip()
+  local dostmt_save = dostmt
+  local lvl = 0
+  dostmt = function(stmt)
+    local op = match(stmt, "^%s*(%S+)")
+    if op == ".if" then
+      lvl = lvl + 1
+    elseif lvl ~= 0 then
+      if op == ".endif" then lvl = lvl - 1 end
+    elseif op == ".elif" or op == ".else" or op == ".endif" then
+      dostmt = dostmt_save
+      dostmt(stmt)
+    end
+  end
+end
+
+-- Pseudo-opcodes for conditional assembly.
+map_coreop[".if_1"] = functio
