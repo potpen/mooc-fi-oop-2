@@ -298,4 +298,57 @@ local function stmtskip()
 end
 
 -- Pseudo-opcodes for conditional assembly.
-map_coreop[".if_1"] = functio
+map_coreop[".if_1"] = function(params)
+  if not params then return "condition" end
+  local lvl = condlevel + 1
+  local res = cond_eval(params[1])
+  condlevel = lvl
+  condstack[lvl] = res
+  if not res then stmtskip() end
+end
+
+map_coreop[".elif_1"] = function(params)
+  if not params then return "condition" end
+  if condlevel == 0 then wfatal(".elif without .if") end
+  local lvl = condlevel
+  local res = condstack[lvl]
+  if res then
+    if res == "else" then wfatal(".elif after .else") end
+  else
+    res = cond_eval(params[1])
+    if res then
+      condstack[lvl] = res
+      return
+    end
+  end
+  stmtskip()
+end
+
+map_coreop[".else_0"] = function(params)
+  if condlevel == 0 then wfatal(".else without .if") end
+  local lvl = condlevel
+  local res = condstack[lvl]
+  condstack[lvl] = "else"
+  if res then
+    if res == "else" then wfatal(".else after .else") end
+    stmtskip()
+  end
+end
+
+map_coreop[".endif_0"] = function(params)
+  local lvl = condlevel
+  if lvl == 0 then wfatal(".endif without .if") end
+  condlevel = lvl - 1
+end
+
+-- Check for unfinished conditionals.
+local function checkconds()
+  if g_errcount ~= "fatal" and condlevel ~= 0 then
+    wprinterr(g_fname, ":*: error: unbalanced conditional\n")
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Search for a file in the given path and open it for reading.
+local functi
