@@ -137,4 +137,55 @@ local function wprinterr(...)
 	":*: warning: too many errors (suppressed further messages).\n")
     end
   else
-    -- Fatal erro
+    -- Fatal error.
+    stderr:write(...)
+    return true -- Stop processing.
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Map holding all option handlers.
+local opt_map = {}
+local opt_current
+
+-- Print error and exit with error status.
+local function opterror(...)
+  stderr:write("dynasm.lua: ERROR: ", ...)
+  stderr:write("\n")
+  exit(1)
+end
+
+-- Get option parameter.
+local function optparam(args)
+  local argn = args.argn
+  local p = args[argn]
+  if not p then
+    opterror("missing parameter for option `", opt_current, "'.")
+  end
+  args.argn = argn + 1
+  return p
+end
+
+------------------------------------------------------------------------------
+
+-- Core pseudo-opcodes.
+local map_coreop = {}
+-- Dummy opcode map. Replaced by arch-specific map.
+local map_op = {}
+
+-- Forward declarations.
+local dostmt
+local readfile
+
+------------------------------------------------------------------------------
+
+-- Map for defines (initially empty, chains to arch-specific map).
+local map_def = {}
+
+-- Pseudo-opcode to define a substitution.
+map_coreop[".define_2"] = function(params, nparams)
+  if not params then return nparams == 1 and "name" or "name, subst" end
+  local name, def = params[1], params[2] or "1"
+  if not match(name, "^[%a_][%w_]*$") then werror("bad or duplicate define") end
+  map_d
