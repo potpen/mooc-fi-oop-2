@@ -351,4 +351,47 @@ end
 ------------------------------------------------------------------------------
 
 -- Search for a file in the given path and open it for reading.
-local functi
+local function pathopen(path, name)
+  local dirsep = package and match(package.path, "\\") and "\\" or "/"
+  for _,p in ipairs(path) do
+    local fullname = p == "" and name or p..dirsep..name
+    local fin = io.open(fullname, "r")
+    if fin then
+      g_fname = fullname
+      return fin
+    end
+  end
+end
+
+-- Include a file.
+map_coreop[".include_1"] = function(params)
+  if not params then return "filename" end
+  local name = params[1]
+  -- Save state. Ugly, I know. but upvalues are fast.
+  local gf, gl, gcl, gi = g_fname, g_lineno, g_curline, g_indent
+  -- Read the included file.
+  local fatal = readfile(pathopen(g_opt.include, name) or
+			 wfatal("include file `"..name.."' not found"))
+  -- Restore state.
+  g_synclineno = -1
+  g_fname, g_lineno, g_curline, g_indent = gf, gl, gcl, gi
+  if fatal then wfatal("in include file") end
+end
+
+-- Make .include and conditionals initially available, too.
+map_op[".include_1"] = map_coreop[".include_1"]
+map_op[".if_1"] = map_coreop[".if_1"]
+map_op[".elif_1"] = map_coreop[".elif_1"]
+map_op[".else_0"] = map_coreop[".else_0"]
+map_op[".endif_0"] = map_coreop[".endif_0"]
+
+------------------------------------------------------------------------------
+
+-- Support variables for macros.
+local mac_capture, mac_lineno, mac_name
+local mac_active = {}
+local mac_list = {}
+
+-- Pseudo-opcode to define a macro.
+map_coreop[".macro_*"] = function(mparams)
+  if not mparams then r
