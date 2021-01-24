@@ -394,4 +394,44 @@ local mac_list = {}
 
 -- Pseudo-opcode to define a macro.
 map_coreop[".macro_*"] = function(mparams)
-  if not mparams then r
+  if not mparams then return "name [, params...]" end
+  -- Split off and validate macro name.
+  local name = remove(mparams, 1)
+  if not name then werror("missing macro name") end
+  if not (match(name, "^[%a_][%w_%.]*$") or match(name, "^%.[%w_%.]*$")) then
+    wfatal("bad macro name `"..name.."'")
+  end
+  -- Validate macro parameter names.
+  local mdup = {}
+  for _,mp in ipairs(mparams) do
+    if not match(mp, "^[%a_][%w_]*$") then
+      wfatal("bad macro parameter name `"..mp.."'")
+    end
+    if mdup[mp] then wfatal("duplicate macro parameter name `"..mp.."'") end
+    mdup[mp] = true
+  end
+  -- Check for duplicate or recursive macro definitions.
+  local opname = name.."_"..#mparams
+  if map_op[opname] or map_op[name.."_*"] then
+    wfatal("duplicate macro `"..name.."' ("..#mparams.." parameters)")
+  end
+  if mac_capture then wfatal("recursive macro definition") end
+
+  -- Enable statement capture.
+  local lines = {}
+  mac_lineno = g_lineno
+  mac_name = name
+  mac_capture = function(stmt) -- Statement capture function.
+    -- Stop macro definition with .endmacro pseudo-opcode.
+    if not match(stmt, "^%s*.endmacro%s*$") then
+      lines[#lines+1] = stmt
+      return
+    end
+    mac_capture = nil
+    mac_lineno = nil
+    mac_name = nil
+    mac_list[#mac_list+1] = opname
+    -- Add macro-op definition.
+    map_op[opname] = function(params)
+      if not params then return mparams, lines end
+      -- Protect against 
