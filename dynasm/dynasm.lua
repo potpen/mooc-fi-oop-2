@@ -434,4 +434,47 @@ map_coreop[".macro_*"] = function(mparams)
     -- Add macro-op definition.
     map_op[opname] = function(params)
       if not params then return mparams, lines end
-      -- Protect against 
+      -- Protect against recursive macro invocation.
+      if mac_active[opname] then wfatal("recursive macro invocation") end
+      mac_active[opname] = true
+      -- Setup substitution map.
+      local subst = {}
+      for i,mp in ipairs(mparams) do subst[mp] = params[i] end
+      local mcom
+      if g_opt.maccomment and g_opt.comment then
+	mcom = " MACRO "..name.." ("..#mparams..")"
+	wcomment("{"..mcom)
+      end
+      -- Loop through all captured statements
+      for _,stmt in ipairs(lines) do
+	-- Substitute macro parameters.
+	local st = gsub(stmt, "[%w_]+", subst)
+	st = definesubst(st)
+	st = gsub(st, "%s*%.%.%s*", "") -- Token paste a..b.
+	if mcom and sub(st, 1, 1) ~= "|" then wcomment(st) end
+	-- Emit statement. Use a protected call for better diagnostics.
+	local ok, err = pcall(dostmt, st)
+	if not ok then
+	  -- Add the captured statement to the error.
+	  wprinterr(err, "\n", g_indent, "|  ", stmt,
+		    "\t[MACRO ", name, " (", #mparams, ")]\n")
+	end
+      end
+      if mcom then wcomment("}"..mcom) end
+      mac_active[opname] = nil
+    end
+  end
+end
+
+-- An .endmacro pseudo-opcode outside of a macro definition is an error.
+map_coreop[".endmacro_0"] = function(params)
+  wfatal(".endmacro without .macro")
+end
+
+-- Dump all macros and their contents (with -PP only).
+local function dumpmacros(out, lvl)
+  sort(mac_list)
+  out:write("Macros:\n")
+  for _,opname in ipairs(mac_list) do
+    local name = sub(opname, 1, -3)
+    local params, lines 
