@@ -477,4 +477,57 @@ local function dumpmacros(out, lvl)
   out:write("Macros:\n")
   for _,opname in ipairs(mac_list) do
     local name = sub(opname, 1, -3)
-    local params, lines 
+    local params, lines = map_op[opname]()
+    out:write(format("  %-20s %s\n", name, concat(params, ", ")))
+    if lvl > 1 then
+      for _,line in ipairs(lines) do
+	out:write("  |", line, "\n")
+      end
+      out:write("\n")
+    end
+  end
+  out:write("\n")
+end
+
+-- Check for unfinished macro definitions.
+local function checkmacros()
+  if mac_capture then
+    wprinterr(g_fname, ":", mac_lineno,
+	      ": error: unfinished .macro `", mac_name ,"'\n")
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Support variables for captures.
+local cap_lineno, cap_name
+local cap_buffers = {}
+local cap_used = {}
+
+-- Start a capture.
+map_coreop[".capture_1"] = function(params)
+  if not params then return "name" end
+  wflush()
+  local name = params[1]
+  if not match(name, "^[%a_][%w_]*$") then
+    wfatal("bad capture name `"..name.."'")
+  end
+  if cap_name then
+    wfatal("already capturing to `"..cap_name.."' since line "..cap_lineno)
+  end
+  cap_name = name
+  cap_lineno = g_lineno
+  -- Create or continue a capture buffer and start the output line capture.
+  local buf = cap_buffers[name]
+  if not buf then buf = {}; cap_buffers[name] = buf end
+  g_capbuffer = buf
+  g_synclineno = 0
+end
+
+-- Stop a capture.
+map_coreop[".endcapture_0"] = function(params)
+  wflush()
+  if not cap_name then wfatal(".endcapture without a valid .capture") end
+  cap_name = nil
+  cap_lineno = nil
+  g_capbuffe
