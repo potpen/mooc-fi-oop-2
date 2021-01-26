@@ -530,4 +530,60 @@ map_coreop[".endcapture_0"] = function(params)
   if not cap_name then wfatal(".endcapture without a valid .capture") end
   cap_name = nil
   cap_lineno = nil
-  g_capbuffe
+  g_capbuffer = nil
+  g_synclineno = 0
+end
+
+-- Dump a capture buffer.
+map_coreop[".dumpcapture_1"] = function(params)
+  if not params then return "name" end
+  wflush()
+  local name = params[1]
+  if not match(name, "^[%a_][%w_]*$") then
+    wfatal("bad capture name `"..name.."'")
+  end
+  cap_used[name] = true
+  wline(function(out)
+    local buf = cap_buffers[name]
+    if buf then wdumplines(out, buf) end
+  end)
+  g_synclineno = 0
+end
+
+-- Dump all captures and their buffers (with -PP only).
+local function dumpcaptures(out, lvl)
+  out:write("Captures:\n")
+  for name,buf in pairs(cap_buffers) do
+    out:write(format("  %-20s %4s)\n", name, "("..#buf))
+    if lvl > 1 then
+      local bar = rep("=", 76)
+      out:write("  ", bar, "\n")
+      for _,line in ipairs(buf) do
+	out:write("  ", line, "\n")
+      end
+      out:write("  ", bar, "\n\n")
+    end
+  end
+  out:write("\n")
+end
+
+-- Check for unfinished or unused captures.
+local function checkcaptures()
+  if cap_name then
+    wprinterr(g_fname, ":", cap_lineno,
+	      ": error: unfinished .capture `", cap_name,"'\n")
+    return
+  end
+  for name in pairs(cap_buffers) do
+    if not cap_used[name] then
+      wprinterr(g_fname, ":*: error: missing .dumpcapture ", name ,"\n")
+    end
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Sections names.
+local map_sections = {}
+
+-- Pseudo-opcode to define code section
