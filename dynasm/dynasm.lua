@@ -586,4 +586,49 @@ end
 -- Sections names.
 local map_sections = {}
 
--- Pseudo-opcode to define code section
+-- Pseudo-opcode to define code sections.
+-- TODO: Data sections, BSS sections. Needs extra C code and API.
+map_coreop[".section_*"] = function(params)
+  if not params then return "name..." end
+  if #map_sections > 0 then werror("duplicate section definition") end
+  wflush()
+  for sn,name in ipairs(params) do
+    local opname = "."..name.."_0"
+    if not match(name, "^[%a][%w_]*$") or
+       map_op[opname] or map_op["."..name.."_*"] then
+      werror("bad section name `"..name.."'")
+    end
+    map_sections[#map_sections+1] = name
+    wline(format("#define DASM_SECTION_%s\t%d", upper(name), sn-1))
+    map_op[opname] = function(params) g_arch.section(sn-1) end
+  end
+  wline(format("#define DASM_MAXSECTION\t\t%d", #map_sections))
+end
+
+-- Dump all sections.
+local function dumpsections(out, lvl)
+  out:write("Sections:\n")
+  for _,name in ipairs(map_sections) do
+    out:write(format("  %s\n", name))
+  end
+  out:write("\n")
+end
+
+------------------------------------------------------------------------------
+
+-- Replacement for customized Lua, which lacks the package library.
+local prefix = ""
+if not require then
+  function require(name)
+    local fp = assert(io.open(prefix..name..".lua"))
+    local s = fp:read("*a")
+    assert(fp:close())
+    return assert(loadstring(s, "@"..name..".lua"))()
+  end
+end
+
+-- Load architecture-specific module.
+local function loadarch(arch)
+  if not match(arch, "^[%w_]+$") then return "bad arch name" end
+  _G._map_def = map_def
+  local ok, m_arch
