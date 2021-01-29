@@ -684,4 +684,56 @@ function opt_map.dumparch(args)
       else
 	out:write(format("  %-12s %s\n", name, s))
       end
-   
+    end
+  end
+  out:write("\n")
+  exit(0)
+end
+
+-- Pseudo-opcode to set the architecture.
+-- Only initially available (map_op is replaced when called).
+map_op[".arch_1"] = function(params)
+  if not params then return "name" end
+  local err = loadarch(params[1])
+  if err then wfatal(err) end
+  wline(format("#if DASM_VERSION != %d", _info.vernum))
+  wline('#error "Version mismatch between DynASM and included encoding engine"')
+  wline("#endif")
+end
+
+-- Dummy .arch pseudo-opcode to improve the error report.
+map_coreop[".arch_1"] = function(params)
+  if not params then return "name" end
+  wfatal("duplicate .arch statement")
+end
+
+------------------------------------------------------------------------------
+
+-- Dummy pseudo-opcode. Don't confuse '.nop' with 'nop'.
+map_coreop[".nop_*"] = function(params)
+  if not params then return "[ignored...]" end
+end
+
+-- Pseudo-opcodes to raise errors.
+map_coreop[".error_1"] = function(params)
+  if not params then return "message" end
+  werror(params[1])
+end
+
+map_coreop[".fatal_1"] = function(params)
+  if not params then return "message" end
+  wfatal(params[1])
+end
+
+-- Dump all user defined elements.
+local function dumpdef(out)
+  local lvl = g_opt.dumpdef
+  if lvl == 0 then return end
+  dumpsections(out, lvl)
+  dumpdefines(out, lvl)
+  if g_arch then g_arch.dumpdef(out, lvl) end
+  dumpmacros(out, lvl)
+  dumpcaptures(out, lvl)
+end
+
+-----------------------
