@@ -785,4 +785,53 @@ end
 
 -- Process a single statement.
 dostmt = function(stmt)
-  -- Ignore empty
+  -- Ignore empty statements.
+  if match(stmt, "^%s*$") then return end
+
+  -- Capture macro defs before substitution.
+  if mac_capture then return mac_capture(stmt) end
+  stmt = definesubst(stmt)
+
+  -- Emit C code without parsing the line.
+  if sub(stmt, 1, 1) == "|" then
+    local tail = sub(stmt, 2)
+    wflush()
+    if sub(tail, 1, 2) == "//" then wcomment(tail) else wline(tail, true) end
+    return
+  end
+
+  -- Split into (pseudo-)opcode and params.
+  local op, params = splitstmt(stmt)
+
+  -- Get opcode handler (matching # of parameters or generic handler).
+  local f = map_op[op.."_"..#params] or map_op[op.."_*"]
+  if not f then
+    if not g_arch then wfatal("first statement must be .arch") end
+    -- Improve error report.
+    for i=0,9 do
+      if map_op[op.."_"..i] then
+	werror("wrong number of parameters for `"..op.."'")
+      end
+    end
+    werror("unknown statement `"..op.."'")
+  end
+
+  -- Call opcode handler or special handler for template strings.
+  if type(f) == "string" then
+    map_op[".template__"](params, f)
+  else
+    f(params)
+  end
+end
+
+-- Process a single line.
+local function doline(line)
+  if g_opt.flushline then wflush() end
+
+  -- Assembler line?
+  local indent, aline = match(line, "^(%s*)%|(.*)$")
+  if not aline then
+    -- No, plain C code line, need to flush first.
+    wflush()
+    wsync()
+    wlin
