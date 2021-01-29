@@ -631,4 +631,57 @@ end
 local function loadarch(arch)
   if not match(arch, "^[%w_]+$") then return "bad arch name" end
   _G._map_def = map_def
-  local ok, m_arch
+  local ok, m_arch = pcall(require, "dasm_"..arch)
+  if not ok then return "cannot load module: "..m_arch end
+  g_arch = m_arch
+  wflush = m_arch.passcb(wline, werror, wfatal, wwarn)
+  m_arch.setup(arch, g_opt)
+  map_op, map_def = m_arch.mergemaps(map_coreop, map_def)
+end
+
+-- Dump architecture description.
+function opt_map.dumparch(args)
+  local name = optparam(args)
+  if not g_arch then
+    local err = loadarch(name)
+    if err then opterror(err) end
+  end
+
+  local t = {}
+  for name in pairs(map_coreop) do t[#t+1] = name end
+  for name in pairs(map_op) do t[#t+1] = name end
+  sort(t)
+
+  local out = stdout
+  local _arch = g_arch._info
+  out:write(format("%s version %s, released %s, %s\n",
+    _info.name, _info.version, _info.release, _info.url))
+  g_arch.dumparch(out)
+
+  local pseudo = true
+  out:write("Pseudo-Opcodes:\n")
+  for _,sname in ipairs(t) do
+    local name, nparam = match(sname, "^(.+)_([0-9%*])$")
+    if name then
+      if pseudo and sub(name, 1, 1) ~= "." then
+	out:write("\nOpcodes:\n")
+	pseudo = false
+      end
+      local f = map_op[sname]
+      local s
+      if nparam ~= "*" then nparam = nparam + 0 end
+      if nparam == 0 then
+	s = ""
+      elseif type(f) == "string" then
+	s = map_op[".template__"](nil, f, nparam)
+      else
+	s = f(nil, nparam)
+      end
+      if type(s) == "table" then
+	for _,s2 in ipairs(s) do
+	  out:write(format("  %-12s %s\n", name, s2))
+	end
+      else
+	out:write(format("  %-12s %s\n", name, s))
+      end
+   
