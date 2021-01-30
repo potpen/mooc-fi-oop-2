@@ -834,4 +834,71 @@ local function doline(line)
     -- No, plain C code line, need to flush first.
     wflush()
     wsync()
-    wlin
+    wline(line, false)
+    return
+  end
+
+  g_indent = indent -- Remember current line indentation.
+
+  -- Emit C code (even from macros). Avoids echo and line parsing.
+  if sub(aline, 1, 1) == "|" then
+    if not mac_capture then
+      wsync()
+    elseif g_opt.comment then
+      wsync()
+      wcomment(aline)
+    end
+    dostmt(aline)
+    return
+  end
+
+  -- Echo assembler line as a comment.
+  if g_opt.comment then
+    wsync()
+    wcomment(aline)
+  end
+
+  -- Strip assembler comments.
+  aline = gsub(aline, "//.*$", "")
+
+  -- Split line into statements at semicolons.
+  if match(aline, ";") then
+    for stmt in gmatch(aline, "[^;]+") do dostmt(stmt) end
+  else
+    dostmt(aline)
+  end
+end
+
+------------------------------------------------------------------------------
+
+-- Write DynASM header.
+local function dasmhead(out)
+  out:write(format([[
+/*
+** This file has been pre-processed with DynASM.
+** %s
+** DynASM version %s, DynASM %s version %s
+** DO NOT EDIT! The original file is in "%s".
+*/
+
+]], _info.url,
+    _info.version, g_arch._info.arch, g_arch._info.version,
+    g_fname))
+end
+
+-- Read input file.
+readfile = function(fin)
+  g_indent = ""
+  g_lineno = 0
+  g_synclineno = -1
+
+  -- Process all lines.
+  for line in fin:lines() do
+    g_lineno = g_lineno + 1
+    g_curline = line
+    local ok, err = pcall(doline, line)
+    if not ok and wprinterr(err, "\n") then return true end
+  end
+  wflush()
+
+  -
