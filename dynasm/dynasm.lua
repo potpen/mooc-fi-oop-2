@@ -967,4 +967,40 @@ local function translate(infile, outfile)
   writefile(outfile)
 end
 
----------
+------------------------------------------------------------------------------
+
+-- Print help text.
+function opt_map.help()
+  stdout:write("DynASM -- ", _info.description, ".\n")
+  stdout:write("DynASM ", _info.version, " ", _info.release, "  ", _info.url, "\n")
+  stdout:write[[
+
+Usage: dynasm [OPTION]... INFILE.dasc|-
+
+  -h, --help           Display this help text.
+  -V, --version        Display version and copyright information.
+
+  -o, --outfile FILE   Output file name (default is stdout).
+  -I, --include DIR    Add directory to the include search path.
+
+  -c, --ccomment       Use /* */ comments for assembler lines.
+  -C, --cppcomment     Use // comments for assembler lines (default).
+  -N, --nocomment      Suppress assembler lines in output.
+  -M, --maccomment     Show macro expansions as comments (default off).
+
+  -L, --nolineno       Suppress CPP line number information in output.
+  -F, --flushline      Flush action list for every line.
+
+  -D NAME[=SUBST]      Define a substitution.
+  -U NAME              Undefine a substitution.
+
+  -P, --dumpdef        Dump defines, macros, etc. Repeat for more output.
+  -A, --dumparch ARCH  Load architecture ARCH and dump description.
+]]
+  exit(0)
+end
+
+-- Print version information.
+function opt_map.version()
+  stdout:write(format("%s version %s, released %s\n%s\n\n%s",
+    _info.name, _info.version, _info.release, _
