@@ -901,4 +901,70 @@ readfile = function(fin)
   end
   wflush()
 
-  -
+  -- Close input file.
+  assert(fin == stdin or fin:close())
+end
+
+-- Write output file.
+local function writefile(outfile)
+  local fout
+
+  -- Open output file.
+  if outfile == nil or outfile == "-" then
+    fout = stdout
+  else
+    fout = assert(io.open(outfile, "w"))
+  end
+
+  -- Write all buffered lines
+  wdumplines(fout, g_wbuffer)
+
+  -- Close output file.
+  assert(fout == stdout or fout:close())
+
+  -- Optionally dump definitions.
+  dumpdef(fout == stdout and stderr or stdout)
+end
+
+-- Translate an input file to an output file.
+local function translate(infile, outfile)
+  g_wbuffer = {}
+  g_indent = ""
+  g_lineno = 0
+  g_synclineno = -1
+
+  -- Put header.
+  wline(dasmhead)
+
+  -- Read input file.
+  local fin
+  if infile == "-" then
+    g_fname = "(stdin)"
+    fin = stdin
+  else
+    g_fname = infile
+    fin = assert(io.open(infile, "r"))
+  end
+  readfile(fin)
+
+  -- Check for errors.
+  if not g_arch then
+    wprinterr(g_fname, ":*: error: missing .arch directive\n")
+  end
+  checkconds()
+  checkmacros()
+  checkcaptures()
+
+  if g_errcount ~= 0 then
+    stderr:write(g_fname, ":*: info: ", g_errcount, " error",
+      (type(g_errcount) == "number" and g_errcount > 1) and "s" or "",
+      " in input file -- no output file generated.\n")
+    dumpdef(stderr)
+    exit(1)
+  end
+
+  -- Write output file.
+  writefile(outfile)
+end
+
+---------
