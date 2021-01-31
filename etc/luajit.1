@@ -4,4 +4,53 @@ luajit \- Just-In-Time Compiler for the Lua Language
 \fB
 .SH SYNOPSIS
 .B luajit
-[\fIopti
+[\fIoptions\fR]... [\fIscript\fR [\fIargs\fR]...]
+.SH "WEB SITE"
+.IR https://luajit.org
+.SH DESCRIPTION
+.PP
+This is the command-line program to run Lua programs with \fBLuaJIT\fR.
+.PP
+\fBLuaJIT\fR is a just-in-time (JIT) compiler for the Lua language.
+The virtual machine (VM) is based on a fast interpreter combined with
+a trace compiler. It can significantly improve the performance of Lua programs.
+.PP
+\fBLuaJIT\fR is API\- and ABI-compatible with the VM of the standard
+Lua\ 5.1 interpreter. When embedding the VM into an application,
+the built library can be used as a drop-in replacement.
+.SH OPTIONS
+.TP
+.BI "\-e " chunk
+Run the given chunk of Lua code.
+.TP
+.BI "\-l " library
+Load the named library, just like \fBrequire("\fR\fIlibrary\fR\fB")\fR.
+.TP
+.BI "\-b " ...
+Save or list bytecode. Run without arguments to get help on options.
+.TP
+.BI "\-j " command
+Perform LuaJIT control command (optional space after \fB\-j\fR).
+.TP
+.BI "\-O" [opt]
+Control LuaJIT optimizations.
+.TP
+.B "\-i"
+Run in interactive mode.
+.TP
+.B "\-v"
+Show \fBLuaJIT\fR version.
+.TP
+.B "\-E"
+Ignore environment variables.
+.TP
+.B "\-\-"
+Stop processing options.
+.TP
+.B "\-"
+Read script from stdin instead.
+.PP
+After all options are processed, the given \fIscript\fR is run.
+The arguments are passed in the global \fIarg\fR table.
+.PP
+Interactive mode is only entered, if no \fIscript\f
