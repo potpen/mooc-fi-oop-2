@@ -1003,4 +1003,46 @@ end
 -- Print version information.
 function opt_map.version()
   stdout:write(format("%s version %s, released %s\n%s\n\n%s",
-    _info.name, _info.version, _info.release, _
+    _info.name, _info.version, _info.release, _info.url, _info.copyright))
+  exit(0)
+end
+
+-- Misc. options.
+function opt_map.outfile(args) g_opt.outfile = optparam(args) end
+function opt_map.include(args) insert(g_opt.include, 1, optparam(args)) end
+function opt_map.ccomment() g_opt.comment = "/*|"; g_opt.endcomment = " */" end
+function opt_map.cppcomment() g_opt.comment = "//|"; g_opt.endcomment = "" end
+function opt_map.nocomment() g_opt.comment = false end
+function opt_map.maccomment() g_opt.maccomment = true end
+function opt_map.nolineno() g_opt.cpp = false end
+function opt_map.flushline() g_opt.flushline = true end
+function opt_map.dumpdef() g_opt.dumpdef = g_opt.dumpdef + 1 end
+
+------------------------------------------------------------------------------
+
+-- Short aliases for long options.
+local opt_alias = {
+  h = "help", ["?"] = "help", V = "version",
+  o = "outfile", I = "include",
+  c = "ccomment", C = "cppcomment", N = "nocomment", M = "maccomment",
+  L = "nolineno", F = "flushline",
+  P = "dumpdef", A = "dumparch",
+}
+
+-- Parse single option.
+local function parseopt(opt, args)
+  opt_current = #opt == 1 and "-"..opt or "--"..opt
+  local f = opt_map[opt] or opt_map[opt_alias[opt]]
+  if not f then
+    opterror("unrecognized option `", opt_current, "'. Try `--help'.\n")
+  end
+  f(args)
+end
+
+-- Parse arguments.
+local function parseargs(args)
+  -- Default options.
+  g_opt.comment = "//|"
+  g_opt.endcomment = ""
+  g_opt.cpp = true
+  g_opt.dumpdef =
