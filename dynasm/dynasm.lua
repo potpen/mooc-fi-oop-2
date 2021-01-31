@@ -1045,4 +1045,51 @@ local function parseargs(args)
   g_opt.comment = "//|"
   g_opt.endcomment = ""
   g_opt.cpp = true
-  g_opt.dumpdef =
+  g_opt.dumpdef = 0
+  g_opt.include = { "" }
+
+  -- Process all option arguments.
+  args.argn = 1
+  repeat
+    local a = args[args.argn]
+    if not a then break end
+    local lopt, opt = match(a, "^%-(%-?)(.+)")
+    if not opt then break end
+    args.argn = args.argn + 1
+    if lopt == "" then
+      -- Loop through short options.
+      for o in gmatch(opt, ".") do parseopt(o, args) end
+    else
+      -- Long option.
+      parseopt(opt, args)
+    end
+  until false
+
+  -- Check for proper number of arguments.
+  local nargs = #args - args.argn + 1
+  if nargs ~= 1 then
+    if nargs == 0 then
+      if g_opt.dumpdef > 0 then return dumpdef(stdout) end
+    end
+    opt_map.help()
+  end
+
+  -- Translate a single input file to a single output file
+  -- TODO: Handle multiple files?
+  translate(args[args.argn], g_opt.outfile)
+end
+
+------------------------------------------------------------------------------
+
+-- Add the directory dynasm.lua resides in to the Lua module search path.
+local arg = arg
+if arg and arg[0] then
+  prefix = match(arg[0], "^(.*[/\\])")
+  if package and prefix then package.path = prefix.."?.lua;"..package.path end
+end
+
+-- Start DynASM.
+parseargs{...}
+
+------------------------------------------------------------------------------
+
