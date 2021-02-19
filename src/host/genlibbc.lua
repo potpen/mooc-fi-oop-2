@@ -83,4 +83,61 @@ local BC, BCN = {}, {}
 for i=0,#bcnames/6-1 do
   local name = bcnames:sub(i*6+1, i*6+6):gsub(" ", "")
   BC[name] = i
-  BCN[i
+  BCN[i] = name
+end
+local xop, xra = isbe and 3 or 0, isbe and 2 or 1
+local xrc, xrb = isbe and 1 or 2, isbe and 0 or 3
+
+local function fixup_dump(dump, fixup)
+  local buf = ffi.new("uint8_t[?]", #dump+1, dump)
+  local p = buf+5
+  local n, sizebc
+  p, n = read_uleb128(p)
+  local start = p
+  p = p + 4
+  p = read_uleb128(p)
+  p = read_uleb128(p)
+  p, sizebc = read_uleb128(p)
+  local startbc = tonumber(p - start)
+  local rawtab = {}
+  for i=0,sizebc-1 do
+    local op = p[xop]
+    if op == BC.KSHORT then
+      local rd = p[xrc] + 256*p[xrb]
+      rd = bit.arshift(bit.lshift(rd, 16), 16)
+      local f = fixup[rd]
+      if f then
+	if f[1] == "CHECK" then
+	  local tp = f[2]
+	  if tp == "tab" then rawtab[p[xra]] = true end
+	  p[xop] = tp == "num" and BC.ISNUM or BC.ISTYPE
+	  p[xrb] = 0
+	  p[xrc] = name2itype[tp]
+	else
+	  error("unhandled fixup type: "..f[1])
+	end
+      end
+    elseif op == BC.TGETV then
+      if rawtab[p[xrb]] then
+	p[xop] = BC.TGETR
+      end
+    elseif op == BC.TSETV then
+      if rawtab[p[xrb]] then
+	p[xop] = BC.TSETR
+      end
+    elseif op == BC.ITERC then
+      if fixup.PAIRS then
+	p[xop] = BC.ITERN
+      end
+    end
+    p = p + 4
+  end
+  local ndump = ffi.string(start, n)
+  -- Fixup hi-part of 0x4dp80 to LJ_KEYINDEX.
+  ndump = ndump:gsub("\x80\x80\xcd\xaa\x04", "\xff\xff\xf9\xff\x0f")
+  return { dump = ndump, startbc = startbc, sizebc = sizebc }
+end
+
+local function find_defs(src)
+  local defs = {}
+  for name, 
