@@ -67,4 +67,15 @@ BC_KSHORT,8,255,255,BC_FORI,6,4,128,BC_ADDVV,10,5,9,BC_TGETR,11,9,0,BC_TSETR,
 0
 };
 
-static const struct { const 
+static const struct { const char *name; int ofs; } libbc_map[] = {
+{"math_deg",0},
+{"math_rad",25},
+{"string_len",50},
+{"table_foreachi",69},
+{"table_foreach",136},
+{"table_getn",213},
+{"table_remove",232},
+{"table_move",361},
+{NULL,508}
+};
+
