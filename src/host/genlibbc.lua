@@ -190,4 +190,36 @@ local function gen_header(defs)
     w(",")
   end
   w("\n0\n};\n\n")
-  w("static const struct { const char 
+  w("static const struct { const char *name; int ofs; } libbc_map[] = {\n")
+  local m = 0
+  for _,name in ipairs(defs) do
+    w('{"'); w(name); w('",'); w(m) w('},\n')
+    m = m + #defs[name].dump
+  end
+  w("{NULL,"); w(m); w("}\n};\n\n")
+  return table.concat(t)
+end
+
+local function write_file(name, data)
+  if name == "-" then
+    assert(io.write(data))
+    assert(io.flush())
+  else
+    local fp = io.open(name)
+    if fp then
+      local old = fp:read("*a")
+      fp:close()
+      if data == old then return end
+    end
+    fp = assert(io.open(name, "w"))
+    assert(fp:write(data))
+    assert(fp:close())
+  end
+end
+
+local outfile = parse_arg(arg)
+local src = read_files(arg)
+local defs = find_defs(src)
+local hdr = gen_header(defs)
+write_file(outfile, hdr)
+
