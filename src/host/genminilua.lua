@@ -95,4 +95,65 @@ const char *hexdigits="0123456789abcdef";
 char buf[8];
 int i;
 if(n<0){n=-n;hexdigits="0123456789ABCDEF";}
-if(n>8)
+if(n>8)n=8;
+for(i=(int)n;--i>=0;){buf[i]=hexdigits[b&15];b>>=4;}
+lua_pushlstring(L,buf,(size_t)n);
+return 1;
+}
+static const struct luaL_Reg bitlib[] = {
+{"tobit",tobit},
+{"bnot",bnot},
+{"band",band},
+{"bor",bor},
+{"bxor",bxor},
+{"lshift",lshift},
+{"rshift",rshift},
+{"arshift",arshift},
+{"rol",rol},
+{"ror",ror},
+{"bswap",bswap},
+{"tohex",tohex},
+{NULL,NULL}
+};
+int main(int argc, char **argv){
+  lua_State *L = luaL_newstate();
+  int i;
+  luaL_openlibs(L);
+  luaL_register(L, "bit", bitlib);
+  if (argc < 2) return sizeof(void *);
+  lua_createtable(L, 0, 1);
+  lua_pushstring(L, argv[1]);
+  lua_rawseti(L, -2, 0);
+  lua_setglobal(L, "arg");
+  if (luaL_loadfile(L, argv[1]))
+    goto err;
+  for (i = 2; i < argc; i++)
+    lua_pushstring(L, argv[i]);
+  if (lua_pcall(L, argc - 2, 0, 0)) {
+  err:
+    fprintf(stderr, "Error: %s\n", lua_tostring(L, -1));
+    return 1;
+  }
+  lua_close(L);
+  return 0;
+}
+]]
+
+local function read_sources()
+  local t = {}
+  for i, name in ipairs(LUA_FILES) do
+    local fp = assert(io.open(LUA_SOURCE..name, "r"))
+    t[i] = fp:read("*a")
+    assert(fp:close())
+  end
+  t[#t+1] = CUSTOM_MAIN
+  return table.concat(t)
+end
+
+local includes = {}
+
+local function merge_includes(src)
+  return gsub(src, '#include%s*"([^"]*)"%s*\n', function(name)
+    if includes[name] then return "" end
+    includes[name] = true
+    local fp = assert(io.open(LUA_SOURC
