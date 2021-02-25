@@ -156,4 +156,65 @@ local function merge_includes(src)
   return gsub(src, '#include%s*"([^"]*)"%s*\n', function(name)
     if includes[name] then return "" end
     includes[name] = true
-    local fp = assert(io.open(LUA_SOURC
+    local fp = assert(io.open(LUA_SOURCE..name, "r"))
+    local inc = fp:read("*a")
+    assert(fp:close())
+    inc = gsub(inc, "#ifndef%s+%w+_h\n#define%s+%w+_h\n", "")
+    inc = gsub(inc, "#endif%s*$", "")
+    return merge_includes(inc)
+  end)
+end
+
+local function get_license(src)
+  return match(src, "/%*+\n%* Copyright %(.-%*/\n")
+end
+
+local function fold_lines(src)
+  return gsub(src, "\\\n", " ")
+end
+
+local strings = {}
+
+local function save_str(str)
+  local n = #strings+1
+  strings[n] = str
+  return "\1"..n.."\2"
+end
+
+local function save_strings(src)
+  src = gsub(src, '"[^"\n]*"', save_str)
+  return gsub(src, "'[^'\n]*'", save_str)
+end
+
+local function restore_strings(src)
+  return gsub(src, "\1(%d+)\2", function(numstr)
+    return strings[tonumber(numstr)]
+  end)
+end
+
+local function def_istrue(def)
+  return def == "INT_MAX > 2147483640L" or
+	 def == "LUAI_BITSINT >= 32" or
+	 def == "SIZE_Bx < LUAI_BITSINT-1" or
+	 def == "cast" or
+	 def == "defined(LUA_CORE)" or
+	 def == "MINSTRTABSIZE" or
+	 def == "LUA_MINBUFFER" or
+	 def == "HARDSTACKTESTS" or
+	 def == "UNUSED"
+end
+
+local head, defs = {[[
+#ifdef _MSC_VER
+typedef unsigned __int64 U64;
+#else
+typedef unsigned long long U64;
+#endif
+int _CRT_glob = 0;
+]]}, {}
+
+local function preprocess(src)
+  local t = { match(src, "^(.-)#") }
+  local lvl, on, oldon = 0, true, {}
+  for pp, def, txt in string.gmatch(src, "#(%w+) *([^\n]*)\n([^#]*)") do
+    if pp == "if" or pp == "ifdef"
