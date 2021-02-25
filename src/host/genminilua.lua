@@ -217,4 +217,54 @@ local function preprocess(src)
   local t = { match(src, "^(.-)#") }
   local lvl, on, oldon = 0, true, {}
   for pp, def, txt in string.gmatch(src, "#(%w+) *([^\n]*)\n([^#]*)") do
-    if pp == "if" or pp == "ifdef"
+    if pp == "if" or pp == "ifdef" or pp == "ifndef" then
+      lvl = lvl + 1
+      oldon[lvl] = on
+      on = def_istrue(def)
+    elseif pp == "else" then
+      if oldon[lvl] then
+	if on == false then on = true else on = false end
+      end
+    elseif pp == "elif" then
+      if oldon[lvl] then
+	on = def_istrue(def)
+      end
+    elseif pp == "endif" then
+      on = oldon[lvl]
+      lvl = lvl - 1
+    elseif on then
+      if pp == "include" then
+	if not head[def] and not REMOVE_EXTINC[def] then
+	  head[def] = true
+	  head[#head+1] = "#include "..def.."\n"
+	end
+      elseif pp == "define" then
+	local k, sp, v = match(def, "([%w_]+)(%s*)(.*)")
+	if k and not (sp == "" and sub(v, 1, 1) == "(") then
+	  defs[k] = gsub(v, "%a[%w_]*", function(tok)
+	    return defs[tok] or tok
+	  end)
+	else
+	  t[#t+1] = "#define "..def.."\n"
+	end
+      elseif pp ~= "undef" then
+	error("unexpected directive: "..pp.." "..def)
+      end
+    end
+    if on then t[#t+1] = txt end
+  end
+  return gsub(table.concat(t), "%a[%w_]*", function(tok)
+    return defs[tok] or tok
+  end)
+end
+
+local function merge_header(src, license)
+  local hdr = string.format([[
+/* This is a heavily customized and minimized copy of Lua %s. */
+/* It's only used to build LuaJIT. It does NOT have all standard functions! */
+]], LUA_VERSION)
+  return hdr..license..table.concat(head)..src
+end
+
+local function strip_unused1(src)
+  return gsub(src, '(  {"?([%w_]+)"?,
