@@ -410,4 +410,27 @@ local function func_collect(src)
     if j and j < i then used["*"..n] = j end
   end
   for n,i in pairs(nodes) do
-    if not used[n] then 
+    if not used[n] then list[i] = "" end
+  end
+  return table.concat(list)
+end
+
+find_sources()
+local src = read_sources()
+src = merge_includes(src)
+local license = get_license(src)
+src = fold_lines(src)
+src = strip_unused1(src)
+src = save_strings(src)
+src = strip_unused2(src)
+src = strip_comments(src)
+src = preprocess(src)
+src = strip_whitespace(src)
+src = strip_unused3(src)
+src = rename_tokens1(src)
+src = func_collect(src)
+src = rename_tokens2(src)
+src = restore_strings(src)
+src = fix_bugs_and_warnings(src)
+src = merge_header(src, license)
+io.write(src)
