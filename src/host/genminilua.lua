@@ -300,4 +300,51 @@ local function strip_unused3(src)
   src = gsub(src, "if%([^\n]*hookmask[^\n]*&&\n[^\n]*%b{}\n", "")
   src = gsub(src, "(twoto%b()%()", "%1(size_t)")
   src = gsub(src, "i<sizenode", "i<(int)sizenode")
-  src = gsub(sr
+  src = gsub(src, "cast%(unsigned int,key%-1%)", "cast(unsigned int,key)-1")
+  return gsub(src, "\n\n+", "\n")
+end
+
+local function strip_comments(src)
+  return gsub(src, "/%*.-%*/", " ")
+end
+
+local function strip_whitespace(src)
+  src = gsub(src, "^%s+", "")
+  src = gsub(src, "%s*\n%s*", "\n")
+  src = gsub(src, "[ \t]+", " ")
+  src = gsub(src, "(%W) ", "%1")
+  return gsub(src, " (%W)", "%1")
+end
+
+local function rename_tokens1(src)
+  src = gsub(src, "getline", "getline_")
+  src = gsub(src, "struct ([%w_]+)", "ZX%1")
+  return gsub(src, "union ([%w_]+)", "ZY%1")
+end
+
+local function rename_tokens2(src)
+  src = gsub(src, "ZX([%w_]+)", "struct %1")
+  return gsub(src, "ZY([%w_]+)", "union %1")
+end
+
+local function fix_bugs_and_warnings(src)
+ src = gsub(src, "(luaD_checkstack%(L,p%->maxstacksize)%)", "%1+p->numparams)")
+ src = gsub(src, "if%(sep==%-1%)(return'%[';)\nelse (luaX_lexerror%b();)", "if (sep!=-1)%2\n%1")
+ return gsub(src, "(default:{\nNode%*n=mainposition)", "/*fallthrough*/\n%1")
+end
+
+local function func_gather(src)
+  local nodes, list = {}, {}
+  local pos, len = 1, #src
+  while pos < len do
+    local d, w = match(src, "^(#define ([%w_]+)[^\n]*\n)", pos)
+    if d then
+      local n = #list+1
+      list[n] = d
+      nodes[w] = n
+    else
+      local s
+      d, w, s = match(src, "^(([%w_]+)[^\n]*([{;])\n)", pos)
+      if not d then
+	d, w, s = match(src, "^(([%w_]+)[^(]*%b()([{;])\n)", pos)
+	if not d th
