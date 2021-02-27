@@ -267,4 +267,37 @@ local function merge_header(src, license)
 end
 
 local function strip_unused1(src)
-  return gsub(src, '(  {"?([%w_]+)"?,
+  return gsub(src, '(  {"?([%w_]+)"?,%s+%a[%w_]*},\n)', function(line, func)
+    return REMOVE_LIB[func] and "" or line
+  end)
+end
+
+local function strip_unused2(src)
+  return gsub(src, "Symbolic Execution.-}=", "")
+end
+
+local function strip_unused3(src)
+  src = gsub(src, "extern", "static")
+  src = gsub(src, "\nstatic([^\n]-)%(([^)]*)%)%(", "\nstatic%1 %2(")
+  src = gsub(src, "#define lua_assert[^\n]*\n", "")
+  src = gsub(src, "lua_assert%b();?", "")
+  src = gsub(src, "default:\n}", "default:;\n}")
+  src = gsub(src, "lua_lock%b();", "")
+  src = gsub(src, "lua_unlock%b();", "")
+  src = gsub(src, "luai_threadyield%b();", "")
+  src = gsub(src, "luai_userstateopen%b();", "{}")
+  src = gsub(src, "luai_userstate%w+%b();", "")
+  src = gsub(src, "%(%(c==.*luaY_parser%)", "luaY_parser")
+  src = gsub(src, "trydecpoint%(ls,seminfo%)",
+		  "luaX_lexerror(ls,\"malformed number\",TK_NUMBER)")
+  src = gsub(src, "int c=luaZ_lookahead%b();", "")
+  src = gsub(src, "luaL_register%(L,[^,]*,co_funcs%);\nreturn 2;",
+		  "return 1;")
+  src = gsub(src, "getfuncname%b():", "NULL:")
+  src = gsub(src, "getobjname%b():", "NULL:")
+  src = gsub(src, "if%([^\n]*hookmask[^\n]*%)\n[^\n]*\n", "")
+  src = gsub(src, "if%([^\n]*hookmask[^\n]*%)%b{}\n", "")
+  src = gsub(src, "if%([^\n]*hookmask[^\n]*&&\n[^\n]*%b{}\n", "")
+  src = gsub(src, "(twoto%b()%()", "%1(size_t)")
+  src = gsub(src, "i<sizenode", "i<(int)sizenode")
+  src = gsub(sr
