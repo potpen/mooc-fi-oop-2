@@ -347,4 +347,67 @@ local function func_gather(src)
       d, w, s = match(src, "^(([%w_]+)[^\n]*([{;])\n)", pos)
       if not d then
 	d, w, s = match(src, "^(([%w_]+)[^(]*%b()([{;])\n)", pos)
-	if not d th
+	if not d then d = match(src, "^[^\n]*\n", pos) end
+      end
+      if s == "{" then
+	d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
+	if sub(d, -2) == "{\n" then
+	  d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
+	end
+      end
+      local k, v = nil, d
+      if w == "typedef" then
+	if match(d, "^typedef enum") then
+	  head[#head+1] = d
+	else
+	  k = match(d, "([%w_]+);\n$")
+	  if not k then k = match(d, "^.-%(.-([%w_]+)%)%(") end
+	end
+      elseif w == "enum" then
+	head[#head+1] = v
+      elseif w ~= nil then
+	k = match(d, "^[^\n]-([%w_]+)[(%[=]")
+	if k then
+	  if w ~= "static" and k ~= "main" then v = "static "..d end
+	else
+	  k = w
+	end
+      end
+      if w and k then
+	local o = nodes[k]
+	if o then nodes["*"..k] = o end
+	local n = #list+1
+	list[n] = v
+	nodes[k] = n
+      end
+    end
+    pos = pos + #d
+  end
+  return nodes, list
+end
+
+local function func_visit(nodes, list, used, n)
+  local i = nodes[n]
+  for m in string.gmatch(list[i], "[%w_]+") do
+    if nodes[m] then
+      local j = used[m]
+      if not j then
+	used[m] = i
+	func_visit(nodes, list, used, m)
+      elseif i < j then
+	used[m] = i
+      end
+    end
+  end
+end
+
+local function func_collect(src)
+  local nodes, list = func_gather(src)
+  local used = {}
+  func_visit(nodes, list, used, "main")
+  for n,i in pairs(nodes) do
+    local j = used[n]
+    if j and j < i then used["*"..n] = j end
+  end
+  for n,i in pairs(nodes) do
+    if not used[n] then 
