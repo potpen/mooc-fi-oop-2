@@ -2277,3 +2277,1447 @@ L1->base=L1->ci->base=L1->top;
 L1->ci->top=L1->top+20;
 }
 static void freestack(lua_State*L,lua_State*L1){
+luaM_freearray(L,L1->base_ci,L1->size_ci,CallInfo);
+luaM_freearray(L,L1->stack,L1->stacksize,TValue);
+}
+static void f_luaopen(lua_State*L,void*ud){
+global_State*g=G(L);
+UNUSED(ud);
+stack_init(L,L);
+sethvalue(L,gt(L),luaH_new(L,0,2));
+sethvalue(L,registry(L),luaH_new(L,0,2));
+luaS_resize(L,32);
+luaT_init(L);
+luaX_init(L);
+luaS_fix(luaS_newliteral(L,"not enough memory"));
+g->GCthreshold=4*g->totalbytes;
+}
+static void preinit_state(lua_State*L,global_State*g){
+G(L)=g;
+L->stack=NULL;
+L->stacksize=0;
+L->errorJmp=NULL;
+L->hook=NULL;
+L->hookmask=0;
+L->basehookcount=0;
+L->allowhook=1;
+resethookcount(L);
+L->openupval=NULL;
+L->size_ci=0;
+L->nCcalls=L->baseCcalls=0;
+L->status=0;
+L->base_ci=L->ci=NULL;
+L->savedpc=NULL;
+L->errfunc=0;
+setnilvalue(gt(L));
+}
+static void close_state(lua_State*L){
+global_State*g=G(L);
+luaF_close(L,L->stack);
+luaC_freeall(L);
+luaM_freearray(L,G(L)->strt.hash,G(L)->strt.size,TString*);
+luaZ_freebuffer(L,&g->buff);
+freestack(L,L);
+(*g->frealloc)(g->ud,fromstate(L),state_size(LG),0);
+}
+static void luaE_freethread(lua_State*L,lua_State*L1){
+luaF_close(L1,L1->stack);
+freestack(L,L1);
+luaM_freemem(L,fromstate(L1),state_size(lua_State));
+}
+static lua_State*lua_newstate(lua_Alloc f,void*ud){
+int i;
+lua_State*L;
+global_State*g;
+void*l=(*f)(ud,NULL,0,state_size(LG));
+if(l==NULL)return NULL;
+L=tostate(l);
+g=&((LG*)L)->g;
+L->next=NULL;
+L->tt=8;
+g->currentwhite=bit2mask(0,5);
+L->marked=luaC_white(g);
+set2bits(L->marked,5,6);
+preinit_state(L,g);
+g->frealloc=f;
+g->ud=ud;
+g->mainthread=L;
+g->uvhead.u.l.prev=&g->uvhead;
+g->uvhead.u.l.next=&g->uvhead;
+g->GCthreshold=0;
+g->strt.size=0;
+g->strt.nuse=0;
+g->strt.hash=NULL;
+setnilvalue(registry(L));
+luaZ_initbuffer(L,&g->buff);
+g->panic=NULL;
+g->gcstate=0;
+g->rootgc=obj2gco(L);
+g->sweepstrgc=0;
+g->sweepgc=&g->rootgc;
+g->gray=NULL;
+g->grayagain=NULL;
+g->weak=NULL;
+g->tmudata=NULL;
+g->totalbytes=sizeof(LG);
+g->gcpause=200;
+g->gcstepmul=200;
+g->gcdept=0;
+for(i=0;i<(8+1);i++)g->mt[i]=NULL;
+if(luaD_rawrunprotected(L,f_luaopen,NULL)!=0){
+close_state(L);
+L=NULL;
+}
+else
+{}
+return L;
+}
+static void callallgcTM(lua_State*L,void*ud){
+UNUSED(ud);
+luaC_callGCTM(L);
+}
+static void lua_close(lua_State*L){
+L=G(L)->mainthread;
+luaF_close(L,L->stack);
+luaC_separateudata(L,1);
+L->errfunc=0;
+do{
+L->ci=L->base_ci;
+L->base=L->top=L->ci->base;
+L->nCcalls=L->baseCcalls=0;
+}while(luaD_rawrunprotected(L,callallgcTM,NULL)!=0);
+close_state(L);
+}
+#define getcode(fs,e)((fs)->f->code[(e)->u.s.info])
+#define luaK_codeAsBx(fs,o,A,sBx)luaK_codeABx(fs,o,A,(sBx)+(((1<<(9+9))-1)>>1))
+#define luaK_setmultret(fs,e)luaK_setreturns(fs,e,(-1))
+static int luaK_codeABx(FuncState*fs,OpCode o,int A,unsigned int Bx);
+static int luaK_codeABC(FuncState*fs,OpCode o,int A,int B,int C);
+static void luaK_setreturns(FuncState*fs,expdesc*e,int nresults);
+static void luaK_patchtohere(FuncState*fs,int list);
+static void luaK_concat(FuncState*fs,int*l1,int l2);
+static int currentpc(lua_State*L,CallInfo*ci){
+if(!isLua(ci))return-1;
+if(ci==L->ci)
+ci->savedpc=L->savedpc;
+return pcRel(ci->savedpc,ci_func(ci)->l.p);
+}
+static int currentline(lua_State*L,CallInfo*ci){
+int pc=currentpc(L,ci);
+if(pc<0)
+return-1;
+else
+return getline_(ci_func(ci)->l.p,pc);
+}
+static int lua_getstack(lua_State*L,int level,lua_Debug*ar){
+int status;
+CallInfo*ci;
+for(ci=L->ci;level>0&&ci>L->base_ci;ci--){
+level--;
+if(f_isLua(ci))
+level-=ci->tailcalls;
+}
+if(level==0&&ci>L->base_ci){
+status=1;
+ar->i_ci=cast_int(ci-L->base_ci);
+}
+else if(level<0){
+status=1;
+ar->i_ci=0;
+}
+else status=0;
+return status;
+}
+static Proto*getluaproto(CallInfo*ci){
+return(isLua(ci)?ci_func(ci)->l.p:NULL);
+}
+static void funcinfo(lua_Debug*ar,Closure*cl){
+if(cl->c.isC){
+ar->source="=[C]";
+ar->linedefined=-1;
+ar->lastlinedefined=-1;
+ar->what="C";
+}
+else{
+ar->source=getstr(cl->l.p->source);
+ar->linedefined=cl->l.p->linedefined;
+ar->lastlinedefined=cl->l.p->lastlinedefined;
+ar->what=(ar->linedefined==0)?"main":"Lua";
+}
+luaO_chunkid(ar->short_src,ar->source,60);
+}
+static void info_tailcall(lua_Debug*ar){
+ar->name=ar->namewhat="";
+ar->what="tail";
+ar->lastlinedefined=ar->linedefined=ar->currentline=-1;
+ar->source="=(tail call)";
+luaO_chunkid(ar->short_src,ar->source,60);
+ar->nups=0;
+}
+static void collectvalidlines(lua_State*L,Closure*f){
+if(f==NULL||f->c.isC){
+setnilvalue(L->top);
+}
+else{
+Table*t=luaH_new(L,0,0);
+int*lineinfo=f->l.p->lineinfo;
+int i;
+for(i=0;i<f->l.p->sizelineinfo;i++)
+setbvalue(luaH_setnum(L,t,lineinfo[i]),1);
+sethvalue(L,L->top,t);
+}
+incr_top(L);
+}
+static int auxgetinfo(lua_State*L,const char*what,lua_Debug*ar,
+Closure*f,CallInfo*ci){
+int status=1;
+if(f==NULL){
+info_tailcall(ar);
+return status;
+}
+for(;*what;what++){
+switch(*what){
+case'S':{
+funcinfo(ar,f);
+break;
+}
+case'l':{
+ar->currentline=(ci)?currentline(L,ci):-1;
+break;
+}
+case'u':{
+ar->nups=f->c.nupvalues;
+break;
+}
+case'n':{
+ar->namewhat=(ci)?NULL:NULL;
+if(ar->namewhat==NULL){
+ar->namewhat="";
+ar->name=NULL;
+}
+break;
+}
+case'L':
+case'f':
+break;
+default:status=0;
+}
+}
+return status;
+}
+static int lua_getinfo(lua_State*L,const char*what,lua_Debug*ar){
+int status;
+Closure*f=NULL;
+CallInfo*ci=NULL;
+if(*what=='>'){
+StkId func=L->top-1;
+luai_apicheck(L,ttisfunction(func));
+what++;
+f=clvalue(func);
+L->top--;
+}
+else if(ar->i_ci!=0){
+ci=L->base_ci+ar->i_ci;
+f=clvalue(ci->func);
+}
+status=auxgetinfo(L,what,ar,f,ci);
+if(strchr(what,'f')){
+if(f==NULL)setnilvalue(L->top);
+else setclvalue(L,L->top,f);
+incr_top(L);
+}
+if(strchr(what,'L'))
+collectvalidlines(L,f);
+return status;
+}
+static int isinstack(CallInfo*ci,const TValue*o){
+StkId p;
+for(p=ci->base;p<ci->top;p++)
+if(o==p)return 1;
+return 0;
+}
+static void luaG_typeerror(lua_State*L,const TValue*o,const char*op){
+const char*name=NULL;
+const char*t=luaT_typenames[ttype(o)];
+const char*kind=(isinstack(L->ci,o))?
+NULL:
+NULL;
+if(kind)
+luaG_runerror(L,"attempt to %s %s "LUA_QL("%s")" (a %s value)",
+op,kind,name,t);
+else
+luaG_runerror(L,"attempt to %s a %s value",op,t);
+}
+static void luaG_concaterror(lua_State*L,StkId p1,StkId p2){
+if(ttisstring(p1)||ttisnumber(p1))p1=p2;
+luaG_typeerror(L,p1,"concatenate");
+}
+static void luaG_aritherror(lua_State*L,const TValue*p1,const TValue*p2){
+TValue temp;
+if(luaV_tonumber(p1,&temp)==NULL)
+p2=p1;
+luaG_typeerror(L,p2,"perform arithmetic on");
+}
+static int luaG_ordererror(lua_State*L,const TValue*p1,const TValue*p2){
+const char*t1=luaT_typenames[ttype(p1)];
+const char*t2=luaT_typenames[ttype(p2)];
+if(t1[2]==t2[2])
+luaG_runerror(L,"attempt to compare two %s values",t1);
+else
+luaG_runerror(L,"attempt to compare %s with %s",t1,t2);
+return 0;
+}
+static void addinfo(lua_State*L,const char*msg){
+CallInfo*ci=L->ci;
+if(isLua(ci)){
+char buff[60];
+int line=currentline(L,ci);
+luaO_chunkid(buff,getstr(getluaproto(ci)->source),60);
+luaO_pushfstring(L,"%s:%d: %s",buff,line,msg);
+}
+}
+static void luaG_errormsg(lua_State*L){
+if(L->errfunc!=0){
+StkId errfunc=restorestack(L,L->errfunc);
+if(!ttisfunction(errfunc))luaD_throw(L,5);
+setobj(L,L->top,L->top-1);
+setobj(L,L->top-1,errfunc);
+incr_top(L);
+luaD_call(L,L->top-2,1);
+}
+luaD_throw(L,2);
+}
+static void luaG_runerror(lua_State*L,const char*fmt,...){
+va_list argp;
+va_start(argp,fmt);
+addinfo(L,luaO_pushvfstring(L,fmt,argp));
+va_end(argp);
+luaG_errormsg(L);
+}
+static int luaZ_fill(ZIO*z){
+size_t size;
+lua_State*L=z->L;
+const char*buff;
+buff=z->reader(L,z->data,&size);
+if(buff==NULL||size==0)return(-1);
+z->n=size-1;
+z->p=buff;
+return char2int(*(z->p++));
+}
+static void luaZ_init(lua_State*L,ZIO*z,lua_Reader reader,void*data){
+z->L=L;
+z->reader=reader;
+z->data=data;
+z->n=0;
+z->p=NULL;
+}
+static char*luaZ_openspace(lua_State*L,Mbuffer*buff,size_t n){
+if(n>buff->buffsize){
+if(n<32)n=32;
+luaZ_resizebuffer(L,buff,n);
+}
+return buff->buffer;
+}
+#define opmode(t,a,b,c,m)(((t)<<7)|((a)<<6)|((b)<<4)|((c)<<2)|(m))
+static const lu_byte luaP_opmodes[(cast(int,OP_VARARG)+1)]={
+opmode(0,1,OpArgR,OpArgN,iABC)
+,opmode(0,1,OpArgK,OpArgN,iABx)
+,opmode(0,1,OpArgU,OpArgU,iABC)
+,opmode(0,1,OpArgR,OpArgN,iABC)
+,opmode(0,1,OpArgU,OpArgN,iABC)
+,opmode(0,1,OpArgK,OpArgN,iABx)
+,opmode(0,1,OpArgR,OpArgK,iABC)
+,opmode(0,0,OpArgK,OpArgN,iABx)
+,opmode(0,0,OpArgU,OpArgN,iABC)
+,opmode(0,0,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgU,OpArgU,iABC)
+,opmode(0,1,OpArgR,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgK,OpArgK,iABC)
+,opmode(0,1,OpArgR,OpArgN,iABC)
+,opmode(0,1,OpArgR,OpArgN,iABC)
+,opmode(0,1,OpArgR,OpArgN,iABC)
+,opmode(0,1,OpArgR,OpArgR,iABC)
+,opmode(0,0,OpArgR,OpArgN,iAsBx)
+,opmode(1,0,OpArgK,OpArgK,iABC)
+,opmode(1,0,OpArgK,OpArgK,iABC)
+,opmode(1,0,OpArgK,OpArgK,iABC)
+,opmode(1,1,OpArgR,OpArgU,iABC)
+,opmode(1,1,OpArgR,OpArgU,iABC)
+,opmode(0,1,OpArgU,OpArgU,iABC)
+,opmode(0,1,OpArgU,OpArgU,iABC)
+,opmode(0,0,OpArgU,OpArgN,iABC)
+,opmode(0,1,OpArgR,OpArgN,iAsBx)
+,opmode(0,1,OpArgR,OpArgN,iAsBx)
+,opmode(1,0,OpArgN,OpArgU,iABC)
+,opmode(0,0,OpArgU,OpArgU,iABC)
+,opmode(0,0,OpArgN,OpArgN,iABC)
+,opmode(0,1,OpArgU,OpArgN,iABx)
+,opmode(0,1,OpArgU,OpArgN,iABC)
+};
+#define next(ls)(ls->current=zgetc(ls->z))
+#define currIsNewline(ls)(ls->current=='\n'||ls->current=='\r')
+static const char*const luaX_tokens[]={
+"and","break","do","else","elseif",
+"end","false","for","function","if",
+"in","local","nil","not","or","repeat",
+"return","then","true","until","while",
+"..","...","==",">=","<=","~=",
+"<number>","<name>","<string>","<eof>",
+NULL
+};
+#define save_and_next(ls)(save(ls,ls->current),next(ls))
+static void save(LexState*ls,int c){
+Mbuffer*b=ls->buff;
+if(b->n+1>b->buffsize){
+size_t newsize;
+if(b->buffsize>=((size_t)(~(size_t)0)-2)/2)
+luaX_lexerror(ls,"lexical element too long",0);
+newsize=b->buffsize*2;
+luaZ_resizebuffer(ls->L,b,newsize);
+}
+b->buffer[b->n++]=cast(char,c);
+}
+static void luaX_init(lua_State*L){
+int i;
+for(i=0;i<(cast(int,TK_WHILE-257+1));i++){
+TString*ts=luaS_new(L,luaX_tokens[i]);
+luaS_fix(ts);
+ts->tsv.reserved=cast_byte(i+1);
+}
+}
+static const char*luaX_token2str(LexState*ls,int token){
+if(token<257){
+return(iscntrl(token))?luaO_pushfstring(ls->L,"char(%d)",token):
+luaO_pushfstring(ls->L,"%c",token);
+}
+else
+return luaX_tokens[token-257];
+}
+static const char*txtToken(LexState*ls,int token){
+switch(token){
+case TK_NAME:
+case TK_STRING:
+case TK_NUMBER:
+save(ls,'\0');
+return luaZ_buffer(ls->buff);
+default:
+return luaX_token2str(ls,token);
+}
+}
+static void luaX_lexerror(LexState*ls,const char*msg,int token){
+char buff[80];
+luaO_chunkid(buff,getstr(ls->source),80);
+msg=luaO_pushfstring(ls->L,"%s:%d: %s",buff,ls->linenumber,msg);
+if(token)
+luaO_pushfstring(ls->L,"%s near "LUA_QL("%s"),msg,txtToken(ls,token));
+luaD_throw(ls->L,3);
+}
+static void luaX_syntaxerror(LexState*ls,const char*msg){
+luaX_lexerror(ls,msg,ls->t.token);
+}
+static TString*luaX_newstring(LexState*ls,const char*str,size_t l){
+lua_State*L=ls->L;
+TString*ts=luaS_newlstr(L,str,l);
+TValue*o=luaH_setstr(L,ls->fs->h,ts);
+if(ttisnil(o)){
+setbvalue(o,1);
+luaC_checkGC(L);
+}
+return ts;
+}
+static void inclinenumber(LexState*ls){
+int old=ls->current;
+next(ls);
+if(currIsNewline(ls)&&ls->current!=old)
+next(ls);
+if(++ls->linenumber>=(INT_MAX-2))
+luaX_syntaxerror(ls,"chunk has too many lines");
+}
+static void luaX_setinput(lua_State*L,LexState*ls,ZIO*z,TString*source){
+ls->decpoint='.';
+ls->L=L;
+ls->lookahead.token=TK_EOS;
+ls->z=z;
+ls->fs=NULL;
+ls->linenumber=1;
+ls->lastline=1;
+ls->source=source;
+luaZ_resizebuffer(ls->L,ls->buff,32);
+next(ls);
+}
+static int check_next(LexState*ls,const char*set){
+if(!strchr(set,ls->current))
+return 0;
+save_and_next(ls);
+return 1;
+}
+static void buffreplace(LexState*ls,char from,char to){
+size_t n=luaZ_bufflen(ls->buff);
+char*p=luaZ_buffer(ls->buff);
+while(n--)
+if(p[n]==from)p[n]=to;
+}
+static void read_numeral(LexState*ls,SemInfo*seminfo){
+do{
+save_and_next(ls);
+}while(isdigit(ls->current)||ls->current=='.');
+if(check_next(ls,"Ee"))
+check_next(ls,"+-");
+while(isalnum(ls->current)||ls->current=='_')
+save_and_next(ls);
+save(ls,'\0');
+buffreplace(ls,'.',ls->decpoint);
+if(!luaO_str2d(luaZ_buffer(ls->buff),&seminfo->r))
+luaX_lexerror(ls,"malformed number",TK_NUMBER);
+}
+static int skip_sep(LexState*ls){
+int count=0;
+int s=ls->current;
+save_and_next(ls);
+while(ls->current=='='){
+save_and_next(ls);
+count++;
+}
+return(ls->current==s)?count:(-count)-1;
+}
+static void read_long_string(LexState*ls,SemInfo*seminfo,int sep){
+int cont=0;
+(void)(cont);
+save_and_next(ls);
+if(currIsNewline(ls))
+inclinenumber(ls);
+for(;;){
+switch(ls->current){
+case(-1):
+luaX_lexerror(ls,(seminfo)?"unfinished long string":
+"unfinished long comment",TK_EOS);
+break;
+case']':{
+if(skip_sep(ls)==sep){
+save_and_next(ls);
+goto endloop;
+}
+break;
+}
+case'\n':
+case'\r':{
+save(ls,'\n');
+inclinenumber(ls);
+if(!seminfo)luaZ_resetbuffer(ls->buff);
+break;
+}
+default:{
+if(seminfo)save_and_next(ls);
+else next(ls);
+}
+}
+}endloop:
+if(seminfo)
+seminfo->ts=luaX_newstring(ls,luaZ_buffer(ls->buff)+(2+sep),
+luaZ_bufflen(ls->buff)-2*(2+sep));
+}
+static void read_string(LexState*ls,int del,SemInfo*seminfo){
+save_and_next(ls);
+while(ls->current!=del){
+switch(ls->current){
+case(-1):
+luaX_lexerror(ls,"unfinished string",TK_EOS);
+continue;
+case'\n':
+case'\r':
+luaX_lexerror(ls,"unfinished string",TK_STRING);
+continue;
+case'\\':{
+int c;
+next(ls);
+switch(ls->current){
+case'a':c='\a';break;
+case'b':c='\b';break;
+case'f':c='\f';break;
+case'n':c='\n';break;
+case'r':c='\r';break;
+case't':c='\t';break;
+case'v':c='\v';break;
+case'\n':
+case'\r':save(ls,'\n');inclinenumber(ls);continue;
+case(-1):continue;
+default:{
+if(!isdigit(ls->current))
+save_and_next(ls);
+else{
+int i=0;
+c=0;
+do{
+c=10*c+(ls->current-'0');
+next(ls);
+}while(++i<3&&isdigit(ls->current));
+if(c>UCHAR_MAX)
+luaX_lexerror(ls,"escape sequence too large",TK_STRING);
+save(ls,c);
+}
+continue;
+}
+}
+save(ls,c);
+next(ls);
+continue;
+}
+default:
+save_and_next(ls);
+}
+}
+save_and_next(ls);
+seminfo->ts=luaX_newstring(ls,luaZ_buffer(ls->buff)+1,
+luaZ_bufflen(ls->buff)-2);
+}
+static int llex(LexState*ls,SemInfo*seminfo){
+luaZ_resetbuffer(ls->buff);
+for(;;){
+switch(ls->current){
+case'\n':
+case'\r':{
+inclinenumber(ls);
+continue;
+}
+case'-':{
+next(ls);
+if(ls->current!='-')return'-';
+next(ls);
+if(ls->current=='['){
+int sep=skip_sep(ls);
+luaZ_resetbuffer(ls->buff);
+if(sep>=0){
+read_long_string(ls,NULL,sep);
+luaZ_resetbuffer(ls->buff);
+continue;
+}
+}
+while(!currIsNewline(ls)&&ls->current!=(-1))
+next(ls);
+continue;
+}
+case'[':{
+int sep=skip_sep(ls);
+if(sep>=0){
+read_long_string(ls,seminfo,sep);
+return TK_STRING;
+}
+else if (sep!=-1)luaX_lexerror(ls,"invalid long string delimiter",TK_STRING);
+return'[';
+}
+case'=':{
+next(ls);
+if(ls->current!='=')return'=';
+else{next(ls);return TK_EQ;}
+}
+case'<':{
+next(ls);
+if(ls->current!='=')return'<';
+else{next(ls);return TK_LE;}
+}
+case'>':{
+next(ls);
+if(ls->current!='=')return'>';
+else{next(ls);return TK_GE;}
+}
+case'~':{
+next(ls);
+if(ls->current!='=')return'~';
+else{next(ls);return TK_NE;}
+}
+case'"':
+case'\'':{
+read_string(ls,ls->current,seminfo);
+return TK_STRING;
+}
+case'.':{
+save_and_next(ls);
+if(check_next(ls,".")){
+if(check_next(ls,"."))
+return TK_DOTS;
+else return TK_CONCAT;
+}
+else if(!isdigit(ls->current))return'.';
+else{
+read_numeral(ls,seminfo);
+return TK_NUMBER;
+}
+}
+case(-1):{
+return TK_EOS;
+}
+default:{
+if(isspace(ls->current)){
+next(ls);
+continue;
+}
+else if(isdigit(ls->current)){
+read_numeral(ls,seminfo);
+return TK_NUMBER;
+}
+else if(isalpha(ls->current)||ls->current=='_'){
+TString*ts;
+do{
+save_and_next(ls);
+}while(isalnum(ls->current)||ls->current=='_');
+ts=luaX_newstring(ls,luaZ_buffer(ls->buff),
+luaZ_bufflen(ls->buff));
+if(ts->tsv.reserved>0)
+return ts->tsv.reserved-1+257;
+else{
+seminfo->ts=ts;
+return TK_NAME;
+}
+}
+else{
+int c=ls->current;
+next(ls);
+return c;
+}
+}
+}
+}
+}
+static void luaX_next(LexState*ls){
+ls->lastline=ls->linenumber;
+if(ls->lookahead.token!=TK_EOS){
+ls->t=ls->lookahead;
+ls->lookahead.token=TK_EOS;
+}
+else
+ls->t.token=llex(ls,&ls->t.seminfo);
+}
+static void luaX_lookahead(LexState*ls){
+ls->lookahead.token=llex(ls,&ls->lookahead.seminfo);
+}
+#define hasjumps(e)((e)->t!=(e)->f)
+static int isnumeral(expdesc*e){
+return(e->k==VKNUM&&e->t==(-1)&&e->f==(-1));
+}
+static void luaK_nil(FuncState*fs,int from,int n){
+Instruction*previous;
+if(fs->pc>fs->lasttarget){
+if(fs->pc==0){
+if(from>=fs->nactvar)
+return;
+}
+else{
+previous=&fs->f->code[fs->pc-1];
+if(GET_OPCODE(*previous)==OP_LOADNIL){
+int pfrom=GETARG_A(*previous);
+int pto=GETARG_B(*previous);
+if(pfrom<=from&&from<=pto+1){
+if(from+n-1>pto)
+SETARG_B(*previous,from+n-1);
+return;
+}
+}
+}
+}
+luaK_codeABC(fs,OP_LOADNIL,from,from+n-1,0);
+}
+static int luaK_jump(FuncState*fs){
+int jpc=fs->jpc;
+int j;
+fs->jpc=(-1);
+j=luaK_codeAsBx(fs,OP_JMP,0,(-1));
+luaK_concat(fs,&j,jpc);
+return j;
+}
+static void luaK_ret(FuncState*fs,int first,int nret){
+luaK_codeABC(fs,OP_RETURN,first,nret+1,0);
+}
+static int condjump(FuncState*fs,OpCode op,int A,int B,int C){
+luaK_codeABC(fs,op,A,B,C);
+return luaK_jump(fs);
+}
+static void fixjump(FuncState*fs,int pc,int dest){
+Instruction*jmp=&fs->f->code[pc];
+int offset=dest-(pc+1);
+if(abs(offset)>(((1<<(9+9))-1)>>1))
+luaX_syntaxerror(fs->ls,"control structure too long");
+SETARG_sBx(*jmp,offset);
+}
+static int luaK_getlabel(FuncState*fs){
+fs->lasttarget=fs->pc;
+return fs->pc;
+}
+static int getjump(FuncState*fs,int pc){
+int offset=GETARG_sBx(fs->f->code[pc]);
+if(offset==(-1))
+return(-1);
+else
+return(pc+1)+offset;
+}
+static Instruction*getjumpcontrol(FuncState*fs,int pc){
+Instruction*pi=&fs->f->code[pc];
+if(pc>=1&&testTMode(GET_OPCODE(*(pi-1))))
+return pi-1;
+else
+return pi;
+}
+static int need_value(FuncState*fs,int list){
+for(;list!=(-1);list=getjump(fs,list)){
+Instruction i=*getjumpcontrol(fs,list);
+if(GET_OPCODE(i)!=OP_TESTSET)return 1;
+}
+return 0;
+}
+static int patchtestreg(FuncState*fs,int node,int reg){
+Instruction*i=getjumpcontrol(fs,node);
+if(GET_OPCODE(*i)!=OP_TESTSET)
+return 0;
+if(reg!=((1<<8)-1)&&reg!=GETARG_B(*i))
+SETARG_A(*i,reg);
+else
+*i=CREATE_ABC(OP_TEST,GETARG_B(*i),0,GETARG_C(*i));
+return 1;
+}
+static void removevalues(FuncState*fs,int list){
+for(;list!=(-1);list=getjump(fs,list))
+patchtestreg(fs,list,((1<<8)-1));
+}
+static void patchlistaux(FuncState*fs,int list,int vtarget,int reg,
+int dtarget){
+while(list!=(-1)){
+int next=getjump(fs,list);
+if(patchtestreg(fs,list,reg))
+fixjump(fs,list,vtarget);
+else
+fixjump(fs,list,dtarget);
+list=next;
+}
+}
+static void dischargejpc(FuncState*fs){
+patchlistaux(fs,fs->jpc,fs->pc,((1<<8)-1),fs->pc);
+fs->jpc=(-1);
+}
+static void luaK_patchlist(FuncState*fs,int list,int target){
+if(target==fs->pc)
+luaK_patchtohere(fs,list);
+else{
+patchlistaux(fs,list,target,((1<<8)-1),target);
+}
+}
+static void luaK_patchtohere(FuncState*fs,int list){
+luaK_getlabel(fs);
+luaK_concat(fs,&fs->jpc,list);
+}
+static void luaK_concat(FuncState*fs,int*l1,int l2){
+if(l2==(-1))return;
+else if(*l1==(-1))
+*l1=l2;
+else{
+int list=*l1;
+int next;
+while((next=getjump(fs,list))!=(-1))
+list=next;
+fixjump(fs,list,l2);
+}
+}
+static void luaK_checkstack(FuncState*fs,int n){
+int newstack=fs->freereg+n;
+if(newstack>fs->f->maxstacksize){
+if(newstack>=250)
+luaX_syntaxerror(fs->ls,"function or expression too complex");
+fs->f->maxstacksize=cast_byte(newstack);
+}
+}
+static void luaK_reserveregs(FuncState*fs,int n){
+luaK_checkstack(fs,n);
+fs->freereg+=n;
+}
+static void freereg(FuncState*fs,int reg){
+if(!ISK(reg)&&reg>=fs->nactvar){
+fs->freereg--;
+}
+}
+static void freeexp(FuncState*fs,expdesc*e){
+if(e->k==VNONRELOC)
+freereg(fs,e->u.s.info);
+}
+static int addk(FuncState*fs,TValue*k,TValue*v){
+lua_State*L=fs->L;
+TValue*idx=luaH_set(L,fs->h,k);
+Proto*f=fs->f;
+int oldsize=f->sizek;
+if(ttisnumber(idx)){
+return cast_int(nvalue(idx));
+}
+else{
+setnvalue(idx,cast_num(fs->nk));
+luaM_growvector(L,f->k,fs->nk,f->sizek,TValue,
+((1<<(9+9))-1),"constant table overflow");
+while(oldsize<f->sizek)setnilvalue(&f->k[oldsize++]);
+setobj(L,&f->k[fs->nk],v);
+luaC_barrier(L,f,v);
+return fs->nk++;
+}
+}
+static int luaK_stringK(FuncState*fs,TString*s){
+TValue o;
+setsvalue(fs->L,&o,s);
+return addk(fs,&o,&o);
+}
+static int luaK_numberK(FuncState*fs,lua_Number r){
+TValue o;
+setnvalue(&o,r);
+return addk(fs,&o,&o);
+}
+static int boolK(FuncState*fs,int b){
+TValue o;
+setbvalue(&o,b);
+return addk(fs,&o,&o);
+}
+static int nilK(FuncState*fs){
+TValue k,v;
+setnilvalue(&v);
+sethvalue(fs->L,&k,fs->h);
+return addk(fs,&k,&v);
+}
+static void luaK_setreturns(FuncState*fs,expdesc*e,int nresults){
+if(e->k==VCALL){
+SETARG_C(getcode(fs,e),nresults+1);
+}
+else if(e->k==VVARARG){
+SETARG_B(getcode(fs,e),nresults+1);
+SETARG_A(getcode(fs,e),fs->freereg);
+luaK_reserveregs(fs,1);
+}
+}
+static void luaK_setoneret(FuncState*fs,expdesc*e){
+if(e->k==VCALL){
+e->k=VNONRELOC;
+e->u.s.info=GETARG_A(getcode(fs,e));
+}
+else if(e->k==VVARARG){
+SETARG_B(getcode(fs,e),2);
+e->k=VRELOCABLE;
+}
+}
+static void luaK_dischargevars(FuncState*fs,expdesc*e){
+switch(e->k){
+case VLOCAL:{
+e->k=VNONRELOC;
+break;
+}
+case VUPVAL:{
+e->u.s.info=luaK_codeABC(fs,OP_GETUPVAL,0,e->u.s.info,0);
+e->k=VRELOCABLE;
+break;
+}
+case VGLOBAL:{
+e->u.s.info=luaK_codeABx(fs,OP_GETGLOBAL,0,e->u.s.info);
+e->k=VRELOCABLE;
+break;
+}
+case VINDEXED:{
+freereg(fs,e->u.s.aux);
+freereg(fs,e->u.s.info);
+e->u.s.info=luaK_codeABC(fs,OP_GETTABLE,0,e->u.s.info,e->u.s.aux);
+e->k=VRELOCABLE;
+break;
+}
+case VVARARG:
+case VCALL:{
+luaK_setoneret(fs,e);
+break;
+}
+default:break;
+}
+}
+static int code_label(FuncState*fs,int A,int b,int jump){
+luaK_getlabel(fs);
+return luaK_codeABC(fs,OP_LOADBOOL,A,b,jump);
+}
+static void discharge2reg(FuncState*fs,expdesc*e,int reg){
+luaK_dischargevars(fs,e);
+switch(e->k){
+case VNIL:{
+luaK_nil(fs,reg,1);
+break;
+}
+case VFALSE:case VTRUE:{
+luaK_codeABC(fs,OP_LOADBOOL,reg,e->k==VTRUE,0);
+break;
+}
+case VK:{
+luaK_codeABx(fs,OP_LOADK,reg,e->u.s.info);
+break;
+}
+case VKNUM:{
+luaK_codeABx(fs,OP_LOADK,reg,luaK_numberK(fs,e->u.nval));
+break;
+}
+case VRELOCABLE:{
+Instruction*pc=&getcode(fs,e);
+SETARG_A(*pc,reg);
+break;
+}
+case VNONRELOC:{
+if(reg!=e->u.s.info)
+luaK_codeABC(fs,OP_MOVE,reg,e->u.s.info,0);
+break;
+}
+default:{
+return;
+}
+}
+e->u.s.info=reg;
+e->k=VNONRELOC;
+}
+static void discharge2anyreg(FuncState*fs,expdesc*e){
+if(e->k!=VNONRELOC){
+luaK_reserveregs(fs,1);
+discharge2reg(fs,e,fs->freereg-1);
+}
+}
+static void exp2reg(FuncState*fs,expdesc*e,int reg){
+discharge2reg(fs,e,reg);
+if(e->k==VJMP)
+luaK_concat(fs,&e->t,e->u.s.info);
+if(hasjumps(e)){
+int final;
+int p_f=(-1);
+int p_t=(-1);
+if(need_value(fs,e->t)||need_value(fs,e->f)){
+int fj=(e->k==VJMP)?(-1):luaK_jump(fs);
+p_f=code_label(fs,reg,0,1);
+p_t=code_label(fs,reg,1,0);
+luaK_patchtohere(fs,fj);
+}
+final=luaK_getlabel(fs);
+patchlistaux(fs,e->f,final,reg,p_f);
+patchlistaux(fs,e->t,final,reg,p_t);
+}
+e->f=e->t=(-1);
+e->u.s.info=reg;
+e->k=VNONRELOC;
+}
+static void luaK_exp2nextreg(FuncState*fs,expdesc*e){
+luaK_dischargevars(fs,e);
+freeexp(fs,e);
+luaK_reserveregs(fs,1);
+exp2reg(fs,e,fs->freereg-1);
+}
+static int luaK_exp2anyreg(FuncState*fs,expdesc*e){
+luaK_dischargevars(fs,e);
+if(e->k==VNONRELOC){
+if(!hasjumps(e))return e->u.s.info;
+if(e->u.s.info>=fs->nactvar){
+exp2reg(fs,e,e->u.s.info);
+return e->u.s.info;
+}
+}
+luaK_exp2nextreg(fs,e);
+return e->u.s.info;
+}
+static void luaK_exp2val(FuncState*fs,expdesc*e){
+if(hasjumps(e))
+luaK_exp2anyreg(fs,e);
+else
+luaK_dischargevars(fs,e);
+}
+static int luaK_exp2RK(FuncState*fs,expdesc*e){
+luaK_exp2val(fs,e);
+switch(e->k){
+case VKNUM:
+case VTRUE:
+case VFALSE:
+case VNIL:{
+if(fs->nk<=((1<<(9-1))-1)){
+e->u.s.info=(e->k==VNIL)?nilK(fs):
+(e->k==VKNUM)?luaK_numberK(fs,e->u.nval):
+boolK(fs,(e->k==VTRUE));
+e->k=VK;
+return RKASK(e->u.s.info);
+}
+else break;
+}
+case VK:{
+if(e->u.s.info<=((1<<(9-1))-1))
+return RKASK(e->u.s.info);
+else break;
+}
+default:break;
+}
+return luaK_exp2anyreg(fs,e);
+}
+static void luaK_storevar(FuncState*fs,expdesc*var,expdesc*ex){
+switch(var->k){
+case VLOCAL:{
+freeexp(fs,ex);
+exp2reg(fs,ex,var->u.s.info);
+return;
+}
+case VUPVAL:{
+int e=luaK_exp2anyreg(fs,ex);
+luaK_codeABC(fs,OP_SETUPVAL,e,var->u.s.info,0);
+break;
+}
+case VGLOBAL:{
+int e=luaK_exp2anyreg(fs,ex);
+luaK_codeABx(fs,OP_SETGLOBAL,e,var->u.s.info);
+break;
+}
+case VINDEXED:{
+int e=luaK_exp2RK(fs,ex);
+luaK_codeABC(fs,OP_SETTABLE,var->u.s.info,var->u.s.aux,e);
+break;
+}
+default:{
+break;
+}
+}
+freeexp(fs,ex);
+}
+static void luaK_self(FuncState*fs,expdesc*e,expdesc*key){
+int func;
+luaK_exp2anyreg(fs,e);
+freeexp(fs,e);
+func=fs->freereg;
+luaK_reserveregs(fs,2);
+luaK_codeABC(fs,OP_SELF,func,e->u.s.info,luaK_exp2RK(fs,key));
+freeexp(fs,key);
+e->u.s.info=func;
+e->k=VNONRELOC;
+}
+static void invertjump(FuncState*fs,expdesc*e){
+Instruction*pc=getjumpcontrol(fs,e->u.s.info);
+SETARG_A(*pc,!(GETARG_A(*pc)));
+}
+static int jumponcond(FuncState*fs,expdesc*e,int cond){
+if(e->k==VRELOCABLE){
+Instruction ie=getcode(fs,e);
+if(GET_OPCODE(ie)==OP_NOT){
+fs->pc--;
+return condjump(fs,OP_TEST,GETARG_B(ie),0,!cond);
+}
+}
+discharge2anyreg(fs,e);
+freeexp(fs,e);
+return condjump(fs,OP_TESTSET,((1<<8)-1),e->u.s.info,cond);
+}
+static void luaK_goiftrue(FuncState*fs,expdesc*e){
+int pc;
+luaK_dischargevars(fs,e);
+switch(e->k){
+case VK:case VKNUM:case VTRUE:{
+pc=(-1);
+break;
+}
+case VJMP:{
+invertjump(fs,e);
+pc=e->u.s.info;
+break;
+}
+default:{
+pc=jumponcond(fs,e,0);
+break;
+}
+}
+luaK_concat(fs,&e->f,pc);
+luaK_patchtohere(fs,e->t);
+e->t=(-1);
+}
+static void luaK_goiffalse(FuncState*fs,expdesc*e){
+int pc;
+luaK_dischargevars(fs,e);
+switch(e->k){
+case VNIL:case VFALSE:{
+pc=(-1);
+break;
+}
+case VJMP:{
+pc=e->u.s.info;
+break;
+}
+default:{
+pc=jumponcond(fs,e,1);
+break;
+}
+}
+luaK_concat(fs,&e->t,pc);
+luaK_patchtohere(fs,e->f);
+e->f=(-1);
+}
+static void codenot(FuncState*fs,expdesc*e){
+luaK_dischargevars(fs,e);
+switch(e->k){
+case VNIL:case VFALSE:{
+e->k=VTRUE;
+break;
+}
+case VK:case VKNUM:case VTRUE:{
+e->k=VFALSE;
+break;
+}
+case VJMP:{
+invertjump(fs,e);
+break;
+}
+case VRELOCABLE:
+case VNONRELOC:{
+discharge2anyreg(fs,e);
+freeexp(fs,e);
+e->u.s.info=luaK_codeABC(fs,OP_NOT,0,e->u.s.info,0);
+e->k=VRELOCABLE;
+break;
+}
+default:{
+break;
+}
+}
+{int temp=e->f;e->f=e->t;e->t=temp;}
+removevalues(fs,e->f);
+removevalues(fs,e->t);
+}
+static void luaK_indexed(FuncState*fs,expdesc*t,expdesc*k){
+t->u.s.aux=luaK_exp2RK(fs,k);
+t->k=VINDEXED;
+}
+static int constfolding(OpCode op,expdesc*e1,expdesc*e2){
+lua_Number v1,v2,r;
+if(!isnumeral(e1)||!isnumeral(e2))return 0;
+v1=e1->u.nval;
+v2=e2->u.nval;
+switch(op){
+case OP_ADD:r=luai_numadd(v1,v2);break;
+case OP_SUB:r=luai_numsub(v1,v2);break;
+case OP_MUL:r=luai_nummul(v1,v2);break;
+case OP_DIV:
+if(v2==0)return 0;
+r=luai_numdiv(v1,v2);break;
+case OP_MOD:
+if(v2==0)return 0;
+r=luai_nummod(v1,v2);break;
+case OP_POW:r=luai_numpow(v1,v2);break;
+case OP_UNM:r=luai_numunm(v1);break;
+case OP_LEN:return 0;
+default:r=0;break;
+}
+if(luai_numisnan(r))return 0;
+e1->u.nval=r;
+return 1;
+}
+static void codearith(FuncState*fs,OpCode op,expdesc*e1,expdesc*e2){
+if(constfolding(op,e1,e2))
+return;
+else{
+int o2=(op!=OP_UNM&&op!=OP_LEN)?luaK_exp2RK(fs,e2):0;
+int o1=luaK_exp2RK(fs,e1);
+if(o1>o2){
+freeexp(fs,e1);
+freeexp(fs,e2);
+}
+else{
+freeexp(fs,e2);
+freeexp(fs,e1);
+}
+e1->u.s.info=luaK_codeABC(fs,op,0,o1,o2);
+e1->k=VRELOCABLE;
+}
+}
+static void codecomp(FuncState*fs,OpCode op,int cond,expdesc*e1,
+expdesc*e2){
+int o1=luaK_exp2RK(fs,e1);
+int o2=luaK_exp2RK(fs,e2);
+freeexp(fs,e2);
+freeexp(fs,e1);
+if(cond==0&&op!=OP_EQ){
+int temp;
+temp=o1;o1=o2;o2=temp;
+cond=1;
+}
+e1->u.s.info=condjump(fs,op,cond,o1,o2);
+e1->k=VJMP;
+}
+static void luaK_prefix(FuncState*fs,UnOpr op,expdesc*e){
+expdesc e2;
+e2.t=e2.f=(-1);e2.k=VKNUM;e2.u.nval=0;
+switch(op){
+case OPR_MINUS:{
+if(!isnumeral(e))
+luaK_exp2anyreg(fs,e);
+codearith(fs,OP_UNM,e,&e2);
+break;
+}
+case OPR_NOT:codenot(fs,e);break;
+case OPR_LEN:{
+luaK_exp2anyreg(fs,e);
+codearith(fs,OP_LEN,e,&e2);
+break;
+}
+default:;
+}
+}
+static void luaK_infix(FuncState*fs,BinOpr op,expdesc*v){
+switch(op){
+case OPR_AND:{
+luaK_goiftrue(fs,v);
+break;
+}
+case OPR_OR:{
+luaK_goiffalse(fs,v);
+break;
+}
+case OPR_CONCAT:{
+luaK_exp2nextreg(fs,v);
+break;
+}
+case OPR_ADD:case OPR_SUB:case OPR_MUL:case OPR_DIV:
+case OPR_MOD:case OPR_POW:{
+if(!isnumeral(v))luaK_exp2RK(fs,v);
+break;
+}
+default:{
+luaK_exp2RK(fs,v);
+break;
+}
+}
+}
+static void luaK_posfix(FuncState*fs,BinOpr op,expdesc*e1,expdesc*e2){
+switch(op){
+case OPR_AND:{
+luaK_dischargevars(fs,e2);
+luaK_concat(fs,&e2->f,e1->f);
+*e1=*e2;
+break;
+}
+case OPR_OR:{
+luaK_dischargevars(fs,e2);
+luaK_concat(fs,&e2->t,e1->t);
+*e1=*e2;
+break;
+}
+case OPR_CONCAT:{
+luaK_exp2val(fs,e2);
+if(e2->k==VRELOCABLE&&GET_OPCODE(getcode(fs,e2))==OP_CONCAT){
+freeexp(fs,e1);
+SETARG_B(getcode(fs,e2),e1->u.s.info);
+e1->k=VRELOCABLE;e1->u.s.info=e2->u.s.info;
+}
+else{
+luaK_exp2nextreg(fs,e2);
+codearith(fs,OP_CONCAT,e1,e2);
+}
+break;
+}
+case OPR_ADD:codearith(fs,OP_ADD,e1,e2);break;
+case OPR_SUB:codearith(fs,OP_SUB,e1,e2);break;
+case OPR_MUL:codearith(fs,OP_MUL,e1,e2);break;
+case OPR_DIV:codearith(fs,OP_DIV,e1,e2);break;
+case OPR_MOD:codearith(fs,OP_MOD,e1,e2);break;
+case OPR_POW:codearith(fs,OP_POW,e1,e2);break;
+case OPR_EQ:codecomp(fs,OP_EQ,1,e1,e2);break;
+case OPR_NE:codecomp(fs,OP_EQ,0,e1,e2);break;
+case OPR_LT:codecomp(fs,OP_LT,1,e1,e2);break;
+case OPR_LE:codecomp(fs,OP_LE,1,e1,e2);break;
+case OPR_GT:codecomp(fs,OP_LT,0,e1,e2);break;
+case OPR_GE:codecomp(fs,OP_LE,0,e1,e2);break;
+default:;
+}
+}
+static void luaK_fixline(FuncState*fs,int line){
+fs->f->lineinfo[fs->pc-1]=line;
+}
+static int luaK_code(FuncState*fs,Instruction i,int line){
+Proto*f=fs->f;
+dischargejpc(fs);
+luaM_growvector(fs->L,f->code,fs->pc,f->sizecode,Instruction,
+(INT_MAX-2),"code size overflow");
+f->code[fs->pc]=i;
+luaM_growvector(fs->L,f->lineinfo,fs->pc,f->sizelineinfo,int,
+(INT_MAX-2),"code size overflow");
+f->lineinfo[fs->pc]=line;
+return fs->pc++;
+}
+static int luaK_codeABC(FuncState*fs,OpCode o,int a,int b,int c){
+return luaK_code(fs,CREATE_ABC(o,a,b,c),fs->ls->lastline);
+}
+static int luaK_codeABx(FuncState*fs,OpCode o,int a,unsigned int bc){
+return luaK_code(fs,CREATE_ABx(o,a,bc),fs->ls->lastline);
+}
+static void luaK_setlist(FuncState*fs,int base,int nelems,int tostore){
+int c=(nelems-1)/50+1;
+int b=(tostore==(-1))?0:tostore;
+if(c<=((1<<9)-1))
+luaK_codeABC(fs,OP_SETLIST,base,b,c);
+else{
+luaK_codeABC(fs,OP_SETLIST,base,b,0);
+luaK_code(fs,cast(Instruction,c),fs->ls->lastline);
+}
+fs->freereg=base+1;
+}
+#define hasmultret(k)((k)==VCALL||(k)==VVARARG)
+#define getlocvar(fs,i)((fs)->f->locvars[(fs)->actvar[i]])
+#define luaY_checklimit(fs,v,l,m)if((v)>(l))errorlimit(fs,l,m)
+typedef struct BlockCnt{
+struct BlockCnt*previous;
+int breaklist;
+lu_byte nactvar;
+lu_byte upval;
+lu_byte isbreakable;
+}BlockCnt;
+static void chunk(LexState*ls);
+static void expr(LexState*ls,expdesc*v);
+static void anchor_token(LexState*ls){
+if(ls->t.token==TK_NAME||ls->t.token==TK_STRING){
+TString*ts=ls->t.seminfo.ts;
+luaX_newstring(ls,getstr(ts),ts->tsv.len);
+}
+}
+static void error_expected(LexState*ls,int token){
+luaX_syntaxerror(ls,
+luaO_pushfstring(ls->L,LUA_QL("%s")" expected",luaX_token2str(ls,token)));
+}
+static void errorlimit(FuncState*fs,int limit,const char*what){
+const char*msg=(fs->f->linedefined==0)?
+luaO_pushfstring(fs->L,"main function has more than %d %s",limit,what):
+luaO_pushfstring(fs->L,"function at line %d has more than %d %s",
+fs->f->linedefined,limit,what);
+luaX_lexerror(fs->ls,msg,0);
+}
+static int testnext(LexState*ls,int c){
+if(ls->t.token==c){
+luaX_next(ls);
+return 1;
+}
+else return 0;
+}
+static void check(LexState*ls,int c){
+if(ls->t.token!=c)
+error_expected(ls,c);
+}
+static void checknext(LexState*ls,int c){
+check(ls,c);
+luaX_next(ls);
+}
+#define check_condition(ls,c,msg){if(!(c))luaX_syntaxerror(ls,msg);}
+static void check_match(LexState*ls,int what,int who,int where){
+if(!testnext(ls,what)){
+if(where==ls->linenumber)
+error_expected(ls,what);
+else{
+luaX_syntaxerror(ls,luaO_pushfstring(ls->L,
+LUA_QL("%s")" expected (to close "LUA_QL("%s")" at line %d)",
+luaX_token2str(ls,what),luaX_token2str(ls,who),where));
+}
+}
+}
+static TString*str_checkname(LexState*ls){
+TString*ts;
+check(ls,TK_NAME);
+ts=ls->t.seminfo.ts;
+luaX_next(ls);
+return ts;
+}
+static void init_exp(expdesc*e,expkind k,int i){
+e->f=e->t=(-1);
+e->k=k;
+e->u.s.info=i;
