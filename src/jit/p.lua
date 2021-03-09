@@ -1,0 +1,26 @@
+
+----------------------------------------------------------------------------
+-- LuaJIT profiler.
+--
+-- Copyright (C) 2005-2022 Mike Pall. All rights reserved.
+-- Released under the MIT license. See Copyright Notice in luajit.h
+----------------------------------------------------------------------------
+--
+-- This module is a simple command line interface to the built-in
+-- low-overhead profiler of LuaJIT.
+--
+-- The lower-level API of the profiler is accessible via the "jit.profile"
+-- module or the luaJIT_profile_* C API.
+--
+-- Example usage:
+--
+--   luajit -jp myapp.lua
+--   luajit -jp=s myapp.lua
+--   luajit -jp=-s myapp.lua
+--   luajit -jp=vl myapp.lua
+--   luajit -jp=G,profile.txt myapp.lua
+--
+-- The following dump features are available:
+--
+--   f  Stack dump: function name, otherwise module:line. Default mode.
+--   F  Stack dump: ditto, but always prepend module.
