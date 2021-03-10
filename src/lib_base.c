@@ -146,4 +146,70 @@ LJLIB_CF(getfenv)		LJLIB_REC(.)
   cTValue *o = L->base;
   if (!(o < L->top && tvisfunc(o))) {
     int level = lj_lib_optint(L, 1, 1);
-    o = lj_debug_frame(L, lev
+    o = lj_debug_frame(L, level, &level);
+    if (o == NULL)
+      lj_err_arg(L, 1, LJ_ERR_INVLVL);
+    if (LJ_FR2) o--;
+  }
+  fn = &gcval(o)->fn;
+  settabV(L, L->top++, isluafunc(fn) ? tabref(fn->l.env) : tabref(L->env));
+  return 1;
+}
+
+LJLIB_CF(setfenv)
+{
+  GCfunc *fn;
+  GCtab *t = lj_lib_checktab(L, 2);
+  cTValue *o = L->base;
+  if (!(o < L->top && tvisfunc(o))) {
+    int level = lj_lib_checkint(L, 1);
+    if (level == 0) {
+      /* NOBARRIER: A thread (i.e. L) is never black. */
+      setgcref(L->env, obj2gco(t));
+      return 0;
+    }
+    o = lj_debug_frame(L, level, &level);
+    if (o == NULL)
+      lj_err_arg(L, 1, LJ_ERR_INVLVL);
+    if (LJ_FR2) o--;
+  }
+  fn = &gcval(o)->fn;
+  if (!isluafunc(fn))
+    lj_err_caller(L, LJ_ERR_SETFENV);
+  setgcref(fn->l.env, obj2gco(t));
+  lj_gc_objbarrier(L, obj2gco(fn), t);
+  setfuncV(L, L->top++, fn);
+  return 1;
+}
+
+LJLIB_ASM(rawget)		LJLIB_REC(.)
+{
+  lj_lib_checktab(L, 1);
+  lj_lib_checkany(L, 2);
+  return FFH_UNREACHABLE;
+}
+
+LJLIB_CF(rawset)		LJLIB_REC(.)
+{
+  lj_lib_checktab(L, 1);
+  lj_lib_checkany(L, 2);
+  L->top = 1+lj_lib_checkany(L, 3);
+  lua_rawset(L, 1);
+  return 1;
+}
+
+LJLIB_CF(rawequal)		LJLIB_REC(.)
+{
+  cTValue *o1 = lj_lib_checkany(L, 1);
+  cTValue *o2 = lj_lib_checkany(L, 2);
+  setboolV(L->top-1, lj_obj_equal(o1, o2));
+  return 1;
+}
+
+#if LJ_52
+LJLIB_CF(rawlen)		LJLIB_REC(.)
+{
+  cTValue *o = L->base;
+  int32_t len;
+  if (L->top > o && tvisstr(o))
+  
