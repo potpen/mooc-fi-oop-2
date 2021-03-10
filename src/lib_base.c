@@ -89,4 +89,61 @@ static int ffh_pairs(lua_State *L, MMS mm)
   TValue *o = lj_lib_checkany(L, 1);
   cTValue *mo = lj_meta_lookup(L, o, mm);
   if ((LJ_52 || tviscdata(o)) && !tvisnil(mo)) {
-    L->top = o+1;  /* Only keep one argument
+    L->top = o+1;  /* Only keep one argument. */
+    copyTV(L, L->base-1-LJ_FR2, mo);  /* Replace callable. */
+    return FFH_TAILCALL;
+  } else {
+    if (!tvistab(o)) lj_err_argt(L, 1, LUA_TTABLE);
+    if (LJ_FR2) { copyTV(L, o-1, o); o--; }
+    setfuncV(L, o-1, funcV(lj_lib_upvalue(L, 1)));
+    if (mm == MM_pairs) setnilV(o+1); else setintV(o+1, 0);
+    return FFH_RES(3);
+  }
+}
+#else
+#define ffh_pairs(L, mm)	(lj_lib_checktab(L, 1), FFH_UNREACHABLE)
+#endif
+
+LJLIB_PUSH(lastcl)
+LJLIB_ASM(pairs)		LJLIB_REC(xpairs 0)
+{
+  return ffh_pairs(L, MM_pairs);
+}
+
+LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
+{
+  lj_lib_checktab(L, 1);
+  lj_lib_checkint(L, 2);
+  return FFH_UNREACHABLE;
+}
+
+LJLIB_PUSH(lastcl)
+LJLIB_ASM(ipairs)		LJLIB_REC(xpairs 1)
+{
+  return ffh_pairs(L, MM_ipairs);
+}
+
+/* -- Base library: getters and setters ----------------------------------- */
+
+LJLIB_ASM_(getmetatable)	LJLIB_REC(.)
+/* Recycle the lj_lib_checkany(L, 1) from assert. */
+
+LJLIB_ASM(setmetatable)		LJLIB_REC(.)
+{
+  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *mt = lj_lib_checktabornil(L, 2);
+  if (!tvisnil(lj_meta_lookup(L, L->base, MM_metatable)))
+    lj_err_caller(L, LJ_ERR_PROTMT);
+  setgcref(t->metatable, obj2gco(mt));
+  if (mt) { lj_gc_objbarriert(L, t, mt); }
+  settabV(L, L->base-1-LJ_FR2, t);
+  return FFH_RES(1);
+}
+
+LJLIB_CF(getfenv)		LJLIB_REC(.)
+{
+  GCfunc *fn;
+  cTValue *o = L->base;
+  if (!(o < L->top && tvisfunc(o))) {
+    int level = lj_lib_optint(L, 1, 1);
+    o = lj_debug_frame(L, lev
