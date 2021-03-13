@@ -315,4 +315,64 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
       }
     }
   }
-  setnilV(L->base-1-
+  setnilV(L->base-1-LJ_FR2);
+  return FFH_RES(1);
+}
+
+LJLIB_ASM(tostring)		LJLIB_REC(.)
+{
+  TValue *o = lj_lib_checkany(L, 1);
+  cTValue *mo;
+  L->top = o+1;  /* Only keep one argument. */
+  if (!tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
+    copyTV(L, L->base-1-LJ_FR2, mo);  /* Replace callable. */
+    return FFH_TAILCALL;
+  }
+  lj_gc_check(L);
+  setstrV(L, L->base-1-LJ_FR2, lj_strfmt_obj(L, L->base));
+  return FFH_RES(1);
+}
+
+/* -- Base library: throw and catch errors -------------------------------- */
+
+LJLIB_CF(error)
+{
+  int32_t level = lj_lib_optint(L, 2, 1);
+  lua_settop(L, 1);
+  if (lua_isstring(L, 1) && level > 0) {
+    luaL_where(L, level);
+    lua_pushvalue(L, 1);
+    lua_concat(L, 2);
+  }
+  return lua_error(L);
+}
+
+LJLIB_ASM(pcall)		LJLIB_REC(.)
+{
+  lj_lib_checkany(L, 1);
+  lj_lib_checkfunc(L, 2);  /* For xpcall only. */
+  return FFH_UNREACHABLE;
+}
+LJLIB_ASM_(xpcall)		LJLIB_REC(.)
+
+/* -- Base library: load Lua code ----------------------------------------- */
+
+static int load_aux(lua_State *L, int status, int envarg)
+{
+  if (status == LUA_OK) {
+    if (tvistab(L->base+envarg-1)) {
+      GCfunc *fn = funcV(L->top-1);
+      GCtab *t = tabV(L->base+envarg-1);
+      setgcref(fn->c.env, obj2gco(t));
+      lj_gc_objbarrier(L, fn, t);
+    }
+    return 1;
+  } else {
+    setnilV(L->top-2);
+    return 2;
+  }
+}
+
+LJLIB_CF(loadfile)
+{
+  GCstr *fname = lj_lib_optstr(L, 1)
