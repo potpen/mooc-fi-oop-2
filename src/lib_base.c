@@ -271,4 +271,48 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
     }
 #if LJ_HASFFI
     if (tviscdata(o)) {
- 
+      CTState *cts = ctype_cts(L);
+      CType *ct = lj_ctype_rawref(cts, cdataV(o)->ctypeid);
+      if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
+      if (ctype_isnum(ct->info) || ctype_iscomplex(ct->info)) {
+	if (LJ_DUALNUM && ctype_isinteger_or_bool(ct->info) &&
+	    ct->size <= 4 && !(ct->size == 4 && (ct->info & CTF_UNSIGNED))) {
+	  int32_t i;
+	  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_INT32), (uint8_t *)&i, o, 0);
+	  setintV(L->base-1-LJ_FR2, i);
+	  return FFH_RES(1);
+	}
+	lj_cconv_ct_tv(cts, ctype_get(cts, CTID_DOUBLE),
+		       (uint8_t *)&(L->base-1-LJ_FR2)->n, o, 0);
+	return FFH_RES(1);
+      }
+    }
+#endif
+  } else {
+    const char *p = strdata(lj_lib_checkstr(L, 1));
+    char *ep;
+    unsigned int neg = 0;
+    unsigned long ul;
+    if (base < 2 || base > 36)
+      lj_err_arg(L, 2, LJ_ERR_BASERNG);
+    while (lj_char_isspace((unsigned char)(*p))) p++;
+    if (*p == '-') { p++; neg = 1; } else if (*p == '+') { p++; }
+    if (lj_char_isalnum((unsigned char)(*p))) {
+      ul = strtoul(p, &ep, base);
+      if (p != ep) {
+	while (lj_char_isspace((unsigned char)(*ep))) ep++;
+	if (*ep == '\0') {
+	  if (LJ_DUALNUM && LJ_LIKELY(ul < 0x80000000u+neg)) {
+	    if (neg) ul = ~ul+1u;
+	    setintV(L->base-1-LJ_FR2, (int32_t)ul);
+	  } else {
+	    lua_Number n = (lua_Number)ul;
+	    if (neg) n = -n;
+	    setnumV(L->base-1-LJ_FR2, n);
+	  }
+	  return FFH_RES(1);
+	}
+      }
+    }
+  }
+  setnilV(L->base-1-
