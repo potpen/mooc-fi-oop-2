@@ -212,4 +212,63 @@ LJLIB_CF(rawlen)		LJLIB_REC(.)
   cTValue *o = L->base;
   int32_t len;
   if (L->top > o && tvisstr(o))
-  
+    len = (int32_t)strV(o)->len;
+  else
+    len = (int32_t)lj_tab_len(lj_lib_checktab(L, 1));
+  setintV(L->top-1, len);
+  return 1;
+}
+#endif
+
+LJLIB_CF(unpack)
+{
+  GCtab *t = lj_lib_checktab(L, 1);
+  int32_t n, i = lj_lib_optint(L, 2, 1);
+  int32_t e = (L->base+3-1 < L->top && !tvisnil(L->base+3-1)) ?
+	      lj_lib_checkint(L, 3) : (int32_t)lj_tab_len(t);
+  uint32_t nu;
+  if (i > e) return 0;
+  nu = (uint32_t)e - (uint32_t)i;
+  n = (int32_t)(nu+1);
+  if (nu >= LUAI_MAXCSTACK || !lua_checkstack(L, n))
+    lj_err_caller(L, LJ_ERR_UNPACK);
+  do {
+    cTValue *tv = lj_tab_getint(t, i);
+    if (tv) {
+      copyTV(L, L->top++, tv);
+    } else {
+      setnilV(L->top++);
+    }
+  } while (i++ < e);
+  return n;
+}
+
+LJLIB_CF(select)		LJLIB_REC(.)
+{
+  int32_t n = (int32_t)(L->top - L->base);
+  if (n >= 1 && tvisstr(L->base) && *strVdata(L->base) == '#') {
+    setintV(L->top-1, n-1);
+    return 1;
+  } else {
+    int32_t i = lj_lib_checkint(L, 1);
+    if (i < 0) i = n + i; else if (i > n) i = n;
+    if (i < 1)
+      lj_err_arg(L, 1, LJ_ERR_IDXRNG);
+    return n - i;
+  }
+}
+
+/* -- Base library: conversions ------------------------------------------- */
+
+LJLIB_ASM(tonumber)		LJLIB_REC(.)
+{
+  int32_t base = lj_lib_optint(L, 2, 10);
+  if (base == 10) {
+    TValue *o = lj_lib_checkany(L, 1);
+    if (lj_strscan_numberobj(o)) {
+      copyTV(L, L->base-1-LJ_FR2, o);
+      return FFH_RES(1);
+    }
+#if LJ_HASFFI
+    if (tviscdata(o)) {
+ 
