@@ -375,4 +375,53 @@ static int load_aux(lua_State *L, int status, int envarg)
 
 LJLIB_CF(loadfile)
 {
-  GCstr *fname = lj_lib_optstr(L, 1)
+  GCstr *fname = lj_lib_optstr(L, 1);
+  GCstr *mode = lj_lib_optstr(L, 2);
+  int status;
+  lua_settop(L, 3);  /* Ensure env arg exists. */
+  status = luaL_loadfilex(L, fname ? strdata(fname) : NULL,
+			  mode ? strdata(mode) : NULL);
+  return load_aux(L, status, 3);
+}
+
+static const char *reader_func(lua_State *L, void *ud, size_t *size)
+{
+  UNUSED(ud);
+  luaL_checkstack(L, 2, "too many nested functions");
+  copyTV(L, L->top++, L->base);
+  lua_call(L, 0, 1);  /* Call user-supplied function. */
+  L->top--;
+  if (tvisnil(L->top)) {
+    *size = 0;
+    return NULL;
+  } else if (tvisstr(L->top) || tvisnumber(L->top)) {
+    copyTV(L, L->base+4, L->top);  /* Anchor string in reserved stack slot. */
+    return lua_tolstring(L, 5, size);
+  } else {
+    lj_err_caller(L, LJ_ERR_RDRSTR);
+    return NULL;
+  }
+}
+
+LJLIB_CF(load)
+{
+  GCstr *name = lj_lib_optstr(L, 2);
+  GCstr *mode = lj_lib_optstr(L, 3);
+  int status;
+  if (L->base < L->top &&
+      (tvisstr(L->base) || tvisnumber(L->base) || tvisbuf(L->base))) {
+    const char *s;
+    MSize len;
+    if (tvisbuf(L->base)) {
+      SBufExt *sbx = bufV(L->base);
+      s = sbx->r;
+      len = sbufxlen(sbx);
+      if (!name) name = &G(L)->strempty;  /* Buffers are not NUL-terminated. */
+    } else {
+      GCstr *str = lj_lib_checkstr(L, 1);
+      s = strdata(str);
+      len = str->len;
+    }
+    lua_settop(L, 4);  /* Ensure env arg exists. */
+    status = luaL_loadbufferx(L, s, len, name ? strdata(name) : s,
+			    
