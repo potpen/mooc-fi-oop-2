@@ -482,4 +482,52 @@ LJLIB_PUSH(top-2)  /* Upvalue holds weak table. */
 LJLIB_CF(newproxy)
 {
   lua_settop(L, 1);
-  lua_
+  lua_newuserdata(L, 0);
+  if (lua_toboolean(L, 1) == 0) {  /* newproxy(): without metatable. */
+    return 1;
+  } else if (lua_isboolean(L, 1)) {  /* newproxy(true): with metatable. */
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    lua_pushboolean(L, 1);
+    lua_rawset(L, lua_upvalueindex(1));  /* Remember mt in weak table. */
+  } else {  /* newproxy(proxy): inherit metatable. */
+    int validproxy = 0;
+    if (lua_getmetatable(L, 1)) {
+      lua_rawget(L, lua_upvalueindex(1));
+      validproxy = lua_toboolean(L, -1);
+      lua_pop(L, 1);
+    }
+    if (!validproxy)
+      lj_err_arg(L, 1, LJ_ERR_NOPROXY);
+    lua_getmetatable(L, 1);
+  }
+  lua_setmetatable(L, 2);
+  return 1;
+}
+
+LJLIB_PUSH("tostring")
+LJLIB_CF(print)
+{
+  ptrdiff_t i, nargs = L->top - L->base;
+  cTValue *tv = lj_tab_getstr(tabref(L->env), strV(lj_lib_upvalue(L, 1)));
+  int shortcut;
+  if (tv && !tvisnil(tv)) {
+    copyTV(L, L->top++, tv);
+  } else {
+    setstrV(L, L->top++, strV(lj_lib_upvalue(L, 1)));
+    lua_gettable(L, LUA_GLOBALSINDEX);
+    tv = L->top-1;
+  }
+  shortcut = (tvisfunc(tv) && funcV(tv)->c.ffid == FF_tostring) &&
+	     !gcrefu(basemt_it(G(L), LJ_TNUMX));
+  for (i = 0; i < nargs; i++) {
+    cTValue *o = &L->base[i];
+    const char *str;
+    size_t size;
+    MSize len;
+    if (shortcut && (str = lj_strfmt_wstrnum(L, o, &len)) != NULL) {
+      size = len;
+    } else {
+      copyTV(L, L->top+1, o);
+      copyTV(L, L->top, L->top-1);
+      L->to
