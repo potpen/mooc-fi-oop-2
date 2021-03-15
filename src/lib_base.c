@@ -600,4 +600,56 @@ LJLIB_CF(coroutine_create)
   return 1;
 }
 
-LJLIB_
+LJLIB_ASM(coroutine_yield)
+{
+  lj_err_caller(L, LJ_ERR_CYIELD);
+  return FFH_UNREACHABLE;
+}
+
+static int ffh_resume(lua_State *L, lua_State *co, int wrap)
+{
+  if (co->cframe != NULL || co->status > LUA_YIELD ||
+      (co->status == LUA_OK && co->top == co->base)) {
+    ErrMsg em = co->cframe ? LJ_ERR_CORUN : LJ_ERR_CODEAD;
+    if (wrap) lj_err_caller(L, em);
+    setboolV(L->base-1-LJ_FR2, 0);
+    setstrV(L, L->base-LJ_FR2, lj_err_str(L, em));
+    return FFH_RES(2);
+  }
+  lj_state_growstack(co, (MSize)(L->top - L->base));
+  return FFH_RETRY;
+}
+
+LJLIB_ASM(coroutine_resume)
+{
+  if (!(L->top > L->base && tvisthread(L->base)))
+    lj_err_arg(L, 1, LJ_ERR_NOCORO);
+  return ffh_resume(L, threadV(L->base), 0);
+}
+
+LJLIB_NOREG LJLIB_ASM(coroutine_wrap_aux)
+{
+  return ffh_resume(L, threadV(lj_lib_upvalue(L, 1)), 1);
+}
+
+/* Inline declarations. */
+LJ_ASMF void lj_ff_coroutine_wrap_aux(void);
+#if !(LJ_TARGET_MIPS && defined(ljamalg_c))
+LJ_FUNCA_NORET void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L,
+							  lua_State *co);
+#endif
+
+/* Error handler, called from assembler VM. */
+void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co)
+{
+  co->top--; copyTV(L, L->top, co->top); L->top++;
+  if (tvisstr(L->top-1))
+    lj_err_callermsg(L, strVdata(L->top-1));
+  else
+    lj_err_run(L);
+}
+
+/* Forward declaration. */
+static void setpc_wrap_aux(lua_State *L, GCfunc *fn);
+
+LJLIB_CF(coroutine_wrap)
