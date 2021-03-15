@@ -653,3 +653,44 @@ void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co)
 static void setpc_wrap_aux(lua_State *L, GCfunc *fn);
 
 LJLIB_CF(coroutine_wrap)
+{
+  GCfunc *fn;
+  lj_cf_coroutine_create(L);
+  fn = lj_lib_pushcc(L, lj_ffh_coroutine_wrap_aux, FF_coroutine_wrap_aux, 1);
+  setpc_wrap_aux(L, fn);
+  return 1;
+}
+
+#include "lj_libdef.h"
+
+/* Fix the PC of wrap_aux. Really ugly workaround. */
+static void setpc_wrap_aux(lua_State *L, GCfunc *fn)
+{
+  setmref(fn->c.pc, &L2GG(L)->bcff[lj_lib_init_coroutine[1]+2]);
+}
+
+/* ------------------------------------------------------------------------ */
+
+static void newproxy_weaktable(lua_State *L)
+{
+  /* NOBARRIER: The table is new (marked white). */
+  GCtab *t = lj_tab_new(L, 0, 1);
+  settabV(L, L->top++, t);
+  setgcref(t->metatable, obj2gco(t));
+  setstrV(L, lj_tab_setstr(L, t, lj_str_newlit(L, "__mode")),
+	    lj_str_newlit(L, "kv"));
+  t->nomm = (uint8_t)(~(1u<<MM_mode));
+}
+
+LUALIB_API int luaopen_base(lua_State *L)
+{
+  /* NOBARRIER: Table and value are the same. */
+  GCtab *env = tabref(L->env);
+  settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_G")), env);
+  lua_pushliteral(L, LUA_VERSION);  /* top-3. */
+  newproxy_weaktable(L);  /* top-2. */
+  LJ_LIB_REG(L, "_G", base);
+  LJ_LIB_REG(L, LUA_COLIBNAME, coroutine);
+  return 2;
+}
+
