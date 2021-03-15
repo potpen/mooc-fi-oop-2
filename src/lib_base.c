@@ -530,4 +530,74 @@ LJLIB_CF(print)
     } else {
       copyTV(L, L->top+1, o);
       copyTV(L, L->top, L->top-1);
-      L->to
+      L->top += 2;
+      lua_call(L, 1, 1);
+      str = lua_tolstring(L, -1, &size);
+      if (!str)
+	lj_err_caller(L, LJ_ERR_PRTOSTR);
+      L->top--;
+    }
+    if (i)
+      putchar('\t');
+    fwrite(str, 1, size, stdout);
+  }
+  putchar('\n');
+  return 0;
+}
+
+LJLIB_PUSH(top-3)
+LJLIB_SET(_VERSION)
+
+#include "lj_libdef.h"
+
+/* -- Coroutine library --------------------------------------------------- */
+
+#define LJLIB_MODULE_coroutine
+
+LJLIB_CF(coroutine_status)
+{
+  const char *s;
+  lua_State *co;
+  if (!(L->top > L->base && tvisthread(L->base)))
+    lj_err_arg(L, 1, LJ_ERR_NOCORO);
+  co = threadV(L->base);
+  if (co == L) s = "running";
+  else if (co->status == LUA_YIELD) s = "suspended";
+  else if (co->status != LUA_OK) s = "dead";
+  else if (co->base > tvref(co->stack)+1+LJ_FR2) s = "normal";
+  else if (co->top == co->base) s = "dead";
+  else s = "suspended";
+  lua_pushstring(L, s);
+  return 1;
+}
+
+LJLIB_CF(coroutine_running)
+{
+#if LJ_52
+  int ismain = lua_pushthread(L);
+  setboolV(L->top++, ismain);
+  return 2;
+#else
+  if (lua_pushthread(L))
+    setnilV(L->top++);
+  return 1;
+#endif
+}
+
+LJLIB_CF(coroutine_isyieldable)
+{
+  setboolV(L->top++, cframe_canyield(L->cframe));
+  return 1;
+}
+
+LJLIB_CF(coroutine_create)
+{
+  lua_State *L1;
+  if (!(L->base < L->top && tvisfunc(L->base)))
+    lj_err_argt(L, 1, LUA_TFUNCTION);
+  L1 = lua_newthread(L);
+  setfuncV(L, L1->top++, funcV(L->base));
+  return 1;
+}
+
+LJLIB_
