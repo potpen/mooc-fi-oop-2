@@ -52,4 +52,56 @@ static IOFileUD *io_tofilep(lua_State *L)
   return (IOFileUD *)uddata(udataV(L->base));
 }
 
-static IO
+static IOFileUD *io_tofile(lua_State *L)
+{
+  IOFileUD *iof = io_tofilep(L);
+  if (iof->fp == NULL)
+    lj_err_caller(L, LJ_ERR_IOCLFL);
+  return iof;
+}
+
+static IOFileUD *io_stdfile(lua_State *L, ptrdiff_t id)
+{
+  IOFileUD *iof = IOSTDF_IOF(L, id);
+  if (iof->fp == NULL)
+    lj_err_caller(L, LJ_ERR_IOSTDCL);
+  return iof;
+}
+
+static IOFileUD *io_file_new(lua_State *L)
+{
+  IOFileUD *iof = (IOFileUD *)lua_newuserdata(L, sizeof(IOFileUD));
+  GCudata *ud = udataV(L->top-1);
+  ud->udtype = UDTYPE_IO_FILE;
+  /* NOBARRIER: The GCudata is new (marked white). */
+  setgcrefr(ud->metatable, curr_func(L)->c.env);
+  iof->fp = NULL;
+  iof->type = IOFILE_TYPE_FILE;
+  return iof;
+}
+
+static IOFileUD *io_file_open(lua_State *L, const char *mode)
+{
+  const char *fname = strdata(lj_lib_checkstr(L, 1));
+  IOFileUD *iof = io_file_new(L);
+  iof->fp = fopen(fname, mode);
+  if (iof->fp == NULL)
+    luaL_argerror(L, 1, lj_strfmt_pushf(L, "%s: %s", fname, strerror(errno)));
+  return iof;
+}
+
+static int io_file_close(lua_State *L, IOFileUD *iof)
+{
+  int ok;
+  if ((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_FILE) {
+    ok = (fclose(iof->fp) == 0);
+  } else if ((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_PIPE) {
+    int stat = -1;
+#if LJ_TARGET_POSIX
+    stat = pclose(iof->fp);
+#elif LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP
+    stat = _pclose(iof->fp);
+#endif
+#if LJ_52
+    iof->fp = NULL;
+    return luaL_execresult(L, s
