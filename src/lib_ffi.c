@@ -721,3 +721,151 @@ LJLIB_CF(ffi_fill)	LJLIB_REC(.)
   memset(dp, fill, len);
   return 0;
 }
+
+/* Test ABI string. */
+LJLIB_CF(ffi_abi)	LJLIB_REC(.)
+{
+  GCstr *s = lj_lib_checkstr(L, 1);
+  int b = lj_cparse_case(s,
+#if LJ_64
+    "\00564bit"
+#else
+    "\00532bit"
+#endif
+#if LJ_ARCH_HASFPU
+    "\003fpu"
+#endif
+#if LJ_ABI_SOFTFP
+    "\006softfp"
+#else
+    "\006hardfp"
+#endif
+#if LJ_ABI_EABI
+    "\004eabi"
+#endif
+#if LJ_ABI_WIN
+    "\003win"
+#endif
+#if LJ_TARGET_UWP
+    "\003uwp"
+#endif
+#if LJ_LE
+    "\002le"
+#else
+    "\002be"
+#endif
+#if LJ_GC64
+    "\004gc64"
+#endif
+  ) >= 0;
+  setboolV(L->top-1, b);
+  setboolV(&G(L)->tmptv2, b);  /* Remember for trace recorder. */
+  return 1;
+}
+
+LJLIB_PUSH(top-8) LJLIB_SET(!)  /* Store reference to miscmap table. */
+
+LJLIB_CF(ffi_metatype)
+{
+  CTState *cts = ctype_cts(L);
+  CTypeID id = ffi_checkctype(L, cts, NULL);
+  GCtab *mt = lj_lib_checktab(L, 2);
+  GCtab *t = cts->miscmap;
+  CType *ct = ctype_raw(cts, id);
+  TValue *tv;
+  GCcdata *cd;
+  if (!(ctype_isstruct(ct->info) || ctype_iscomplex(ct->info) ||
+	ctype_isvector(ct->info)))
+    lj_err_arg(L, 1, LJ_ERR_FFI_INVTYPE);
+  tv = lj_tab_setinth(L, t, -(int32_t)id);
+  if (!tvisnil(tv))
+    lj_err_caller(L, LJ_ERR_PROTMT);
+  settabV(L, tv, mt);
+  lj_gc_anybarriert(L, t);
+  cd = lj_cdata_new(cts, CTID_CTYPEID, 4);
+  *(CTypeID *)cdataptr(cd) = id;
+  setcdataV(L, L->top-1, cd);
+  lj_gc_check(L);
+  return 1;
+}
+
+LJLIB_PUSH(top-7) LJLIB_SET(!)  /* Store reference to finalizer table. */
+
+LJLIB_CF(ffi_gc)	LJLIB_REC(.)
+{
+  GCcdata *cd = ffi_checkcdata(L, 1);
+  TValue *fin = lj_lib_checkany(L, 2);
+  CTState *cts = ctype_cts(L);
+  CType *ct = ctype_raw(cts, cd->ctypeid);
+  if (!(ctype_isptr(ct->info) || ctype_isstruct(ct->info) ||
+	ctype_isrefarray(ct->info)))
+    lj_err_arg(L, 1, LJ_ERR_FFI_INVTYPE);
+  lj_cdata_setfin(L, cd, gcval(fin), itype(fin));
+  L->top = L->base+1;  /* Pass through the cdata object. */
+  return 1;
+}
+
+LJLIB_PUSH(top-5) LJLIB_SET(!)  /* Store clib metatable in func environment. */
+
+LJLIB_CF(ffi_load)
+{
+  GCstr *name = lj_lib_checkstr(L, 1);
+  int global = (L->base+1 < L->top && tvistruecond(L->base+1));
+  lj_clib_load(L, tabref(curr_func(L)->c.env), name, global);
+  return 1;
+}
+
+LJLIB_PUSH(top-4) LJLIB_SET(C)
+LJLIB_PUSH(top-3) LJLIB_SET(os)
+LJLIB_PUSH(top-2) LJLIB_SET(arch)
+
+#include "lj_libdef.h"
+
+/* ------------------------------------------------------------------------ */
+
+/* Create special weak-keyed finalizer table. */
+static GCtab *ffi_finalizer(lua_State *L)
+{
+  /* NOBARRIER: The table is new (marked white). */
+  GCtab *t = lj_tab_new(L, 0, 1);
+  settabV(L, L->top++, t);
+  setgcref(t->metatable, obj2gco(t));
+  setstrV(L, lj_tab_setstr(L, t, lj_str_newlit(L, "__mode")),
+	  lj_str_newlit(L, "k"));
+  t->nomm = (uint8_t)(~(1u<<MM_mode));
+  return t;
+}
+
+/* Register FFI module as loaded. */
+static void ffi_register_module(lua_State *L)
+{
+  cTValue *tmp = lj_tab_getstr(tabV(registry(L)), lj_str_newlit(L, "_LOADED"));
+  if (tmp && tvistab(tmp)) {
+    GCtab *t = tabV(tmp);
+    copyTV(L, lj_tab_setstr(L, t, lj_str_newlit(L, LUA_FFILIBNAME)), L->top-1);
+    lj_gc_anybarriert(L, t);
+  }
+}
+
+LUALIB_API int luaopen_ffi(lua_State *L)
+{
+  CTState *cts = lj_ctype_init(L);
+  settabV(L, L->top++, (cts->miscmap = lj_tab_new(L, 0, 1)));
+  cts->finalizer = ffi_finalizer(L);
+  LJ_LIB_REG(L, NULL, ffi_meta);
+  /* NOBARRIER: basemt is a GC root. */
+  setgcref(basemt_it(G(L), LJ_TCDATA), obj2gco(tabV(L->top-1)));
+  LJ_LIB_REG(L, NULL, ffi_clib);
+  LJ_LIB_REG(L, NULL, ffi_callback);
+  /* NOBARRIER: the key is new and lj_tab_newkey() handles the barrier. */
+  settabV(L, lj_tab_setstr(L, cts->miscmap, &cts->g->strempty), tabV(L->top-1));
+  L->top--;
+  lj_clib_default(L, tabV(L->top-1));  /* Create ffi.C default namespace. */
+  lua_pushliteral(L, LJ_OS_NAME);
+  lua_pushliteral(L, LJ_ARCH_NAME);
+  LJ_LIB_REG(L, NULL, ffi);  /* Note: no global "ffi" created! */
+  ffi_register_module(L);
+  return 1;
+}
+
+#endif
