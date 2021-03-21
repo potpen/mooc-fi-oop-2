@@ -104,4 +104,63 @@ static int io_file_close(lua_State *L, IOFileUD *iof)
 #endif
 #if LJ_52
     iof->fp = NULL;
-    return luaL_execresult(L, s
+    return luaL_execresult(L, stat);
+#else
+    ok = (stat != -1);
+#endif
+  } else {
+    lj_assertL((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_STDF,
+	       "close of unknown FILE* type");
+    setnilV(L->top++);
+    lua_pushliteral(L, "cannot close standard file");
+    return 2;
+  }
+  iof->fp = NULL;
+  return luaL_fileresult(L, ok, NULL);
+}
+
+/* -- Read/write helpers -------------------------------------------------- */
+
+static int io_file_readnum(lua_State *L, FILE *fp)
+{
+  lua_Number d;
+  if (fscanf(fp, LUA_NUMBER_SCAN, &d) == 1) {
+    if (LJ_DUALNUM) {
+      int32_t i = lj_num2int(d);
+      if (d == (lua_Number)i && !tvismzero((cTValue *)&d)) {
+	setintV(L->top++, i);
+	return 1;
+      }
+    }
+    setnumV(L->top++, d);
+    return 1;
+  } else {
+    setnilV(L->top++);
+    return 0;
+  }
+}
+
+static int io_file_readline(lua_State *L, FILE *fp, MSize chop)
+{
+  MSize m = LUAL_BUFFERSIZE, n = 0, ok = 0;
+  char *buf;
+  for (;;) {
+    buf = lj_buf_tmp(L, m);
+    if (fgets(buf+n, m-n, fp) == NULL) break;
+    n += (MSize)strlen(buf+n);
+    ok |= n;
+    if (n && buf[n-1] == '\n') { n -= chop; break; }
+    if (n >= m - 64) m += m;
+  }
+  setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+  lj_gc_check(L);
+  return (int)ok;
+}
+
+static void io_file_readall(lua_State *L, FILE *fp)
+{
+  MSize m, n;
+  for (m = LUAL_BUFFERSIZE, n = 0; ; m += m) {
+    char *buf = lj_buf_tmp(L, m);
+    n += (MSize)fread(buf+n, 1, m-n, fp);
+    if (n != m) {
