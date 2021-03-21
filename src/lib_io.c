@@ -164,3 +164,59 @@ static void io_file_readall(lua_State *L, FILE *fp)
     char *buf = lj_buf_tmp(L, m);
     n += (MSize)fread(buf+n, 1, m-n, fp);
     if (n != m) {
+      setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+      lj_gc_check(L);
+      return;
+    }
+  }
+}
+
+static int io_file_readlen(lua_State *L, FILE *fp, MSize m)
+{
+  if (m) {
+    char *buf = lj_buf_tmp(L, m);
+    MSize n = (MSize)fread(buf, 1, m, fp);
+    setstrV(L, L->top++, lj_str_new(L, buf, (size_t)n));
+    lj_gc_check(L);
+    return n > 0;
+  } else {
+    int c = getc(fp);
+    ungetc(c, fp);
+    setstrV(L, L->top++, &G(L)->strempty);
+    return (c != EOF);
+  }
+}
+
+static int io_file_read(lua_State *L, IOFileUD *iof, int start)
+{
+  FILE *fp = iof->fp;
+  int ok, n, nargs = (int)(L->top - L->base) - start;
+  clearerr(fp);
+  if (nargs == 0) {
+    ok = io_file_readline(L, fp, 1);
+    n = start+1;  /* Return 1 result. */
+  } else {
+    /* The results plus the buffers go on top of the args. */
+    luaL_checkstack(L, nargs+LUA_MINSTACK, "too many arguments");
+    ok = 1;
+    for (n = start; nargs-- && ok; n++) {
+      if (tvisstr(L->base+n)) {
+	const char *p = strVdata(L->base+n);
+	if (p[0] == '*') p++;
+	if (p[0] == 'n')
+	  ok = io_file_readnum(L, fp);
+	else if ((p[0] & ~0x20) == 'L')
+	  ok = io_file_readline(L, fp, (p[0] == 'l'));
+	else if (p[0] == 'a')
+	  io_file_readall(L, fp);
+	else
+	  lj_err_arg(L, n+1, LJ_ERR_INVFMT);
+      } else if (tvisnumber(L->base+n)) {
+	ok = io_file_readlen(L, fp, (MSize)lj_lib_checkint(L, n+1));
+      } else {
+	lj_err_arg(L, n+1, LJ_ERR_INVOPT);
+      }
+    }
+  }
+  if (ferror(fp))
+  
