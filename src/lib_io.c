@@ -219,4 +219,59 @@ static int io_file_read(lua_State *L, IOFileUD *iof, int start)
     }
   }
   if (ferror(fp))
-  
+    return luaL_fileresult(L, 0, NULL);
+  if (!ok)
+    setnilV(L->top-1);  /* Replace last result with nil. */
+  return n - start;
+}
+
+static int io_file_write(lua_State *L, IOFileUD *iof, int start)
+{
+  FILE *fp = iof->fp;
+  cTValue *tv;
+  int status = 1;
+  for (tv = L->base+start; tv < L->top; tv++) {
+    MSize len;
+    const char *p = lj_strfmt_wstrnum(L, tv, &len);
+    if (!p)
+      lj_err_argt(L, (int)(tv - L->base) + 1, LUA_TSTRING);
+    status = status && (fwrite(p, 1, len, fp) == len);
+  }
+  if (LJ_52 && status) {
+    L->top = L->base+1;
+    if (start == 0)
+      setudataV(L, L->base, IOSTDF_UD(L, GCROOT_IO_OUTPUT));
+    return 1;
+  }
+  return luaL_fileresult(L, status, NULL);
+}
+
+static int io_file_iter(lua_State *L)
+{
+  GCfunc *fn = curr_func(L);
+  IOFileUD *iof = uddata(udataV(&fn->c.upvalue[0]));
+  int n = fn->c.nupvalues - 1;
+  if (iof->fp == NULL)
+    lj_err_caller(L, LJ_ERR_IOCLFL);
+  L->top = L->base;
+  if (n) {  /* Copy upvalues with options to stack. */
+    lj_state_checkstack(L, (MSize)n);
+    memcpy(L->top, &fn->c.upvalue[1], n*sizeof(TValue));
+    L->top += n;
+  }
+  n = io_file_read(L, iof, 0);
+  if (ferror(iof->fp))
+    lj_err_callermsg(L, strVdata(L->top-2));
+  if (tvisnil(L->base) && (iof->type & IOFILE_FLAG_CLOSE)) {
+    io_file_close(L, iof);  /* Return values are ignored. */
+    return 0;
+  }
+  return n;
+}
+
+static int io_file_lines(lua_State *L)
+{
+  int n = (int)(L->top - L->base);
+  if (n > LJ_MAX_UPVAL)
+    lj_err_caller(L, LJ_ERR_UNPACK);
+ 
