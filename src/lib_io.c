@@ -274,4 +274,61 @@ static int io_file_lines(lua_State *L)
   int n = (int)(L->top - L->base);
   if (n > LJ_MAX_UPVAL)
     lj_err_caller(L, LJ_ERR_UNPACK);
- 
+  lua_pushcclosure(L, io_file_iter, n);
+  return 1;
+}
+
+/* -- I/O file methods ---------------------------------------------------- */
+
+#define LJLIB_MODULE_io_method
+
+LJLIB_CF(io_method_close)
+{
+  IOFileUD *iof;
+  if (L->base < L->top) {
+    iof = io_tofile(L);
+  } else {
+    iof = IOSTDF_IOF(L, GCROOT_IO_OUTPUT);
+    if (iof->fp == NULL)
+      lj_err_caller(L, LJ_ERR_IOCLFL);
+  }
+  return io_file_close(L, iof);
+}
+
+LJLIB_CF(io_method_read)
+{
+  return io_file_read(L, io_tofile(L), 1);
+}
+
+LJLIB_CF(io_method_write)		LJLIB_REC(io_write 0)
+{
+  return io_file_write(L, io_tofile(L), 1);
+}
+
+LJLIB_CF(io_method_flush)		LJLIB_REC(io_flush 0)
+{
+  return luaL_fileresult(L, fflush(io_tofile(L)->fp) == 0, NULL);
+}
+
+#if LJ_32 && defined(__ANDROID__) && __ANDROID_API__ < 24
+/* The Android NDK is such an unmatched marvel of engineering. */
+extern int fseeko32(FILE *, long int, int) __asm__("fseeko");
+extern long int ftello32(FILE *) __asm__("ftello");
+#define fseeko(fp, pos, whence)	(fseeko32((fp), (pos), (whence)))
+#define ftello(fp)		(ftello32((fp)))
+#endif
+
+LJLIB_CF(io_method_seek)
+{
+  FILE *fp = io_tofile(L)->fp;
+  int opt = lj_lib_checkopt(L, 2, 1, "\3set\3cur\3end");
+  int64_t ofs = 0;
+  cTValue *o;
+  int res;
+  if (opt == 0) opt = SEEK_SET;
+  else if (opt == 1) opt = SEEK_CUR;
+  else if (opt == 2) opt = SEEK_END;
+  o = L->base+2;
+  if (o < L->top) {
+    if (tvisint(o))
+      ofs = (int64_t)intV(
