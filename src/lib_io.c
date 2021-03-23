@@ -331,4 +331,65 @@ LJLIB_CF(io_method_seek)
   o = L->base+2;
   if (o < L->top) {
     if (tvisint(o))
-      ofs = (int64_t)intV(
+      ofs = (int64_t)intV(o);
+    else if (tvisnum(o))
+      ofs = (int64_t)numV(o);
+    else if (!tvisnil(o))
+      lj_err_argt(L, 3, LUA_TNUMBER);
+  }
+#if LJ_TARGET_POSIX
+  res = fseeko(fp, ofs, opt);
+#elif _MSC_VER >= 1400
+  res = _fseeki64(fp, ofs, opt);
+#elif defined(__MINGW32__)
+  res = fseeko64(fp, ofs, opt);
+#else
+  res = fseek(fp, (long)ofs, opt);
+#endif
+  if (res)
+    return luaL_fileresult(L, 0, NULL);
+#if LJ_TARGET_POSIX
+  ofs = ftello(fp);
+#elif _MSC_VER >= 1400
+  ofs = _ftelli64(fp);
+#elif defined(__MINGW32__)
+  ofs = ftello64(fp);
+#else
+  ofs = (int64_t)ftell(fp);
+#endif
+  setint64V(L->top-1, ofs);
+  return 1;
+}
+
+LJLIB_CF(io_method_setvbuf)
+{
+  FILE *fp = io_tofile(L)->fp;
+  int opt = lj_lib_checkopt(L, 2, -1, "\4full\4line\2no");
+  size_t sz = (size_t)lj_lib_optint(L, 3, LUAL_BUFFERSIZE);
+  if (opt == 0) opt = _IOFBF;
+  else if (opt == 1) opt = _IOLBF;
+  else if (opt == 2) opt = _IONBF;
+  return luaL_fileresult(L, setvbuf(fp, NULL, opt, sz) == 0, NULL);
+}
+
+LJLIB_CF(io_method_lines)
+{
+  io_tofile(L);
+  return io_file_lines(L);
+}
+
+LJLIB_CF(io_method___gc)
+{
+  IOFileUD *iof = io_tofilep(L);
+  if (iof->fp != NULL && (iof->type & IOFILE_TYPE_MASK) != IOFILE_TYPE_STDF)
+    io_file_close(L, iof);
+  return 0;
+}
+
+LJLIB_CF(io_method___tostring)
+{
+  IOFileUD *iof = io_tofilep(L);
+  if (iof->fp != NULL)
+    lua_pushfstring(L, "file (%p)", iof->fp);
+  else
+    lua_pushliteral(L, "file (closed)")
