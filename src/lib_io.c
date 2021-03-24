@@ -454,4 +454,61 @@ LJLIB_CF(io_close)
 
 LJLIB_CF(io_read)
 {
-  r
+  return io_file_read(L, io_stdfile(L, GCROOT_IO_INPUT), 0);
+}
+
+LJLIB_CF(io_write)		LJLIB_REC(io_write GCROOT_IO_OUTPUT)
+{
+  return io_file_write(L, io_stdfile(L, GCROOT_IO_OUTPUT), 0);
+}
+
+LJLIB_CF(io_flush)		LJLIB_REC(io_flush GCROOT_IO_OUTPUT)
+{
+  return luaL_fileresult(L, fflush(io_stdfile(L, GCROOT_IO_OUTPUT)->fp) == 0, NULL);
+}
+
+static int io_std_getset(lua_State *L, ptrdiff_t id, const char *mode)
+{
+  if (L->base < L->top && !tvisnil(L->base)) {
+    if (tvisudata(L->base)) {
+      io_tofile(L);
+      L->top = L->base+1;
+    } else {
+      io_file_open(L, mode);
+    }
+    /* NOBARRIER: The standard I/O handles are GC roots. */
+    setgcref(G(L)->gcroot[id], gcV(L->top-1));
+  } else {
+    setudataV(L, L->top++, IOSTDF_UD(L, id));
+  }
+  return 1;
+}
+
+LJLIB_CF(io_input)
+{
+  return io_std_getset(L, GCROOT_IO_INPUT, "r");
+}
+
+LJLIB_CF(io_output)
+{
+  return io_std_getset(L, GCROOT_IO_OUTPUT, "w");
+}
+
+LJLIB_CF(io_lines)
+{
+  if (L->base == L->top) setnilV(L->top++);
+  if (!tvisnil(L->base)) {  /* io.lines(fname) */
+    IOFileUD *iof = io_file_open(L, "r");
+    iof->type = IOFILE_TYPE_FILE|IOFILE_FLAG_CLOSE;
+    L->top--;
+    setudataV(L, L->base, udataV(L->top));
+  } else {  /* io.lines() iterates over stdin. */
+    setudataV(L, L->base, IOSTDF_UD(L, GCROOT_IO_INPUT));
+  }
+  return io_file_lines(L);
+}
+
+LJLIB_CF(io_type)
+{
+  cTValue *o = lj_lib_checkany(L, 1);
+  if
