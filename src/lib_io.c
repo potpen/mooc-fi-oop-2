@@ -511,4 +511,41 @@ LJLIB_CF(io_lines)
 LJLIB_CF(io_type)
 {
   cTValue *o = lj_lib_checkany(L, 1);
-  if
+  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+    setnilV(L->top++);
+  else if (((IOFileUD *)uddata(udataV(o)))->fp != NULL)
+    lua_pushliteral(L, "file");
+  else
+    lua_pushliteral(L, "closed file");
+  return 1;
+}
+
+#include "lj_libdef.h"
+
+/* ------------------------------------------------------------------------ */
+
+static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
+{
+  IOFileUD *iof = (IOFileUD *)lua_newuserdata(L, sizeof(IOFileUD));
+  GCudata *ud = udataV(L->top-1);
+  ud->udtype = UDTYPE_IO_FILE;
+  /* NOBARRIER: The GCudata is new (marked white). */
+  setgcref(ud->metatable, gcV(L->top-3));
+  iof->fp = fp;
+  iof->type = IOFILE_TYPE_STDF;
+  lua_setfield(L, -2, name);
+  return obj2gco(ud);
+}
+
+LUALIB_API int luaopen_io(lua_State *L)
+{
+  LJ_LIB_REG(L, NULL, io_method);
+  copyTV(L, L->top, L->top-1); L->top++;
+  lua_setfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
+  LJ_LIB_REG(L, LUA_IOLIBNAME, io);
+  setgcref(G(L)->gcroot[GCROOT_IO_INPUT], io_std_new(L, stdin, "stdin"));
+  setgcref(G(L)->gcroot[GCROOT_IO_OUTPUT], io_std_new(L, stdout, "stdout"));
+  io_std_new(L, stderr, "stderr");
+  return 1;
+}
+
