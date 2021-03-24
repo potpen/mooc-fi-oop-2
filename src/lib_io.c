@@ -392,4 +392,66 @@ LJLIB_CF(io_method___tostring)
   if (iof->fp != NULL)
     lua_pushfstring(L, "file (%p)", iof->fp);
   else
-    lua_pushliteral(L, "file (closed)")
+    lua_pushliteral(L, "file (closed)");
+  return 1;
+}
+
+LJLIB_PUSH(top-1) LJLIB_SET(__index)
+
+#include "lj_libdef.h"
+
+/* -- I/O library functions ----------------------------------------------- */
+
+#define LJLIB_MODULE_io
+
+LJLIB_PUSH(top-2) LJLIB_SET(!)  /* Set environment. */
+
+LJLIB_CF(io_open)
+{
+  const char *fname = strdata(lj_lib_checkstr(L, 1));
+  GCstr *s = lj_lib_optstr(L, 2);
+  const char *mode = s ? strdata(s) : "r";
+  IOFileUD *iof = io_file_new(L);
+  iof->fp = fopen(fname, mode);
+  return iof->fp != NULL ? 1 : luaL_fileresult(L, 0, fname);
+}
+
+LJLIB_CF(io_popen)
+{
+#if LJ_TARGET_POSIX || (LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP)
+  const char *fname = strdata(lj_lib_checkstr(L, 1));
+  GCstr *s = lj_lib_optstr(L, 2);
+  const char *mode = s ? strdata(s) : "r";
+  IOFileUD *iof = io_file_new(L);
+  iof->type = IOFILE_TYPE_PIPE;
+#if LJ_TARGET_POSIX
+  fflush(NULL);
+  iof->fp = popen(fname, mode);
+#else
+  iof->fp = _popen(fname, mode);
+#endif
+  return iof->fp != NULL ? 1 : luaL_fileresult(L, 0, fname);
+#else
+  return luaL_error(L, LUA_QL("popen") " not supported");
+#endif
+}
+
+LJLIB_CF(io_tmpfile)
+{
+  IOFileUD *iof = io_file_new(L);
+#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PS5 || LJ_TARGET_PSVITA || LJ_TARGET_NX
+  iof->fp = NULL; errno = ENOSYS;
+#else
+  iof->fp = tmpfile();
+#endif
+  return iof->fp != NULL ? 1 : luaL_fileresult(L, 0, NULL);
+}
+
+LJLIB_CF(io_close)
+{
+  return lj_cf_io_method_close(L);
+}
+
+LJLIB_CF(io_read)
+{
+  r
