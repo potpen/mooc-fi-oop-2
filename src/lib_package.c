@@ -502,3 +502,127 @@ static void dooptions(lua_State *L, int n)
 static void modinit(lua_State *L, const char *modname)
 {
   const char *dot;
+  lua_pushvalue(L, -1);
+  lua_setfield(L, -2, "_M");  /* module._M = module */
+  lua_pushstring(L, modname);
+  lua_setfield(L, -2, "_NAME");
+  dot = strrchr(modname, '.');  /* look for last dot in module name */
+  if (dot == NULL) dot = modname; else dot++;
+  /* set _PACKAGE as package name (full module name minus last part) */
+  lua_pushlstring(L, modname, (size_t)(dot - modname));
+  lua_setfield(L, -2, "_PACKAGE");
+}
+
+static int lj_cf_package_module(lua_State *L)
+{
+  const char *modname = luaL_checkstring(L, 1);
+  int lastarg = (int)(L->top - L->base);
+  luaL_pushmodule(L, modname, 1);
+  lua_getfield(L, -1, "_NAME");
+  if (!lua_isnil(L, -1)) {  /* Module already initialized? */
+    lua_pop(L, 1);
+  } else {
+    lua_pop(L, 1);
+    modinit(L, modname);
+  }
+  lua_pushvalue(L, -1);
+  setfenv(L);
+  dooptions(L, lastarg);
+  return LJ_52;
+}
+
+static int lj_cf_package_seeall(lua_State *L)
+{
+  luaL_checktype(L, 1, LUA_TTABLE);
+  if (!lua_getmetatable(L, 1)) {
+    lua_createtable(L, 0, 1); /* create new metatable */
+    lua_pushvalue(L, -1);
+    lua_setmetatable(L, 1);
+  }
+  lua_pushvalue(L, LUA_GLOBALSINDEX);
+  lua_setfield(L, -2, "__index");  /* mt.__index = _G */
+  return 0;
+}
+
+/* ------------------------------------------------------------------------ */
+
+#define AUXMARK		"\1"
+
+static void setpath(lua_State *L, const char *fieldname, const char *envname,
+		    const char *def, int noenv)
+{
+#if LJ_TARGET_CONSOLE
+  const char *path = NULL;
+  UNUSED(envname);
+#else
+  const char *path = getenv(envname);
+#endif
+  if (path == NULL || noenv) {
+    lua_pushstring(L, def);
+  } else {
+    path = luaL_gsub(L, path, LUA_PATHSEP LUA_PATHSEP,
+			      LUA_PATHSEP AUXMARK LUA_PATHSEP);
+    luaL_gsub(L, path, AUXMARK, def);
+    lua_remove(L, -2);
+  }
+  setprogdir(L);
+  lua_setfield(L, -2, fieldname);
+}
+
+static const luaL_Reg package_lib[] = {
+  { "loadlib",	lj_cf_package_loadlib },
+  { "searchpath",  lj_cf_package_searchpath },
+  { "seeall",	lj_cf_package_seeall },
+  { NULL, NULL }
+};
+
+static const luaL_Reg package_global[] = {
+  { "module",	lj_cf_package_module },
+  { "require",	lj_cf_package_require },
+  { NULL, NULL }
+};
+
+static const lua_CFunction package_loaders[] =
+{
+  lj_cf_package_loader_preload,
+  lj_cf_package_loader_lua,
+  lj_cf_package_loader_c,
+  lj_cf_package_loader_croot,
+  NULL
+};
+
+LUALIB_API int luaopen_package(lua_State *L)
+{
+  int i;
+  int noenv;
+  luaL_newmetatable(L, "_LOADLIB");
+  lj_lib_pushcf(L, lj_cf_package_unloadlib, 1);
+  lua_setfield(L, -2, "__gc");
+  luaL_register(L, LUA_LOADLIBNAME, package_lib);
+  lua_copy(L, -1, LUA_ENVIRONINDEX);
+  lua_createtable(L, sizeof(package_loaders)/sizeof(package_loaders[0])-1, 0);
+  for (i = 0; package_loaders[i] != NULL; i++) {
+    lj_lib_pushcf(L, package_loaders[i], 1);
+    lua_rawseti(L, -2, i+1);
+  }
+#if LJ_52
+  lua_pushvalue(L, -1);
+  lua_setfield(L, -3, "searchers");
+#endif
+  lua_setfield(L, -2, "loaders");
+  lua_getfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
+  noenv = lua_toboolean(L, -1);
+  lua_pop(L, 1);
+  setpath(L, "path", LUA_PATH, LUA_PATH_DEFAULT, noenv);
+  setpath(L, "cpath", LUA_CPATH, LUA_CPATH_DEFAULT, noenv);
+  lua_pushliteral(L, LUA_PATH_CONFIG);
+  lua_setfield(L, -2, "config");
+  luaL_findtable(L, LUA_REGISTRYINDEX, "_LOADED", 16);
+  lua_setfield(L, -2, "loaded");
+  luaL_findtable(L, LUA_REGISTRYINDEX, "_PRELOAD", 4);
+  lua_setfield(L, -2, "preload");
+  lua_pushvalue(L, LUA_GLOBALSINDEX);
+  luaL_register(L, NULL, package_global);
+  lua_pop(L, 1);
+  return 1;
+}
