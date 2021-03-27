@@ -106,4 +106,51 @@ LJLIB_CF(string_rep)		LJLIB_REC(.)
 LJLIB_ASM(string_reverse)  LJLIB_REC(string_op IRCALL_lj_buf_putstr_reverse)
 {
   lj_lib_checkstr(L, 1);
-  return FFH_RE
+  return FFH_RETRY;
+}
+LJLIB_ASM_(string_lower)  LJLIB_REC(string_op IRCALL_lj_buf_putstr_lower)
+LJLIB_ASM_(string_upper)  LJLIB_REC(string_op IRCALL_lj_buf_putstr_upper)
+
+/* ------------------------------------------------------------------------ */
+
+static int writer_buf(lua_State *L, const void *p, size_t size, void *sb)
+{
+  lj_buf_putmem((SBuf *)sb, p, (MSize)size);
+  UNUSED(L);
+  return 0;
+}
+
+LJLIB_CF(string_dump)
+{
+  GCfunc *fn = lj_lib_checkfunc(L, 1);
+  int strip = L->base+1 < L->top && tvistruecond(L->base+1);
+  SBuf *sb = lj_buf_tmp_(L);  /* Assumes lj_bcwrite() doesn't use tmpbuf. */
+  L->top = L->base+1;
+  if (!isluafunc(fn) || lj_bcwrite(L, funcproto(fn), writer_buf, sb, strip))
+    lj_err_caller(L, LJ_ERR_STRDUMP);
+  setstrV(L, L->top-1, lj_buf_str(L, sb));
+  lj_gc_check(L);
+  return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+
+/* macro to `unsign' a character */
+#define uchar(c)	((unsigned char)(c))
+
+#define CAP_UNFINISHED	(-1)
+#define CAP_POSITION	(-2)
+
+typedef struct MatchState {
+  const char *src_init;  /* init of source string */
+  const char *src_end;  /* end (`\0') of source string */
+  lua_State *L;
+  int level;  /* total number of captures (finished or unfinished) */
+  int depth;
+  struct {
+    const char *init;
+    ptrdiff_t len;
+  } capture[LUA_MAXCAPTURES];
+} MatchState;
+
+#define L_ESC		'%
