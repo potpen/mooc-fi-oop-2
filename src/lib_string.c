@@ -153,4 +153,64 @@ typedef struct MatchState {
   } capture[LUA_MAXCAPTURES];
 } MatchState;
 
-#define L_ESC		'%
+#define L_ESC		'%'
+
+static int check_capture(MatchState *ms, int l)
+{
+  l -= '1';
+  if (l < 0 || l >= ms->level || ms->capture[l].len == CAP_UNFINISHED)
+    lj_err_caller(ms->L, LJ_ERR_STRCAPI);
+  return l;
+}
+
+static int capture_to_close(MatchState *ms)
+{
+  int level = ms->level;
+  for (level--; level>=0; level--)
+    if (ms->capture[level].len == CAP_UNFINISHED) return level;
+  lj_err_caller(ms->L, LJ_ERR_STRPATC);
+  return 0;  /* unreachable */
+}
+
+static const char *classend(MatchState *ms, const char *p)
+{
+  switch (*p++) {
+  case L_ESC:
+    if (*p == '\0')
+      lj_err_caller(ms->L, LJ_ERR_STRPATE);
+    return p+1;
+  case '[':
+    if (*p == '^') p++;
+    do {  /* look for a `]' */
+      if (*p == '\0')
+	lj_err_caller(ms->L, LJ_ERR_STRPATM);
+      if (*(p++) == L_ESC && *p != '\0')
+	p++;  /* skip escapes (e.g. `%]') */
+    } while (*p != ']');
+    return p+1;
+  default:
+    return p;
+  }
+}
+
+static const unsigned char match_class_map[32] = {
+  0,LJ_CHAR_ALPHA,0,LJ_CHAR_CNTRL,LJ_CHAR_DIGIT,0,0,LJ_CHAR_GRAPH,0,0,0,0,
+  LJ_CHAR_LOWER,0,0,0,LJ_CHAR_PUNCT,0,0,LJ_CHAR_SPACE,0,
+  LJ_CHAR_UPPER,0,LJ_CHAR_ALNUM,LJ_CHAR_XDIGIT,0,0,0,0,0,0,0
+};
+
+static int match_class(int c, int cl)
+{
+  if ((cl & 0xc0) == 0x40) {
+    int t = match_class_map[(cl&0x1f)];
+    if (t) {
+      t = lj_char_isa(c, t);
+      return (cl & 0x20) ? t : !t;
+    }
+    if (cl == 'z') return c == 0;
+    if (cl == 'Z') return c != 0;
+  }
+  return (cl == c);
+}
+
+static int matchbracketclass(in
