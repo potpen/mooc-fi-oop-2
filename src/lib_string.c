@@ -273,4 +273,58 @@ static const char *max_expand(MatchState *ms, const char *s,
 			      const char *p, const char *ep)
 {
   ptrdiff_t i = 0;  /* counts maximum expand for item */
-  while ((s+i)<ms->src_end && singlematch(uch
+  while ((s+i)<ms->src_end && singlematch(uchar(*(s+i)), p, ep))
+    i++;
+  /* keeps trying to match with the maximum repetitions */
+  while (i>=0) {
+    const char *res = match(ms, (s+i), ep+1);
+    if (res) return res;
+    i--;  /* else didn't match; reduce 1 repetition to try again */
+  }
+  return NULL;
+}
+
+static const char *min_expand(MatchState *ms, const char *s,
+			      const char *p, const char *ep)
+{
+  for (;;) {
+    const char *res = match(ms, s, ep+1);
+    if (res != NULL)
+      return res;
+    else if (s<ms->src_end && singlematch(uchar(*s), p, ep))
+      s++;  /* try with one more repetition */
+    else
+      return NULL;
+  }
+}
+
+static const char *start_capture(MatchState *ms, const char *s,
+				 const char *p, int what)
+{
+  const char *res;
+  int level = ms->level;
+  if (level >= LUA_MAXCAPTURES) lj_err_caller(ms->L, LJ_ERR_STRCAPN);
+  ms->capture[level].init = s;
+  ms->capture[level].len = what;
+  ms->level = level+1;
+  if ((res=match(ms, s, p)) == NULL)  /* match failed? */
+    ms->level--;  /* undo capture */
+  return res;
+}
+
+static const char *end_capture(MatchState *ms, const char *s,
+			       const char *p)
+{
+  int l = capture_to_close(ms);
+  const char *res;
+  ms->capture[l].len = s - ms->capture[l].init;  /* close capture */
+  if ((res = match(ms, s, p)) == NULL)  /* match failed? */
+    ms->capture[l].len = CAP_UNFINISHED;  /* undo capture */
+  return res;
+}
+
+static const char *match_capture(MatchState *ms, const char *s, int l)
+{
+  size_t len;
+  l = check_capture(ms, l);
+  len = (size_t)ms->captu
