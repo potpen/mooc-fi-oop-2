@@ -327,4 +327,48 @@ static const char *match_capture(MatchState *ms, const char *s, int l)
 {
   size_t len;
   l = check_capture(ms, l);
-  len = (size_t)ms->captu
+  len = (size_t)ms->capture[l].len;
+  if ((size_t)(ms->src_end-s) >= len &&
+      memcmp(ms->capture[l].init, s, len) == 0)
+    return s+len;
+  else
+    return NULL;
+}
+
+static const char *match(MatchState *ms, const char *s, const char *p)
+{
+  if (++ms->depth > LJ_MAX_XLEVEL)
+    lj_err_caller(ms->L, LJ_ERR_STRPATX);
+  init: /* using goto's to optimize tail recursion */
+  switch (*p) {
+  case '(':  /* start capture */
+    if (*(p+1) == ')')  /* position capture? */
+      s = start_capture(ms, s, p+2, CAP_POSITION);
+    else
+      s = start_capture(ms, s, p+1, CAP_UNFINISHED);
+    break;
+  case ')':  /* end capture */
+    s = end_capture(ms, s, p+1);
+    break;
+  case L_ESC:
+    switch (*(p+1)) {
+    case 'b':  /* balanced string? */
+      s = matchbalance(ms, s, p+2);
+      if (s == NULL) break;
+      p+=4;
+      goto init;  /* else s = match(ms, s, p+4); */
+    case 'f': {  /* frontier? */
+      const char *ep; char previous;
+      p += 2;
+      if (*p != '[')
+	lj_err_caller(ms->L, LJ_ERR_STRPATB);
+      ep = classend(ms, p);  /* points to what is next */
+      previous = (s == ms->src_init) ? '\0' : *(s-1);
+      if (matchbracketclass(uchar(previous), p, ep-1) ||
+	 !matchbracketclass(uchar(*s), p, ep-1)) { s = NULL; break; }
+      p=ep;
+      goto init;  /* else s = match(ms, s, ep); */
+      }
+    default:
+      if (lj_char_isdigit(uchar(*(p+1)))) {  /* capture results (%0-%9)? */
+	s = match_capture(ms, 
