@@ -213,4 +213,64 @@ static int match_class(int c, int cl)
   return (cl == c);
 }
 
-static int matchbracketclass(in
+static int matchbracketclass(int c, const char *p, const char *ec)
+{
+  int sig = 1;
+  if (*(p+1) == '^') {
+    sig = 0;
+    p++;  /* skip the `^' */
+  }
+  while (++p < ec) {
+    if (*p == L_ESC) {
+      p++;
+      if (match_class(c, uchar(*p)))
+	return sig;
+    }
+    else if ((*(p+1) == '-') && (p+2 < ec)) {
+      p+=2;
+      if (uchar(*(p-2)) <= c && c <= uchar(*p))
+	return sig;
+    }
+    else if (uchar(*p) == c) return sig;
+  }
+  return !sig;
+}
+
+static int singlematch(int c, const char *p, const char *ep)
+{
+  switch (*p) {
+  case '.': return 1;  /* matches any char */
+  case L_ESC: return match_class(c, uchar(*(p+1)));
+  case '[': return matchbracketclass(c, p, ep-1);
+  default:  return (uchar(*p) == c);
+  }
+}
+
+static const char *match(MatchState *ms, const char *s, const char *p);
+
+static const char *matchbalance(MatchState *ms, const char *s, const char *p)
+{
+  if (*p == 0 || *(p+1) == 0)
+    lj_err_caller(ms->L, LJ_ERR_STRPATU);
+  if (*s != *p) {
+    return NULL;
+  } else {
+    int b = *p;
+    int e = *(p+1);
+    int cont = 1;
+    while (++s < ms->src_end) {
+      if (*s == e) {
+	if (--cont == 0) return s+1;
+      } else if (*s == b) {
+	cont++;
+      }
+    }
+  }
+  return NULL;  /* string ends out of balance */
+}
+
+static const char *max_expand(MatchState *ms, const char *s,
+			      const char *p, const char *ep)
+{
+  ptrdiff_t i = 0;  /* counts maximum expand for item */
+  while ((s+i)<ms->src_end && singlematch(uch
