@@ -424,4 +424,50 @@ static void push_onecapture(MatchState *ms, int i, const char *s, const char *e)
 {
   if (i >= ms->level) {
     if (i == 0)  /* ms->level == 0, too */
-      lua_pushlstring(ms->L, s, (si
+      lua_pushlstring(ms->L, s, (size_t)(e - s));  /* add whole match */
+    else
+      lj_err_caller(ms->L, LJ_ERR_STRCAPI);
+  } else {
+    ptrdiff_t l = ms->capture[i].len;
+    if (l == CAP_UNFINISHED) lj_err_caller(ms->L, LJ_ERR_STRCAPU);
+    if (l == CAP_POSITION)
+      lua_pushinteger(ms->L, ms->capture[i].init - ms->src_init + 1);
+    else
+      lua_pushlstring(ms->L, ms->capture[i].init, (size_t)l);
+  }
+}
+
+static int push_captures(MatchState *ms, const char *s, const char *e)
+{
+  int i;
+  int nlevels = (ms->level == 0 && s) ? 1 : ms->level;
+  luaL_checkstack(ms->L, nlevels, "too many captures");
+  for (i = 0; i < nlevels; i++)
+    push_onecapture(ms, i, s, e);
+  return nlevels;  /* number of strings pushed */
+}
+
+static int str_find_aux(lua_State *L, int find)
+{
+  GCstr *s = lj_lib_checkstr(L, 1);
+  GCstr *p = lj_lib_checkstr(L, 2);
+  int32_t start = lj_lib_optint(L, 3, 1);
+  MSize st;
+  if (start < 0) start += (int32_t)s->len; else start--;
+  if (start < 0) start = 0;
+  st = (MSize)start;
+  if (st > s->len) {
+#if LJ_52
+    setnilV(L->top-1);
+    return 1;
+#else
+    st = s->len;
+#endif
+  }
+  if (find && ((L->base+3 < L->top && tvistruecond(L->base+3)) ||
+	       !lj_str_haspattern(p))) {  /* Search for fixed string. */
+    const char *q = lj_str_find(strdata(s)+st, strdata(p), s->len-st, p->len);
+    if (q) {
+      setintV(L->top-2, (int32_t)(q-strdata(s)) + 1);
+      setintV(L->top-1, (int32_t)(q-strdata(s)) + (int32_t)p->len);
+   
