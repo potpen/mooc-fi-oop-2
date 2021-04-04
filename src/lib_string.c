@@ -371,4 +371,57 @@ static const char *match(MatchState *ms, const char *s, const char *p)
       }
     default:
       if (lj_char_isdigit(uchar(*(p+1)))) {  /* capture results (%0-%9)? */
-	s = match_capture(ms, 
+	s = match_capture(ms, s, uchar(*(p+1)));
+	if (s == NULL) break;
+	p+=2;
+	goto init;  /* else s = match(ms, s, p+2) */
+      }
+      goto dflt;  /* case default */
+    }
+    break;
+  case '\0':  /* end of pattern */
+    break;  /* match succeeded */
+  case '$':
+    /* is the `$' the last char in pattern? */
+    if (*(p+1) != '\0') goto dflt;
+    if (s != ms->src_end) s = NULL;  /* check end of string */
+    break;
+  default: dflt: {  /* it is a pattern item */
+    const char *ep = classend(ms, p);  /* points to what is next */
+    int m = s<ms->src_end && singlematch(uchar(*s), p, ep);
+    switch (*ep) {
+    case '?': {  /* optional */
+      const char *res;
+      if (m && ((res=match(ms, s+1, ep+1)) != NULL)) {
+	s = res;
+	break;
+      }
+      p=ep+1;
+      goto init;  /* else s = match(ms, s, ep+1); */
+      }
+    case '*':  /* 0 or more repetitions */
+      s = max_expand(ms, s, p, ep);
+      break;
+    case '+':  /* 1 or more repetitions */
+      s = (m ? max_expand(ms, s+1, p, ep) : NULL);
+      break;
+    case '-':  /* 0 or more repetitions (minimum) */
+      s = min_expand(ms, s, p, ep);
+      break;
+    default:
+      if (m) { s++; p=ep; goto init; }  /* else s = match(ms, s+1, ep); */
+      s = NULL;
+      break;
+    }
+    break;
+    }
+  }
+  ms->depth--;
+  return s;
+}
+
+static void push_onecapture(MatchState *ms, int i, const char *s, const char *e)
+{
+  if (i >= ms->level) {
+    if (i == 0)  /* ms->level == 0, too */
+      lua_pushlstring(ms->L, s, (si
