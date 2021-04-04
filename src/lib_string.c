@@ -470,4 +470,60 @@ static int str_find_aux(lua_State *L, int find)
     if (q) {
       setintV(L->top-2, (int32_t)(q-strdata(s)) + 1);
       setintV(L->top-1, (int32_t)(q-strdata(s)) + (int32_t)p->len);
-   
+      return 2;
+    }
+  } else {  /* Search for pattern. */
+    MatchState ms;
+    const char *pstr = strdata(p);
+    const char *sstr = strdata(s) + st;
+    int anchor = 0;
+    if (*pstr == '^') { pstr++; anchor = 1; }
+    ms.L = L;
+    ms.src_init = strdata(s);
+    ms.src_end = strdata(s) + s->len;
+    do {  /* Loop through string and try to match the pattern. */
+      const char *q;
+      ms.level = ms.depth = 0;
+      q = match(&ms, sstr, pstr);
+      if (q) {
+	if (find) {
+	  setintV(L->top++, (int32_t)(sstr-(strdata(s)-1)));
+	  setintV(L->top++, (int32_t)(q-strdata(s)));
+	  return push_captures(&ms, NULL, NULL) + 2;
+	} else {
+	  return push_captures(&ms, sstr, q);
+	}
+      }
+    } while (sstr++ < ms.src_end && !anchor);
+  }
+  setnilV(L->top-1);  /* Not found. */
+  return 1;
+}
+
+LJLIB_CF(string_find)		LJLIB_REC(.)
+{
+  return str_find_aux(L, 1);
+}
+
+LJLIB_CF(string_match)
+{
+  return str_find_aux(L, 0);
+}
+
+LJLIB_NOREG LJLIB_CF(string_gmatch_aux)
+{
+  const char *p = strVdata(lj_lib_upvalue(L, 2));
+  GCstr *str = strV(lj_lib_upvalue(L, 1));
+  const char *s = strdata(str);
+  TValue *tvpos = lj_lib_upvalue(L, 3);
+  const char *src = s + tvpos->u32.lo;
+  MatchState ms;
+  ms.L = L;
+  ms.src_init = s;
+  ms.src_end = s + str->len;
+  for (; src <= ms.src_end; src++) {
+    const char *e;
+    ms.level = ms.depth = 0;
+    if ((e = match(&ms, src, p)) != NULL) {
+      int32_t pos = (int32_t)(e - s);
+      if (e == src
