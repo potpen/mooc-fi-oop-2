@@ -526,4 +526,63 @@ LJLIB_NOREG LJLIB_CF(string_gmatch_aux)
     ms.level = ms.depth = 0;
     if ((e = match(&ms, src, p)) != NULL) {
       int32_t pos = (int32_t)(e - s);
-      if (e == src
+      if (e == src) pos++;  /* Ensure progress for empty match. */
+      tvpos->u32.lo = (uint32_t)pos;
+      return push_captures(&ms, src, e);
+    }
+  }
+  return 0;  /* not found */
+}
+
+LJLIB_CF(string_gmatch)
+{
+  lj_lib_checkstr(L, 1);
+  lj_lib_checkstr(L, 2);
+  L->top = L->base+3;
+  (L->top-1)->u64 = 0;
+  lj_lib_pushcc(L, lj_cf_string_gmatch_aux, FF_string_gmatch_aux, 3);
+  return 1;
+}
+
+static void add_s(MatchState *ms, luaL_Buffer *b, const char *s, const char *e)
+{
+  size_t l, i;
+  const char *news = lua_tolstring(ms->L, 3, &l);
+  for (i = 0; i < l; i++) {
+    if (news[i] != L_ESC) {
+      luaL_addchar(b, news[i]);
+    } else {
+      i++;  /* skip ESC */
+      if (!lj_char_isdigit(uchar(news[i]))) {
+	luaL_addchar(b, news[i]);
+      } else if (news[i] == '0') {
+	luaL_addlstring(b, s, (size_t)(e - s));
+      } else {
+	push_onecapture(ms, news[i] - '1', s, e);
+	luaL_addvalue(b);  /* add capture to accumulated result */
+      }
+    }
+  }
+}
+
+static void add_value(MatchState *ms, luaL_Buffer *b,
+		      const char *s, const char *e)
+{
+  lua_State *L = ms->L;
+  switch (lua_type(L, 3)) {
+    case LUA_TNUMBER:
+    case LUA_TSTRING: {
+      add_s(ms, b, s, e);
+      return;
+    }
+    case LUA_TFUNCTION: {
+      int n;
+      lua_pushvalue(L, 3);
+      n = push_captures(ms, s, e);
+      lua_call(L, n, 1);
+      break;
+    }
+    case LUA_TTABLE: {
+      push_onecapture(ms, 0, s, e);
+      lua_gettable(L, 3);
+  
