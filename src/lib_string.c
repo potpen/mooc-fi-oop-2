@@ -585,4 +585,59 @@ static void add_value(MatchState *ms, luaL_Buffer *b,
     case LUA_TTABLE: {
       push_onecapture(ms, 0, s, e);
       lua_gettable(L, 3);
-  
+      break;
+    }
+  }
+  if (!lua_toboolean(L, -1)) {  /* nil or false? */
+    lua_pop(L, 1);
+    lua_pushlstring(L, s, (size_t)(e - s));  /* keep original text */
+  } else if (!lua_isstring(L, -1)) {
+    lj_err_callerv(L, LJ_ERR_STRGSRV, luaL_typename(L, -1));
+  }
+  luaL_addvalue(b);  /* add result to accumulator */
+}
+
+LJLIB_CF(string_gsub)
+{
+  size_t srcl;
+  const char *src = luaL_checklstring(L, 1, &srcl);
+  const char *p = luaL_checkstring(L, 2);
+  int  tr = lua_type(L, 3);
+  int max_s = luaL_optint(L, 4, (int)(srcl+1));
+  int anchor = (*p == '^') ? (p++, 1) : 0;
+  int n = 0;
+  MatchState ms;
+  luaL_Buffer b;
+  if (!(tr == LUA_TNUMBER || tr == LUA_TSTRING ||
+	tr == LUA_TFUNCTION || tr == LUA_TTABLE))
+    lj_err_arg(L, 3, LJ_ERR_NOSFT);
+  luaL_buffinit(L, &b);
+  ms.L = L;
+  ms.src_init = src;
+  ms.src_end = src+srcl;
+  while (n < max_s) {
+    const char *e;
+    ms.level = ms.depth = 0;
+    e = match(&ms, src, p);
+    if (e) {
+      n++;
+      add_value(&ms, &b, src, e);
+    }
+    if (e && e>src) /* non empty match? */
+      src = e;  /* skip it */
+    else if (src < ms.src_end)
+      luaL_addchar(&b, *src++);
+    else
+      break;
+    if (anchor)
+      break;
+  }
+  luaL_addlstring(&b, src, (size_t)(ms.src_end-src));
+  luaL_pushresult(&b);
+  lua_pushinteger(L, n);  /* number of substitutions */
+  return 2;
+}
+
+/* ------------------------------------------------------------------------ */
+
+LJLIB_CF(strin
