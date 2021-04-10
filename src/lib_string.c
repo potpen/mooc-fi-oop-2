@@ -640,4 +640,37 @@ LJLIB_CF(string_gsub)
 
 /* ------------------------------------------------------------------------ */
 
-LJLIB_CF(strin
+LJLIB_CF(string_format)		LJLIB_REC(.)
+{
+  int retry = 0;
+  SBuf *sb;
+  do {
+    sb = lj_buf_tmp_(L);
+    retry = lj_strfmt_putarg(L, sb, 1, -retry);
+  } while (retry > 0);
+  setstrV(L, L->top-1, lj_buf_str(L, sb));
+  lj_gc_check(L);
+  return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+
+#include "lj_libdef.h"
+
+LUALIB_API int luaopen_string(lua_State *L)
+{
+  GCtab *mt;
+  global_State *g;
+  LJ_LIB_REG(L, LUA_STRLIBNAME, string);
+  mt = lj_tab_new(L, 0, 1);
+  /* NOBARRIER: basemt is a GC root. */
+  g = G(L);
+  setgcref(basemt_it(g, LJ_TSTR), obj2gco(mt));
+  settabV(L, lj_tab_setstr(L, mt, mmname_str(g, MM_index)), tabV(L->top-1));
+  mt->nomm = (uint8_t)(~(1u<<MM_index));
+#if LJ_HASBUFFER
+  lj_lib_prereg(L, LUA_STRLIBNAME ".buffer", luaopen_string_buffer, tabV(L->top-1));
+#endif
+  return 1;
+}
+
