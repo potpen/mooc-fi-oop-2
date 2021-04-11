@@ -156,4 +156,55 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
   int32_t i = lj_lib_optint(L, 3, 1);
   int32_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
 	      lj_lib_checkint(L, 4) : (int32_t)lj_tab_len(t);
-  SBuf *sb = lj_buf_tm
+  SBuf *sb = lj_buf_tmp_(L);
+  SBuf *sbx = lj_buf_puttab(sb, t, sep, i, e);
+  if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type. */
+    int32_t idx = (int32_t)(intptr_t)sb->w;
+    cTValue *o = lj_tab_getint(t, idx);
+    lj_err_callerv(L, LJ_ERR_TABCAT,
+		   lj_obj_itypename[o ? itypemap(o) : ~LJ_TNIL], idx);
+  }
+  setstrV(L, L->top-1, lj_buf_str(L, sbx));
+  lj_gc_check(L);
+  return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+
+static void set2(lua_State *L, int i, int j)
+{
+  lua_rawseti(L, 1, i);
+  lua_rawseti(L, 1, j);
+}
+
+static int sort_comp(lua_State *L, int a, int b)
+{
+  if (!lua_isnil(L, 2)) {  /* function? */
+    int res;
+    lua_pushvalue(L, 2);
+    lua_pushvalue(L, a-1);  /* -1 to compensate function */
+    lua_pushvalue(L, b-2);  /* -2 to compensate function and `a' */
+    lua_call(L, 2, 1);
+    res = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return res;
+  } else {  /* a < b? */
+    return lua_lessthan(L, a, b);
+  }
+}
+
+static void auxsort(lua_State *L, int l, int u)
+{
+  while (l < u) {  /* for tail recursion */
+    int i, j;
+    /* sort elements a[l], a[(l+u)/2] and a[u] */
+    lua_rawgeti(L, 1, l);
+    lua_rawgeti(L, 1, u);
+    if (sort_comp(L, -1, -2))  /* a[u] < a[l]? */
+      set2(L, l, u);  /* swap a[l] - a[u] */
+    else
+      lua_pop(L, 2);
+    if (u-l == 1) break;  /* only 2 elements */
+    i = (l+u)/2;
+    lua_rawgeti(L, 1, i);
+ 
