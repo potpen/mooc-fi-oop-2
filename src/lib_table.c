@@ -252,4 +252,67 @@ static void auxsort(lua_State *L, int l, int u)
     } else {
       j=i+1; i=u; u=j-2;
     }
-    auxsort(L, j, i);
+    auxsort(L, j, i);  /* call recursively the smaller one */
+  }  /* repeat the routine for the larger one */
+}
+
+LJLIB_CF(table_sort)
+{
+  GCtab *t = lj_lib_checktab(L, 1);
+  int32_t n = (int32_t)lj_tab_len(t);
+  lua_settop(L, 2);
+  if (!tvisnil(L->base+1))
+    lj_lib_checkfunc(L, 2);
+  auxsort(L, 1, n);
+  return 0;
+}
+
+#if LJ_52
+LJLIB_PUSH("n")
+LJLIB_CF(table_pack)
+{
+  TValue *array, *base = L->base;
+  MSize i, n = (uint32_t)(L->top - base);
+  GCtab *t = lj_tab_new(L, n ? n+1 : 0, 1);
+  /* NOBARRIER: The table is new (marked white). */
+  setintV(lj_tab_setstr(L, t, strV(lj_lib_upvalue(L, 1))), (int32_t)n);
+  for (array = tvref(t->array) + 1, i = 0; i < n; i++)
+    copyTV(L, &array[i], &base[i]);
+  settabV(L, base, t);
+  L->top = base+1;
+  lj_gc_check(L);
+  return 1;
+}
+#endif
+
+LJLIB_NOREG LJLIB_CF(table_new)		LJLIB_REC(.)
+{
+  int32_t a = lj_lib_checkint(L, 1);
+  int32_t h = lj_lib_checkint(L, 2);
+  lua_createtable(L, a, h);
+  return 1;
+}
+
+LJLIB_NOREG LJLIB_CF(table_clear)	LJLIB_REC(.)
+{
+  lj_tab_clear(lj_lib_checktab(L, 1));
+  return 0;
+}
+
+static int luaopen_table_new(lua_State *L)
+{
+  return lj_lib_postreg(L, lj_cf_table_new, FF_table_new, "new");
+}
+
+static int luaopen_table_clear(lua_State *L)
+{
+  return lj_lib_postreg(L, lj_cf_table_clear, FF_table_clear, "clear");
+}
+
+/* ------------------------------------------------------------------------ */
+
+#include "lj_libdef.h"
+
+LUALIB_API int luaopen_table(lua_State *L)
+{
+  LJ_LIB_REG(L, LUA_TABLIBNAME
