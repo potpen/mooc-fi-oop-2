@@ -315,4 +315,13 @@ static int luaopen_table_clear(lua_State *L)
 
 LUALIB_API int luaopen_table(lua_State *L)
 {
-  LJ_LIB_REG(L, LUA_TABLIBNAME
+  LJ_LIB_REG(L, LUA_TABLIBNAME, table);
+#if LJ_52
+  lua_getglobal(L, "unpack");
+  lua_setfield(L, -2, "unpack");
+#endif
+  lj_lib_prereg(L, LUA_TABLIBNAME ".new", luaopen_table_new, tabV(L->top-1));
+  lj_lib_prereg(L, LUA_TABLIBNAME ".clear", luaopen_table_clear, tabV(L->top-1));
+  return 1;
+}
+
