@@ -788,3 +788,526 @@ LUA_API void lua_concat(lua_State *L, int n)
     } while (--n > 0);
   } else if (n == 0) {  /* Push empty string. */
     setstrV(L, L->top, &G(L)->strempty);
+    incr_top(L);
+  }
+  /* else n == 1: nothing to do. */
+}
+
+/* -- Object getters ------------------------------------------------------ */
+
+LUA_API void lua_gettable(lua_State *L, int idx)
+{
+  cTValue *t = index2adr_check(L, idx);
+  cTValue *v = lj_meta_tget(L, t, L->top-1);
+  if (v == NULL) {
+    L->top += 2;
+    lj_vm_call(L, L->top-2, 1+1);
+    L->top -= 2+LJ_FR2;
+    v = L->top+1+LJ_FR2;
+  }
+  copyTV(L, L->top-1, v);
+}
+
+LUA_API void lua_getfield(lua_State *L, int idx, const char *k)
+{
+  cTValue *v, *t = index2adr_check(L, idx);
+  TValue key;
+  setstrV(L, &key, lj_str_newz(L, k));
+  v = lj_meta_tget(L, t, &key);
+  if (v == NULL) {
+    L->top += 2;
+    lj_vm_call(L, L->top-2, 1+1);
+    L->top -= 2+LJ_FR2;
+    v = L->top+1+LJ_FR2;
+  }
+  copyTV(L, L->top, v);
+  incr_top(L);
+}
+
+LUA_API void lua_rawget(lua_State *L, int idx)
+{
+  cTValue *t = index2adr(L, idx);
+  lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
+  copyTV(L, L->top-1, lj_tab_get(L, tabV(t), L->top-1));
+}
+
+LUA_API void lua_rawgeti(lua_State *L, int idx, int n)
+{
+  cTValue *v, *t = index2adr(L, idx);
+  lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
+  v = lj_tab_getint(tabV(t), n);
+  if (v) {
+    copyTV(L, L->top, v);
+  } else {
+    setnilV(L->top);
+  }
+  incr_top(L);
+}
+
+LUA_API int lua_getmetatable(lua_State *L, int idx)
+{
+  cTValue *o = index2adr(L, idx);
+  GCtab *mt = NULL;
+  if (tvistab(o))
+    mt = tabref(tabV(o)->metatable);
+  else if (tvisudata(o))
+    mt = tabref(udataV(o)->metatable);
+  else
+    mt = tabref(basemt_obj(G(L), o));
+  if (mt == NULL)
+    return 0;
+  settabV(L, L->top, mt);
+  incr_top(L);
+  return 1;
+}
+
+LUALIB_API int luaL_getmetafield(lua_State *L, int idx, const char *field)
+{
+  if (lua_getmetatable(L, idx)) {
+    cTValue *tv = lj_tab_getstr(tabV(L->top-1), lj_str_newz(L, field));
+    if (tv && !tvisnil(tv)) {
+      copyTV(L, L->top-1, tv);
+      return 1;
+    }
+    L->top--;
+  }
+  return 0;
+}
+
+LUA_API void lua_getfenv(lua_State *L, int idx)
+{
+  cTValue *o = index2adr_check(L, idx);
+  if (tvisfunc(o)) {
+    settabV(L, L->top, tabref(funcV(o)->c.env));
+  } else if (tvisudata(o)) {
+    settabV(L, L->top, tabref(udataV(o)->env));
+  } else if (tvisthread(o)) {
+    settabV(L, L->top, tabref(threadV(o)->env));
+  } else {
+    setnilV(L->top);
+  }
+  incr_top(L);
+}
+
+LUA_API int lua_next(lua_State *L, int idx)
+{
+  cTValue *t = index2adr(L, idx);
+  int more;
+  lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
+  more = lj_tab_next(tabV(t), L->top-1, L->top-1);
+  if (more > 0) {
+    incr_top(L);  /* Return new key and value slot. */
+  } else if (!more) {  /* End of traversal. */
+    L->top--;  /* Remove key slot. */
+  } else {
+    lj_err_msg(L, LJ_ERR_NEXTIDX);
+  }
+  return more;
+}
+
+LUA_API const char *lua_getupvalue(lua_State *L, int idx, int n)
+{
+  TValue *val;
+  GCobj *o;
+  const char *name = lj_debug_uvnamev(index2adr(L, idx), (uint32_t)(n-1), &val, &o);
+  if (name) {
+    copyTV(L, L->top, val);
+    incr_top(L);
+  }
+  return name;
+}
+
+LUA_API void *lua_upvalueid(lua_State *L, int idx, int n)
+{
+  GCfunc *fn = funcV(index2adr(L, idx));
+  n--;
+  lj_checkapi((uint32_t)n < fn->l.nupvalues, "bad upvalue %d", n);
+  return isluafunc(fn) ? (void *)gcref(fn->l.uvptr[n]) :
+			 (void *)&fn->c.upvalue[n];
+}
+
+LUA_API void lua_upvaluejoin(lua_State *L, int idx1, int n1, int idx2, int n2)
+{
+  GCfunc *fn1 = funcV(index2adr(L, idx1));
+  GCfunc *fn2 = funcV(index2adr(L, idx2));
+  n1--; n2--;
+  lj_checkapi(isluafunc(fn1), "stack slot %d is not a Lua function", idx1);
+  lj_checkapi(isluafunc(fn2), "stack slot %d is not a Lua function", idx2);
+  lj_checkapi((uint32_t)n1 < fn1->l.nupvalues, "bad upvalue %d", n1+1);
+  lj_checkapi((uint32_t)n2 < fn2->l.nupvalues, "bad upvalue %d", n2+1);
+  setgcrefr(fn1->l.uvptr[n1], fn2->l.uvptr[n2]);
+  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]));
+}
+
+LUALIB_API void *luaL_testudata(lua_State *L, int idx, const char *tname)
+{
+  cTValue *o = index2adr(L, idx);
+  if (tvisudata(o)) {
+    GCudata *ud = udataV(o);
+    cTValue *tv = lj_tab_getstr(tabV(registry(L)), lj_str_newz(L, tname));
+    if (tv && tvistab(tv) && tabV(tv) == tabref(ud->metatable))
+      return uddata(ud);
+  }
+  return NULL;  /* value is not a userdata with a metatable */
+}
+
+LUALIB_API void *luaL_checkudata(lua_State *L, int idx, const char *tname)
+{
+  void *p = luaL_testudata(L, idx, tname);
+  if (!p) lj_err_argtype(L, idx, tname);
+  return p;
+}
+
+/* -- Object setters ------------------------------------------------------ */
+
+LUA_API void lua_settable(lua_State *L, int idx)
+{
+  TValue *o;
+  cTValue *t = index2adr_check(L, idx);
+  lj_checkapi_slot(2);
+  o = lj_meta_tset(L, t, L->top-2);
+  if (o) {
+    /* NOBARRIER: lj_meta_tset ensures the table is not black. */
+    L->top -= 2;
+    copyTV(L, o, L->top+1);
+  } else {
+    TValue *base = L->top;
+    copyTV(L, base+2, base-3-2*LJ_FR2);
+    L->top = base+3;
+    lj_vm_call(L, base, 0+1);
+    L->top -= 3+LJ_FR2;
+  }
+}
+
+LUA_API void lua_setfield(lua_State *L, int idx, const char *k)
+{
+  TValue *o;
+  TValue key;
+  cTValue *t = index2adr_check(L, idx);
+  lj_checkapi_slot(1);
+  setstrV(L, &key, lj_str_newz(L, k));
+  o = lj_meta_tset(L, t, &key);
+  if (o) {
+    /* NOBARRIER: lj_meta_tset ensures the table is not black. */
+    copyTV(L, o, --L->top);
+  } else {
+    TValue *base = L->top;
+    copyTV(L, base+2, base-3-2*LJ_FR2);
+    L->top = base+3;
+    lj_vm_call(L, base, 0+1);
+    L->top -= 2+LJ_FR2;
+  }
+}
+
+LUA_API void lua_rawset(lua_State *L, int idx)
+{
+  GCtab *t = tabV(index2adr(L, idx));
+  TValue *dst, *key;
+  lj_checkapi_slot(2);
+  key = L->top-2;
+  dst = lj_tab_set(L, t, key);
+  copyTV(L, dst, key+1);
+  lj_gc_anybarriert(L, t);
+  L->top = key;
+}
+
+LUA_API void lua_rawseti(lua_State *L, int idx, int n)
+{
+  GCtab *t = tabV(index2adr(L, idx));
+  TValue *dst, *src;
+  lj_checkapi_slot(1);
+  dst = lj_tab_setint(L, t, n);
+  src = L->top-1;
+  copyTV(L, dst, src);
+  lj_gc_barriert(L, t, dst);
+  L->top = src;
+}
+
+LUA_API int lua_setmetatable(lua_State *L, int idx)
+{
+  global_State *g;
+  GCtab *mt;
+  cTValue *o = index2adr_check(L, idx);
+  lj_checkapi_slot(1);
+  if (tvisnil(L->top-1)) {
+    mt = NULL;
+  } else {
+    lj_checkapi(tvistab(L->top-1), "top stack slot is not a table");
+    mt = tabV(L->top-1);
+  }
+  g = G(L);
+  if (tvistab(o)) {
+    setgcref(tabV(o)->metatable, obj2gco(mt));
+    if (mt)
+      lj_gc_objbarriert(L, tabV(o), mt);
+  } else if (tvisudata(o)) {
+    setgcref(udataV(o)->metatable, obj2gco(mt));
+    if (mt)
+      lj_gc_objbarrier(L, udataV(o), mt);
+  } else {
+    /* Flush cache, since traces specialize to basemt. But not during __gc. */
+    if (lj_trace_flushall(L))
+      lj_err_caller(L, LJ_ERR_NOGCMM);
+    if (tvisbool(o)) {
+      /* NOBARRIER: basemt is a GC root. */
+      setgcref(basemt_it(g, LJ_TTRUE), obj2gco(mt));
+      setgcref(basemt_it(g, LJ_TFALSE), obj2gco(mt));
+    } else {
+      /* NOBARRIER: basemt is a GC root. */
+      setgcref(basemt_obj(g, o), obj2gco(mt));
+    }
+  }
+  L->top--;
+  return 1;
+}
+
+LUALIB_API void luaL_setmetatable(lua_State *L, const char *tname)
+{
+  lua_getfield(L, LUA_REGISTRYINDEX, tname);
+  lua_setmetatable(L, -2);
+}
+
+LUA_API int lua_setfenv(lua_State *L, int idx)
+{
+  cTValue *o = index2adr_check(L, idx);
+  GCtab *t;
+  lj_checkapi_slot(1);
+  lj_checkapi(tvistab(L->top-1), "top stack slot is not a table");
+  t = tabV(L->top-1);
+  if (tvisfunc(o)) {
+    setgcref(funcV(o)->c.env, obj2gco(t));
+  } else if (tvisudata(o)) {
+    setgcref(udataV(o)->env, obj2gco(t));
+  } else if (tvisthread(o)) {
+    setgcref(threadV(o)->env, obj2gco(t));
+  } else {
+    L->top--;
+    return 0;
+  }
+  lj_gc_objbarrier(L, gcV(o), t);
+  L->top--;
+  return 1;
+}
+
+LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
+{
+  cTValue *f = index2adr(L, idx);
+  TValue *val;
+  GCobj *o;
+  const char *name;
+  lj_checkapi_slot(1);
+  name = lj_debug_uvnamev(f, (uint32_t)(n-1), &val, &o);
+  if (name) {
+    L->top--;
+    copyTV(L, val, L->top);
+    lj_gc_barrier(L, o, L->top);
+  }
+  return name;
+}
+
+/* -- Calls --------------------------------------------------------------- */
+
+#if LJ_FR2
+static TValue *api_call_base(lua_State *L, int nargs)
+{
+  TValue *o = L->top, *base = o - nargs;
+  L->top = o+1;
+  for (; o > base; o--) copyTV(L, o, o-1);
+  setnilV(o);
+  return o+1;
+}
+#else
+#define api_call_base(L, nargs)	(L->top - (nargs))
+#endif
+
+LUA_API void lua_call(lua_State *L, int nargs, int nresults)
+{
+  lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
+	      "thread called in wrong state %d", L->status);
+  lj_checkapi_slot(nargs+1);
+  lj_vm_call(L, api_call_base(L, nargs), nresults+1);
+}
+
+LUA_API int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc)
+{
+  global_State *g = G(L);
+  uint8_t oldh = hook_save(g);
+  ptrdiff_t ef;
+  int status;
+  lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
+	      "thread called in wrong state %d", L->status);
+  lj_checkapi_slot(nargs+1);
+  if (errfunc == 0) {
+    ef = 0;
+  } else {
+    cTValue *o = index2adr_stack(L, errfunc);
+    ef = savestack(L, o);
+  }
+  status = lj_vm_pcall(L, api_call_base(L, nargs), nresults+1, ef);
+  if (status) hook_restore(g, oldh);
+  return status;
+}
+
+static TValue *cpcall(lua_State *L, lua_CFunction func, void *ud)
+{
+  GCfunc *fn = lj_func_newC(L, 0, getcurrenv(L));
+  TValue *top = L->top;
+  fn->c.f = func;
+  setfuncV(L, top++, fn);
+  if (LJ_FR2) setnilV(top++);
+#if LJ_64
+  ud = lj_lightud_intern(L, ud);
+#endif
+  setrawlightudV(top++, ud);
+  cframe_nres(L->cframe) = 1+0;  /* Zero results. */
+  L->top = top;
+  return top-1;  /* Now call the newly allocated C function. */
+}
+
+LUA_API int lua_cpcall(lua_State *L, lua_CFunction func, void *ud)
+{
+  global_State *g = G(L);
+  uint8_t oldh = hook_save(g);
+  int status;
+  lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
+	      "thread called in wrong state %d", L->status);
+  status = lj_vm_cpcall(L, func, ud, cpcall);
+  if (status) hook_restore(g, oldh);
+  return status;
+}
+
+LUALIB_API int luaL_callmeta(lua_State *L, int idx, const char *field)
+{
+  if (luaL_getmetafield(L, idx, field)) {
+    TValue *top = L->top--;
+    if (LJ_FR2) setnilV(top++);
+    copyTV(L, top++, index2adr(L, idx));
+    L->top = top;
+    lj_vm_call(L, top-1, 1+1);
+    return 1;
+  }
+  return 0;
+}
+
+/* -- Coroutine yield and resume ------------------------------------------ */
+
+LUA_API int lua_isyieldable(lua_State *L)
+{
+  return cframe_canyield(L->cframe);
+}
+
+LUA_API int lua_yield(lua_State *L, int nresults)
+{
+  void *cf = L->cframe;
+  global_State *g = G(L);
+  if (cframe_canyield(cf)) {
+    cf = cframe_raw(cf);
+    if (!hook_active(g)) {  /* Regular yield: move results down if needed. */
+      cTValue *f = L->top - nresults;
+      if (f > L->base) {
+	TValue *t = L->base;
+	while (--nresults >= 0) copyTV(L, t++, f++);
+	L->top = t;
+      }
+      L->cframe = NULL;
+      L->status = LUA_YIELD;
+      return -1;
+    } else {  /* Yield from hook: add a pseudo-frame. */
+      TValue *top = L->top;
+      hook_leave(g);
+      (top++)->u64 = cframe_multres(cf);
+      setcont(top, lj_cont_hook);
+      if (LJ_FR2) top++;
+      setframe_pc(top, cframe_pc(cf)-1);
+      top++;
+      setframe_gc(top, obj2gco(L), LJ_TTHREAD);
+      if (LJ_FR2) top++;
+      setframe_ftsz(top, ((char *)(top+1)-(char *)L->base)+FRAME_CONT);
+      L->top = L->base = top+1;
+#if ((defined(__GNUC__) || defined(__clang__)) && (LJ_TARGET_X64 || defined(LUAJIT_UNWIND_EXTERNAL)) && !LJ_NO_UNWIND) || LJ_TARGET_WINDOWS
+      lj_err_throw(L, LUA_YIELD);
+#else
+      L->cframe = NULL;
+      L->status = LUA_YIELD;
+      lj_vm_unwind_c(cf, LUA_YIELD);
+#endif
+    }
+  }
+  lj_err_msg(L, LJ_ERR_CYIELD);
+  return 0;  /* unreachable */
+}
+
+LUA_API int lua_resume(lua_State *L, int nargs)
+{
+  if (L->cframe == NULL && L->status <= LUA_YIELD)
+    return lj_vm_resume(L,
+      L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
+      0, 0);
+  L->top = L->base;
+  setstrV(L, L->top, lj_err_str(L, LJ_ERR_COSUSP));
+  incr_top(L);
+  return LUA_ERRRUN;
+}
+
+/* -- GC and memory management -------------------------------------------- */
+
+LUA_API int lua_gc(lua_State *L, int what, int data)
+{
+  global_State *g = G(L);
+  int res = 0;
+  switch (what) {
+  case LUA_GCSTOP:
+    g->gc.threshold = LJ_MAX_MEM;
+    break;
+  case LUA_GCRESTART:
+    g->gc.threshold = data == -1 ? (g->gc.total/100)*g->gc.pause : g->gc.total;
+    break;
+  case LUA_GCCOLLECT:
+    lj_gc_fullgc(L);
+    break;
+  case LUA_GCCOUNT:
+    res = (int)(g->gc.total >> 10);
+    break;
+  case LUA_GCCOUNTB:
+    res = (int)(g->gc.total & 0x3ff);
+    break;
+  case LUA_GCSTEP: {
+    GCSize a = (GCSize)data << 10;
+    g->gc.threshold = (a <= g->gc.total) ? (g->gc.total - a) : 0;
+    while (g->gc.total >= g->gc.threshold)
+      if (lj_gc_step(L) > 0) {
+	res = 1;
+	break;
+      }
+    break;
+  }
+  case LUA_GCSETPAUSE:
+    res = (int)(g->gc.pause);
+    g->gc.pause = (MSize)data;
+    break;
+  case LUA_GCSETSTEPMUL:
+    res = (int)(g->gc.stepmul);
+    g->gc.stepmul = (MSize)data;
+    break;
+  case LUA_GCISRUNNING:
+    res = (g->gc.threshold != LJ_MAX_MEM);
+    break;
+  default:
+    res = -1;  /* Invalid option. */
+  }
+  return res;
+}
+
+LUA_API lua_Alloc lua_getallocf(lua_State *L, void **ud)
+{
+  global_State *g = G(L);
+  if (ud) *ud = g->allocd;
+  return g->allocf;
+}
+
+LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
+{
+  global_State *g = G(L);
+  g->allocd = ud;
+  g->allocf = f;
+}
