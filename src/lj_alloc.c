@@ -1205,3 +1205,282 @@ static void *tmalloc_small(mstate m, size_t nb)
   while ((t = leftmost_child(t)) != 0) {
     size_t trem = chunksize(t) - nb;
     if (trem < rsize) {
+      rsize = trem;
+      v = t;
+    }
+  }
+
+  r = chunk_plus_offset(v, nb);
+  unlink_large_chunk(m, v);
+  if (rsize < MIN_CHUNK_SIZE) {
+    set_inuse_and_pinuse(m, v, (rsize + nb));
+  } else {
+    set_size_and_pinuse_of_inuse_chunk(m, v, nb);
+    set_size_and_pinuse_of_free_chunk(r, rsize);
+    replace_dv(m, r, rsize);
+  }
+  return chunk2mem(v);
+}
+
+/* ----------------------------------------------------------------------- */
+
+void *lj_alloc_create(PRNGState *rs)
+{
+  size_t tsize = DEFAULT_GRANULARITY;
+  char *tbase;
+  INIT_MMAP();
+  UNUSED(rs);
+  tbase = (char *)(CALL_MMAP(rs, tsize));
+  if (tbase != CMFAIL) {
+    size_t msize = pad_request(sizeof(struct malloc_state));
+    mchunkptr mn;
+    mchunkptr msp = align_as_chunk(tbase);
+    mstate m = (mstate)(chunk2mem(msp));
+    memset(m, 0, msize);
+    msp->head = (msize|PINUSE_BIT|CINUSE_BIT);
+    m->seg.base = tbase;
+    m->seg.size = tsize;
+    m->release_checks = MAX_RELEASE_CHECK_RATE;
+    init_bins(m);
+    mn = next_chunk(mem2chunk(m));
+    init_top(m, mn, (size_t)((tbase + tsize) - (char *)mn) - TOP_FOOT_SIZE);
+    return m;
+  }
+  return NULL;
+}
+
+void lj_alloc_setprng(void *msp, PRNGState *rs)
+{
+  mstate ms = (mstate)msp;
+  ms->prng = rs;
+}
+
+void lj_alloc_destroy(void *msp)
+{
+  mstate ms = (mstate)msp;
+  msegmentptr sp = &ms->seg;
+  while (sp != 0) {
+    char *base = sp->base;
+    size_t size = sp->size;
+    sp = sp->next;
+    CALL_MUNMAP(base, size);
+  }
+}
+
+static LJ_NOINLINE void *lj_alloc_malloc(void *msp, size_t nsize)
+{
+  mstate ms = (mstate)msp;
+  void *mem;
+  size_t nb;
+  if (nsize <= MAX_SMALL_REQUEST) {
+    bindex_t idx;
+    binmap_t smallbits;
+    nb = (nsize < MIN_REQUEST)? MIN_CHUNK_SIZE : pad_request(nsize);
+    idx = small_index(nb);
+    smallbits = ms->smallmap >> idx;
+
+    if ((smallbits & 0x3U) != 0) { /* Remainderless fit to a smallbin. */
+      mchunkptr b, p;
+      idx += ~smallbits & 1;       /* Uses next bin if idx empty */
+      b = smallbin_at(ms, idx);
+      p = b->fd;
+      unlink_first_small_chunk(ms, b, p, idx);
+      set_inuse_and_pinuse(ms, p, small_index2size(idx));
+      mem = chunk2mem(p);
+      return mem;
+    } else if (nb > ms->dvsize) {
+      if (smallbits != 0) { /* Use chunk in next nonempty smallbin */
+	mchunkptr b, p, r;
+	size_t rsize;
+	binmap_t leftbits = (smallbits << idx) & left_bits(idx2bit(idx));
+	bindex_t i = lj_ffs(leftbits);
+	b = smallbin_at(ms, i);
+	p = b->fd;
+	unlink_first_small_chunk(ms, b, p, i);
+	rsize = small_index2size(i) - nb;
+	/* Fit here cannot be remainderless if 4byte sizes */
+	if (SIZE_T_SIZE != 4 && rsize < MIN_CHUNK_SIZE) {
+	  set_inuse_and_pinuse(ms, p, small_index2size(i));
+	} else {
+	  set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+	  r = chunk_plus_offset(p, nb);
+	  set_size_and_pinuse_of_free_chunk(r, rsize);
+	  replace_dv(ms, r, rsize);
+	}
+	mem = chunk2mem(p);
+	return mem;
+      } else if (ms->treemap != 0 && (mem = tmalloc_small(ms, nb)) != 0) {
+	return mem;
+      }
+    }
+  } else if (nsize >= MAX_REQUEST) {
+    nb = MAX_SIZE_T; /* Too big to allocate. Force failure (in sys alloc) */
+  } else {
+    nb = pad_request(nsize);
+    if (ms->treemap != 0 && (mem = tmalloc_large(ms, nb)) != 0) {
+      return mem;
+    }
+  }
+
+  if (nb <= ms->dvsize) {
+    size_t rsize = ms->dvsize - nb;
+    mchunkptr p = ms->dv;
+    if (rsize >= MIN_CHUNK_SIZE) { /* split dv */
+      mchunkptr r = ms->dv = chunk_plus_offset(p, nb);
+      ms->dvsize = rsize;
+      set_size_and_pinuse_of_free_chunk(r, rsize);
+      set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+    } else { /* exhaust dv */
+      size_t dvs = ms->dvsize;
+      ms->dvsize = 0;
+      ms->dv = 0;
+      set_inuse_and_pinuse(ms, p, dvs);
+    }
+    mem = chunk2mem(p);
+    return mem;
+  } else if (nb < ms->topsize) { /* Split top */
+    size_t rsize = ms->topsize -= nb;
+    mchunkptr p = ms->top;
+    mchunkptr r = ms->top = chunk_plus_offset(p, nb);
+    r->head = rsize | PINUSE_BIT;
+    set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+    mem = chunk2mem(p);
+    return mem;
+  }
+  return alloc_sys(ms, nb);
+}
+
+static LJ_NOINLINE void *lj_alloc_free(void *msp, void *ptr)
+{
+  if (ptr != 0) {
+    mchunkptr p = mem2chunk(ptr);
+    mstate fm = (mstate)msp;
+    size_t psize = chunksize(p);
+    mchunkptr next = chunk_plus_offset(p, psize);
+    if (!pinuse(p)) {
+      size_t prevsize = p->prev_foot;
+      if ((prevsize & IS_DIRECT_BIT) != 0) {
+	prevsize &= ~IS_DIRECT_BIT;
+	psize += prevsize + DIRECT_FOOT_PAD;
+	CALL_MUNMAP((char *)p - prevsize, psize);
+	return NULL;
+      } else {
+	mchunkptr prev = chunk_minus_offset(p, prevsize);
+	psize += prevsize;
+	p = prev;
+	/* consolidate backward */
+	if (p != fm->dv) {
+	  unlink_chunk(fm, p, prevsize);
+	} else if ((next->head & INUSE_BITS) == INUSE_BITS) {
+	  fm->dvsize = psize;
+	  set_free_with_pinuse(p, psize, next);
+	  return NULL;
+	}
+      }
+    }
+    if (!cinuse(next)) {  /* consolidate forward */
+      if (next == fm->top) {
+	size_t tsize = fm->topsize += psize;
+	fm->top = p;
+	p->head = tsize | PINUSE_BIT;
+	if (p == fm->dv) {
+	  fm->dv = 0;
+	  fm->dvsize = 0;
+	}
+	if (tsize > fm->trim_check)
+	  alloc_trim(fm, 0);
+	return NULL;
+      } else if (next == fm->dv) {
+	size_t dsize = fm->dvsize += psize;
+	fm->dv = p;
+	set_size_and_pinuse_of_free_chunk(p, dsize);
+	return NULL;
+      } else {
+	size_t nsize = chunksize(next);
+	psize += nsize;
+	unlink_chunk(fm, next, nsize);
+	set_size_and_pinuse_of_free_chunk(p, psize);
+	if (p == fm->dv) {
+	  fm->dvsize = psize;
+	  return NULL;
+	}
+      }
+    } else {
+      set_free_with_pinuse(p, psize, next);
+    }
+
+    if (is_small(psize)) {
+      insert_small_chunk(fm, p, psize);
+    } else {
+      tchunkptr tp = (tchunkptr)p;
+      insert_large_chunk(fm, tp, psize);
+      if (--fm->release_checks == 0)
+	release_unused_segments(fm);
+    }
+  }
+  return NULL;
+}
+
+static LJ_NOINLINE void *lj_alloc_realloc(void *msp, void *ptr, size_t nsize)
+{
+  if (nsize >= MAX_REQUEST) {
+    return NULL;
+  } else {
+    mstate m = (mstate)msp;
+    mchunkptr oldp = mem2chunk(ptr);
+    size_t oldsize = chunksize(oldp);
+    mchunkptr next = chunk_plus_offset(oldp, oldsize);
+    mchunkptr newp = 0;
+    size_t nb = request2size(nsize);
+
+    /* Try to either shrink or extend into top. Else malloc-copy-free */
+    if (is_direct(oldp)) {
+      newp = direct_resize(oldp, nb);  /* this may return NULL. */
+    } else if (oldsize >= nb) { /* already big enough */
+      size_t rsize = oldsize - nb;
+      newp = oldp;
+      if (rsize >= MIN_CHUNK_SIZE) {
+	mchunkptr rem = chunk_plus_offset(newp, nb);
+	set_inuse(m, newp, nb);
+	set_inuse(m, rem, rsize);
+	lj_alloc_free(m, chunk2mem(rem));
+      }
+    } else if (next == m->top && oldsize + m->topsize > nb) {
+      /* Expand into top */
+      size_t newsize = oldsize + m->topsize;
+      size_t newtopsize = newsize - nb;
+      mchunkptr newtop = chunk_plus_offset(oldp, nb);
+      set_inuse(m, oldp, nb);
+      newtop->head = newtopsize |PINUSE_BIT;
+      m->top = newtop;
+      m->topsize = newtopsize;
+      newp = oldp;
+    }
+
+    if (newp != 0) {
+      return chunk2mem(newp);
+    } else {
+      void *newmem = lj_alloc_malloc(m, nsize);
+      if (newmem != 0) {
+	size_t oc = oldsize - overhead_for(oldp);
+	memcpy(newmem, ptr, oc < nsize ? oc : nsize);
+	lj_alloc_free(m, ptr);
+      }
+      return newmem;
+    }
+  }
+}
+
+void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize)
+{
+  (void)osize;
+  if (nsize == 0) {
+    return lj_alloc_free(msp, ptr);
+  } else if (ptr == NULL) {
+    return lj_alloc_malloc(msp, nsize);
+  } else {
+    return lj_alloc_realloc(msp, ptr, nsize);
+  }
+}
+
+#endif
