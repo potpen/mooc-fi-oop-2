@@ -50,3 +50,44 @@ static Reg ra_scratchpair(ASMState *as, RegSet allow)
 
 #if !LJ_SOFTFP
 /* Allocate two source registers for three-operand instructions. */
+static Reg ra_alloc2(ASMState *as, IRIns *ir, RegSet allow)
+{
+  IRIns *irl = IR(ir->op1), *irr = IR(ir->op2);
+  Reg left = irl->r, right = irr->r;
+  if (ra_hasreg(left)) {
+    ra_noweak(as, left);
+    if (ra_noreg(right))
+      right = ra_allocref(as, ir->op2, rset_exclude(allow, left));
+    else
+      ra_noweak(as, right);
+  } else if (ra_hasreg(right)) {
+    ra_noweak(as, right);
+    left = ra_allocref(as, ir->op1, rset_exclude(allow, right));
+  } else if (ra_hashint(right)) {
+    right = ra_allocref(as, ir->op2, allow);
+    left = ra_alloc1(as, ir->op1, rset_exclude(allow, right));
+  } else {
+    left = ra_allocref(as, ir->op1, allow);
+    right = ra_alloc1(as, ir->op2, rset_exclude(allow, left));
+  }
+  return left | (right << 8);
+}
+#endif
+
+/* -- Guard handling ------------------------------------------------------ */
+
+/* Generate an exit stub group at the bottom of the reserved MCode memory. */
+static MCode *asm_exitstub_gen(ASMState *as, ExitNo group)
+{
+  MCode *mxp = as->mcbot;
+  int i;
+  if (mxp + 4*4+4*EXITSTUBS_PER_GROUP >= as->mctop)
+    asm_mclimit(as);
+  /* str lr, [sp]; bl ->vm_exit_handler; .long DISPATCH_address, group. */
+  *mxp++ = ARMI_STR|ARMI_LS_P|ARMI_LS_U|ARMF_D(RID_LR)|ARMF_N(RID_SP);
+  *mxp = ARMI_BL|((((MCode *)(void *)lj_vm_exit_handler-mxp)-2)&0x00ffffffu);
+  mxp++;
+  *mxp++ = (MCode)i32ptr(J2GG(as->J)->dispatch);  /* DISPATCH address */
+  *mxp++ = group*EXITSTUBS_PER_GROUP;
+  for (i = 0; i < EXITSTUBS_PER_GROUP; i++)
+    *mxp++ = ARMI_B|((-6-i)&0x00fffff
