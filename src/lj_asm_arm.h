@@ -90,4 +90,49 @@ static MCode *asm_exitstub_gen(ASMState *as, ExitNo group)
   *mxp++ = (MCode)i32ptr(J2GG(as->J)->dispatch);  /* DISPATCH address */
   *mxp++ = group*EXITSTUBS_PER_GROUP;
   for (i = 0; i < EXITSTUBS_PER_GROUP; i++)
-    *mxp++ = ARMI_B|((-6-i)&0x00fffff
+    *mxp++ = ARMI_B|((-6-i)&0x00ffffffu);
+  lj_mcode_sync(as->mcbot, mxp);
+  lj_mcode_commitbot(as->J, mxp);
+  as->mcbot = mxp;
+  as->mclim = as->mcbot + MCLIM_REDZONE;
+  return mxp - EXITSTUBS_PER_GROUP;
+}
+
+/* Setup all needed exit stubs. */
+static void asm_exitstub_setup(ASMState *as, ExitNo nexits)
+{
+  ExitNo i;
+  if (nexits >= EXITSTUBS_PER_GROUP*LJ_MAX_EXITSTUBGR)
+    lj_trace_err(as->J, LJ_TRERR_SNAPOV);
+  for (i = 0; i < (nexits+EXITSTUBS_PER_GROUP-1)/EXITSTUBS_PER_GROUP; i++)
+    if (as->J->exitstubgroup[i] == NULL)
+      as->J->exitstubgroup[i] = asm_exitstub_gen(as, i);
+}
+
+/* Emit conditional branch to exit for guard. */
+static void asm_guardcc(ASMState *as, ARMCC cc)
+{
+  MCode *target = exitstub_addr(as->J, as->snapno);
+  MCode *p = as->mcp;
+  if (LJ_UNLIKELY(p == as->invmcp)) {
+    as->loopinv = 1;
+    *p = ARMI_BL | ((target-p-2) & 0x00ffffffu);
+    emit_branch(as, ARMF_CC(ARMI_B, cc^1), p+1);
+    return;
+  }
+  emit_branch(as, ARMF_CC(ARMI_BL, cc), target);
+}
+
+/* -- Operand fusion ------------------------------------------------------ */
+
+/* Limit linear search to this distance. Avoids O(n^2) behavior. */
+#define CONFLICT_SEARCH_LIM	31
+
+/* Check if there's no conflicting instruction between curins and ref. */
+static int noconflict(ASMState *as, IRRef ref, IROp conflict)
+{
+  IRIns *ir = as->ir;
+  IRRef i = as->curins;
+  if (i > ref + CONFLICT_SEARCH_LIM)
+    return 0;  /* Give up, ref is too far away. */
+  while (--i > 
