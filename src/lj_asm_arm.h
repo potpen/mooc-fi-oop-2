@@ -135,4 +135,54 @@ static int noconflict(ASMState *as, IRRef ref, IROp conflict)
   IRRef i = as->curins;
   if (i > ref + CONFLICT_SEARCH_LIM)
     return 0;  /* Give up, ref is too far away. */
-  while (--i > 
+  while (--i > ref)
+    if (ir[i].o == conflict)
+      return 0;  /* Conflict found. */
+  return 1;  /* Ok, no conflict. */
+}
+
+/* Fuse the array base of colocated arrays. */
+static int32_t asm_fuseabase(ASMState *as, IRRef ref)
+{
+  IRIns *ir = IR(ref);
+  if (ir->o == IR_TNEW && ir->op1 <= LJ_MAX_COLOSIZE &&
+      !neverfuse(as) && noconflict(as, ref, IR_NEWREF))
+    return (int32_t)sizeof(GCtab);
+  return 0;
+}
+
+/* Fuse array/hash/upvalue reference into register+offset operand. */
+static Reg asm_fuseahuref(ASMState *as, IRRef ref, int32_t *ofsp, RegSet allow,
+			  int lim)
+{
+  IRIns *ir = IR(ref);
+  if (ra_noreg(ir->r)) {
+    if (ir->o == IR_AREF) {
+      if (mayfuse(as, ref)) {
+	if (irref_isk(ir->op2)) {
+	  IRRef tab = IR(ir->op1)->op1;
+	  int32_t ofs = asm_fuseabase(as, tab);
+	  IRRef refa = ofs ? tab : ir->op1;
+	  ofs += 8*IR(ir->op2)->i;
+	  if (ofs > -lim && ofs < lim) {
+	    *ofsp = ofs;
+	    return ra_alloc1(as, refa, allow);
+	  }
+	}
+      }
+    } else if (ir->o == IR_HREFK) {
+      if (mayfuse(as, ref)) {
+	int32_t ofs = (int32_t)(IR(ir->op2)->op2 * sizeof(Node));
+	if (ofs < lim) {
+	  *ofsp = ofs;
+	  return ra_alloc1(as, ir->op1, allow);
+	}
+      }
+    } else if (ir->o == IR_UREFC) {
+      if (irref_isk(ir->op1)) {
+	GCfunc *fn = ir_kfunc(IR(ir->op1));
+	int32_t ofs = i32ptr(&gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv.tv);
+	*ofsp = (ofs & 255);  /* Mask out less bits to allow LDRD. */
+	return ra_allock(as, (ofs & ~255), allow);
+      }
+    } else if (ir->o ==
