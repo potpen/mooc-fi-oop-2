@@ -185,4 +185,54 @@ static Reg asm_fuseahuref(ASMState *as, IRRef ref, int32_t *ofsp, RegSet allow,
 	*ofsp = (ofs & 255);  /* Mask out less bits to allow LDRD. */
 	return ra_allock(as, (ofs & ~255), allow);
       }
-    } else if (ir->o ==
+    } else if (ir->o == IR_TMPREF) {
+      *ofsp = 0;
+      return RID_SP;
+    }
+  }
+  *ofsp = 0;
+  return ra_alloc1(as, ref, allow);
+}
+
+/* Fuse m operand into arithmetic/logic instructions. */
+static uint32_t asm_fuseopm(ASMState *as, ARMIns ai, IRRef ref, RegSet allow)
+{
+  IRIns *ir = IR(ref);
+  if (ra_hasreg(ir->r)) {
+    ra_noweak(as, ir->r);
+    return ARMF_M(ir->r);
+  } else if (irref_isk(ref)) {
+    uint32_t k = emit_isk12(ai, ir->i);
+    if (k)
+      return k;
+  } else if (mayfuse(as, ref)) {
+    if (ir->o >= IR_BSHL && ir->o <= IR_BROR) {
+      Reg m = ra_alloc1(as, ir->op1, allow);
+      ARMShift sh = ir->o == IR_BSHL ? ARMSH_LSL :
+		    ir->o == IR_BSHR ? ARMSH_LSR :
+		    ir->o == IR_BSAR ? ARMSH_ASR : ARMSH_ROR;
+      if (irref_isk(ir->op2)) {
+	return m | ARMF_SH(sh, (IR(ir->op2)->i & 31));
+      } else {
+	Reg s = ra_alloc1(as, ir->op2, rset_exclude(allow, m));
+	return m | ARMF_RSH(sh, s);
+      }
+    } else if (ir->o == IR_ADD && ir->op1 == ir->op2) {
+      Reg m = ra_alloc1(as, ir->op1, allow);
+      return m | ARMF_SH(ARMSH_LSL, 1);
+    }
+  }
+  return ra_allocref(as, ref, allow);
+}
+
+/* Fuse shifts into loads/stores. Only bother with BSHL 2 => lsl #2. */
+static IRRef asm_fuselsl2(ASMState *as, IRRef ref)
+{
+  IRIns *ir = IR(ref);
+  if (ra_noreg(ir->r) && mayfuse(as, ref) && ir->o == IR_BSHL &&
+      irref_isk(ir->op2) && IR(ir->op2)->i == 2)
+    return ir->op1;
+  return 0;  /* No fusion. */
+}
+
+/* Fuse XLOAD/XSTORE reference i
