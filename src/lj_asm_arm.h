@@ -329,4 +329,54 @@ static int asm_fusemadd(ASMState *as, IRIns *ir, ARMIns ai, ARMIns air)
 	(rref = lref, ai = air, ra_noreg(irm->r))))) {
     Reg dest = ra_dest(as, ir, RSET_FPR);
     Reg add = ra_hintalloc(as, rref, dest, RSET_FPR);
- 
+    Reg right, left = ra_alloc2(as, irm,
+			rset_exclude(rset_exclude(RSET_FPR, dest), add));
+    right = (left >> 8); left &= 255;
+    emit_dnm(as, ai, (dest & 15), (left & 15), (right & 15));
+    if (dest != add) emit_dm(as, ARMI_VMOV_D, (dest & 15), (add & 15));
+    return 1;
+  }
+  return 0;
+}
+#endif
+
+/* -- Calls --------------------------------------------------------------- */
+
+/* Generate a call to a C function. */
+static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
+{
+  uint32_t n, nargs = CCI_XNARGS(ci);
+  int32_t ofs = 0;
+#if LJ_SOFTFP
+  Reg gpr = REGARG_FIRSTGPR;
+#else
+  Reg gpr, fpr = REGARG_FIRSTFPR, fprodd = 0;
+#endif
+  if ((void *)ci->func)
+    emit_call(as, (void *)ci->func);
+#if !LJ_SOFTFP
+  for (gpr = REGARG_FIRSTGPR; gpr <= REGARG_LASTGPR; gpr++)
+    as->cost[gpr] = REGCOST(~0u, ASMREF_L);
+  gpr = REGARG_FIRSTGPR;
+#endif
+  for (n = 0; n < nargs; n++) {  /* Setup args. */
+    IRRef ref = args[n];
+    IRIns *ir = IR(ref);
+#if !LJ_SOFTFP
+    if (ref && irt_isfp(ir->t)) {
+      RegSet of = as->freeset;
+      Reg src;
+      if (!LJ_ABI_SOFTFP && !(ci->flags & CCI_VARARG)) {
+	if (irt_isnum(ir->t)) {
+	  if (fpr <= REGARG_LASTFPR) {
+	    ra_leftov(as, fpr, ref);
+	    fpr++;
+	    continue;
+	  }
+	} else if (fprodd) {  /* Ick. */
+	  src = ra_alloc1(as, ref, RSET_FPR);
+	  emit_dm(as, ARMI_VMOV_S, (fprodd & 15), (src & 15) | 0x00400000);
+	  fprodd = 0;
+	  continue;
+	} else if (fpr <= REGARG_LASTFPR) {
+	  ra_leftov(as, fpr, ref)
