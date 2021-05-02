@@ -235,4 +235,50 @@ static IRRef asm_fuselsl2(ASMState *as, IRRef ref)
   return 0;  /* No fusion. */
 }
 
-/* Fuse XLOAD/XSTORE reference i
+/* Fuse XLOAD/XSTORE reference into load/store operand. */
+static void asm_fusexref(ASMState *as, ARMIns ai, Reg rd, IRRef ref,
+			 RegSet allow, int32_t ofs)
+{
+  IRIns *ir = IR(ref);
+  Reg base;
+  if (ra_noreg(ir->r) && canfuse(as, ir)) {
+    int32_t lim = (!LJ_SOFTFP && (ai & 0x08000000)) ? 1024 :
+		   (ai & 0x04000000) ? 4096 : 256;
+    if (ir->o == IR_ADD) {
+      int32_t ofs2;
+      if (irref_isk(ir->op2) &&
+	  (ofs2 = ofs + IR(ir->op2)->i) > -lim && ofs2 < lim &&
+	  (!(!LJ_SOFTFP && (ai & 0x08000000)) || !(ofs2 & 3))) {
+	ofs = ofs2;
+	ref = ir->op1;
+      } else if (ofs == 0 && !(!LJ_SOFTFP && (ai & 0x08000000))) {
+	IRRef lref = ir->op1, rref = ir->op2;
+	Reg rn, rm;
+	if ((ai & 0x04000000)) {
+	  IRRef sref = asm_fuselsl2(as, rref);
+	  if (sref) {
+	    rref = sref;
+	    ai |= ARMF_SH(ARMSH_LSL, 2);
+	  } else if ((sref = asm_fuselsl2(as, lref)) != 0) {
+	    lref = rref;
+	    rref = sref;
+	    ai |= ARMF_SH(ARMSH_LSL, 2);
+	  }
+	}
+	rn = ra_alloc1(as, lref, allow);
+	rm = ra_alloc1(as, rref, rset_exclude(allow, rn));
+	if ((ai & 0x04000000)) ai |= ARMI_LS_R;
+	emit_dnm(as, ai|ARMI_LS_P|ARMI_LS_U, rd, rn, rm);
+	return;
+      }
+    } else if (ir->o == IR_STRREF && !(!LJ_SOFTFP && (ai & 0x08000000))) {
+      lj_assertA(ofs == 0, "bad usage");
+      ofs = (int32_t)sizeof(GCstr);
+      if (irref_isk(ir->op2)) {
+	ofs += IR(ir->op2)->i;
+	ref = ir->op1;
+      } else if (irref_isk(ir->op1)) {
+	ofs += IR(ir->op1)->i;
+	ref = ir->op2;
+      } else {
+	/* NYI: Fuse ADD 
