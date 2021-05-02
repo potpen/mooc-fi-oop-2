@@ -379,4 +379,47 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 	  fprodd = 0;
 	  continue;
 	} else if (fpr <= REGARG_LASTFPR) {
-	  ra_leftov(as, fpr, ref)
+	  ra_leftov(as, fpr, ref);
+	  fprodd = fpr++;
+	  continue;
+	}
+	/* Workaround to protect argument GPRs from being used for remat. */
+	as->freeset &= ~RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1);
+	src = ra_alloc1(as, ref, RSET_FPR);  /* May alloc GPR to remat FPR. */
+	as->freeset |= (of & RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1));
+	fprodd = 0;
+	goto stackfp;
+      }
+      /* Workaround to protect argument GPRs from being used for remat. */
+      as->freeset &= ~RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1);
+      src = ra_alloc1(as, ref, RSET_FPR);  /* May alloc GPR to remat FPR. */
+      as->freeset |= (of & RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1));
+      if (irt_isnum(ir->t)) gpr = (gpr+1) & ~1u;
+      if (gpr <= REGARG_LASTGPR) {
+	lj_assertA(rset_test(as->freeset, gpr),
+		   "reg %d not free", gpr);  /* Must have been evicted. */
+	if (irt_isnum(ir->t)) {
+	  lj_assertA(rset_test(as->freeset, gpr+1),
+		     "reg %d not free", gpr+1);  /* Ditto. */
+	  emit_dnm(as, ARMI_VMOV_RR_D, gpr, gpr+1, (src & 15));
+	  gpr += 2;
+	} else {
+	  emit_dn(as, ARMI_VMOV_R_S, gpr, (src & 15));
+	  gpr++;
+	}
+      } else {
+      stackfp:
+	if (irt_isnum(ir->t)) ofs = (ofs + 4) & ~4;
+	emit_spstore(as, ir, src, ofs);
+	ofs += irt_isnum(ir->t) ? 8 : 4;
+      }
+    } else
+#endif
+    {
+      if (gpr <= REGARG_LASTGPR) {
+	lj_assertA(rset_test(as->freeset, gpr),
+		   "reg %d not free", gpr);  /* Must have been evicted. */
+	if (ref) ra_leftov(as, gpr, ref);
+	gpr++;
+      } else {
+	if (re
