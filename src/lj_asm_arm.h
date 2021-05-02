@@ -281,4 +281,52 @@ static void asm_fusexref(ASMState *as, ARMIns ai, Reg rd, IRRef ref,
 	ofs += IR(ir->op1)->i;
 	ref = ir->op2;
       } else {
-	/* NYI: Fuse ADD 
+	/* NYI: Fuse ADD with constant. */
+	Reg rn = ra_alloc1(as, ir->op1, allow);
+	uint32_t m = asm_fuseopm(as, 0, ir->op2, rset_exclude(allow, rn));
+	if ((ai & 0x04000000))
+	  emit_lso(as, ai, rd, rd, ofs);
+	else
+	  emit_lsox(as, ai, rd, rd, ofs);
+	emit_dn(as, ARMI_ADD^m, rd, rn);
+	return;
+      }
+      if (ofs <= -lim || ofs >= lim) {
+	Reg rn = ra_alloc1(as, ref, allow);
+	Reg rm = ra_allock(as, ofs, rset_exclude(allow, rn));
+	if ((ai & 0x04000000)) ai |= ARMI_LS_R;
+	emit_dnm(as, ai|ARMI_LS_P|ARMI_LS_U, rd, rn, rm);
+	return;
+      }
+    }
+  }
+  base = ra_alloc1(as, ref, allow);
+#if !LJ_SOFTFP
+  if ((ai & 0x08000000))
+    emit_vlso(as, ai, rd, base, ofs);
+  else
+#endif
+  if ((ai & 0x04000000))
+    emit_lso(as, ai, rd, base, ofs);
+  else
+    emit_lsox(as, ai, rd, base, ofs);
+}
+
+#if !LJ_SOFTFP
+/*
+** Fuse to multiply-add/sub instruction.
+** VMLA rounds twice (UMA, not FMA) -- no need to check for JIT_F_OPT_FMA.
+** VFMA needs VFPv4, which is uncommon on the remaining ARM32 targets.
+*/
+static int asm_fusemadd(ASMState *as, IRIns *ir, ARMIns ai, ARMIns air)
+{
+  IRRef lref = ir->op1, rref = ir->op2;
+  IRIns *irm;
+  if (lref != rref &&
+      ((mayfuse(as, lref) && (irm = IR(lref), irm->o == IR_MUL) &&
+	ra_noreg(irm->r)) ||
+       (mayfuse(as, rref) && (irm = IR(rref), irm->o == IR_MUL) &&
+	(rref = lref, ai = air, ra_noreg(irm->r))))) {
+    Reg dest = ra_dest(as, ir, RSET_FPR);
+    Reg add = ra_hintalloc(as, rref, dest, RSET_FPR);
+ 
