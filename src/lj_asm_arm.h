@@ -422,4 +422,54 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 	if (ref) ra_leftov(as, gpr, ref);
 	gpr++;
       } else {
-	if (re
+	if (ref) {
+	  Reg r = ra_alloc1(as, ref, RSET_GPR);
+	  emit_spstore(as, ir, r, ofs);
+	}
+	ofs += 4;
+      }
+    }
+  }
+}
+
+/* Setup result reg/sp for call. Evict scratch regs. */
+static void asm_setupresult(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  RegSet drop = RSET_SCRATCH;
+  int hiop = ((ir+1)->o == IR_HIOP && !irt_isnil((ir+1)->t));
+  if (ra_hasreg(ir->r))
+    rset_clear(drop, ir->r);  /* Dest reg handled below. */
+  if (hiop && ra_hasreg((ir+1)->r))
+    rset_clear(drop, (ir+1)->r);  /* Dest reg handled below. */
+  ra_evictset(as, drop);  /* Evictions must be performed first. */
+  if (ra_used(ir)) {
+    lj_assertA(!irt_ispri(ir->t), "PRI dest");
+    if (!LJ_SOFTFP && irt_isfp(ir->t)) {
+      if (LJ_ABI_SOFTFP || (ci->flags & (CCI_CASTU64|CCI_VARARG))) {
+	Reg dest = (ra_dest(as, ir, RSET_FPR) & 15);
+	if (irt_isnum(ir->t))
+	  emit_dnm(as, ARMI_VMOV_D_RR, RID_RETLO, RID_RETHI, dest);
+	else
+	  emit_dn(as, ARMI_VMOV_S_R, RID_RET, dest);
+      } else {
+	ra_destreg(as, ir, RID_FPRET);
+      }
+    } else if (hiop) {
+      ra_destpair(as, ir);
+    } else {
+      ra_destreg(as, ir, RID_RET);
+    }
+  }
+  UNUSED(ci);
+}
+
+static void asm_callx(ASMState *as, IRIns *ir)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  CCallInfo ci;
+  IRRef func;
+  IRIns *irf;
+  ci.flags = asm_callx_flags(as, ir);
+  asm_collectargs(as, ir, &ci, args);
+  asm_setupresult(as, ir, &ci);
+  func = ir->op2; irf =
