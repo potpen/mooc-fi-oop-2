@@ -505,4 +505,47 @@ static void asm_retf(ASMState *as, IRIns *ir)
   emit_lso(as, ARMI_LDR, RID_TMP, base, -4);
 }
 
-/* -- Buffer operations --------------------------------------------------- *
+/* -- Buffer operations --------------------------------------------------- */
+
+#if LJ_HASBUFFER
+static void asm_bufhdr_write(ASMState *as, Reg sb)
+{
+  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, sb));
+  IRIns irgc;
+  int32_t addr = i32ptr((void *)&J2G(as->J)->cur_L);
+  irgc.ot = IRT(0, IRT_PGC);  /* GC type. */
+  emit_storeofs(as, &irgc, RID_TMP, sb, offsetof(SBuf, L));
+  if ((as->flags & JIT_F_ARMV6T2)) {
+    emit_dnm(as, ARMI_BFI, RID_TMP, lj_fls(SBUF_MASK_FLAG), tmp);
+  } else {
+    emit_dnm(as, ARMI_ORR, RID_TMP, RID_TMP, tmp);
+    emit_dn(as, ARMI_AND|ARMI_K12|SBUF_MASK_FLAG, tmp, tmp);
+  }
+  emit_lso(as, ARMI_LDR, RID_TMP,
+	   ra_allock(as, (addr & ~4095),
+		     rset_exclude(rset_exclude(RSET_GPR, sb), tmp)),
+	   (addr & 4095));
+  emit_loadofs(as, &irgc, tmp, sb, offsetof(SBuf, L));
+}
+#endif
+
+/* -- Type conversions ---------------------------------------------------- */
+
+#if !LJ_SOFTFP
+static void asm_tointg(ASMState *as, IRIns *ir, Reg left)
+{
+  Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, left));
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  asm_guardcc(as, CC_NE);
+  emit_d(as, ARMI_VMRS, 0);
+  emit_dm(as, ARMI_VCMP_D, (tmp & 15), (left & 15));
+  emit_dm(as, ARMI_VCVT_F64_S32, (tmp & 15), (tmp & 15));
+  emit_dn(as, ARMI_VMOV_R_S, dest, (tmp & 15));
+  emit_dm(as, ARMI_VCVT_S32_F64, (tmp & 15), (left & 15));
+}
+
+static void asm_tobit(ASMState *as, IRIns *ir)
+{
+  RegSet allow = RSET_FPR;
+  Reg left = ra_alloc1(as, ir->op1, allow);
+  Reg right = ra_alloc1(as, ir
