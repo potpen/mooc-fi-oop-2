@@ -548,4 +548,39 @@ static void asm_tobit(ASMState *as, IRIns *ir)
 {
   RegSet allow = RSET_FPR;
   Reg left = ra_alloc1(as, ir->op1, allow);
-  Reg right = ra_alloc1(as, ir
+  Reg right = ra_alloc1(as, ir->op2, rset_clear(allow, left));
+  Reg tmp = ra_scratch(as, rset_clear(allow, right));
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  emit_dn(as, ARMI_VMOV_R_S, dest, (tmp & 15));
+  emit_dnm(as, ARMI_VADD_D, (tmp & 15), (left & 15), (right & 15));
+}
+#endif
+
+static void asm_conv(ASMState *as, IRIns *ir)
+{
+  IRType st = (IRType)(ir->op2 & IRCONV_SRCMASK);
+#if !LJ_SOFTFP
+  int stfp = (st == IRT_NUM || st == IRT_FLOAT);
+#endif
+  IRRef lref = ir->op1;
+  /* 64 bit integer conversions are handled by SPLIT. */
+  lj_assertA(!irt_isint64(ir->t) && !(st == IRT_I64 || st == IRT_U64),
+	     "IR %04d has unsplit 64 bit type",
+	     (int)(ir - as->ir) - REF_BIAS);
+#if LJ_SOFTFP
+  /* FP conversions are handled by SPLIT. */
+  lj_assertA(!irt_isfp(ir->t) && !(st == IRT_NUM || st == IRT_FLOAT),
+	     "IR %04d has FP type",
+	     (int)(ir - as->ir) - REF_BIAS);
+  /* Can't check for same types: SPLIT uses CONV int.int + BXOR for sfp NEG. */
+#else
+  lj_assertA(irt_type(ir->t) != st, "inconsistent types for CONV");
+  if (irt_isfp(ir->t)) {
+    Reg dest = ra_dest(as, ir, RSET_FPR);
+    if (stfp) {  /* FP to FP conversion. */
+      emit_dm(as, st == IRT_NUM ? ARMI_VCVT_F32_F64 : ARMI_VCVT_F64_F32,
+	      (dest & 15), (ra_alloc1(as, lref, RSET_FPR) & 15));
+    } else {  /* Integer to FP conversion. */
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+      ARMIns ai = irt_isfloat(ir->t) ?
+	(st == IRT_INT ? ARMI_VCVT_
