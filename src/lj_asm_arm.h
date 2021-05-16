@@ -583,4 +583,42 @@ static void asm_conv(ASMState *as, IRIns *ir)
     } else {  /* Integer to FP conversion. */
       Reg left = ra_alloc1(as, lref, RSET_GPR);
       ARMIns ai = irt_isfloat(ir->t) ?
-	(st == IRT_INT ? ARMI_VCVT_
+	(st == IRT_INT ? ARMI_VCVT_F32_S32 : ARMI_VCVT_F32_U32) :
+	(st == IRT_INT ? ARMI_VCVT_F64_S32 : ARMI_VCVT_F64_U32);
+      emit_dm(as, ai, (dest & 15), (dest & 15));
+      emit_dn(as, ARMI_VMOV_S_R, left, (dest & 15));
+    }
+  } else if (stfp) {  /* FP to integer conversion. */
+    if (irt_isguard(ir->t)) {
+      /* Checked conversions are only supported from number to int. */
+      lj_assertA(irt_isint(ir->t) && st == IRT_NUM,
+		 "bad type for checked CONV");
+      asm_tointg(as, ir, ra_alloc1(as, lref, RSET_FPR));
+    } else {
+      Reg left = ra_alloc1(as, lref, RSET_FPR);
+      Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, left));
+      Reg dest = ra_dest(as, ir, RSET_GPR);
+      ARMIns ai;
+      emit_dn(as, ARMI_VMOV_R_S, dest, (tmp & 15));
+      ai = irt_isint(ir->t) ?
+	(st == IRT_NUM ? ARMI_VCVT_S32_F64 : ARMI_VCVT_S32_F32) :
+	(st == IRT_NUM ? ARMI_VCVT_U32_F64 : ARMI_VCVT_U32_F32);
+      emit_dm(as, ai, (tmp & 15), (left & 15));
+    }
+  } else
+#endif
+  {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    if (st >= IRT_I8 && st <= IRT_U16) {  /* Extend to 32 bit integer. */
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+      lj_assertA(irt_isint(ir->t) || irt_isu32(ir->t), "bad type for CONV EXT");
+      if ((as->flags & JIT_F_ARMV6)) {
+	ARMIns ai = st == IRT_I8 ? ARMI_SXTB :
+		    st == IRT_U8 ? ARMI_UXTB :
+		    st == IRT_I16 ? ARMI_SXTH : ARMI_UXTH;
+	emit_dm(as, ai, dest, left);
+      } else if (st == IRT_U8) {
+	emit_dn(as, ARMI_AND|ARMI_K12|255, dest, left);
+      } else {
+	uint32_t shift = st == IRT_I8 ? 24 : 16;
+	AR
