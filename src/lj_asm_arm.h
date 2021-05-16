@@ -621,4 +621,55 @@ static void asm_conv(ASMState *as, IRIns *ir)
 	emit_dn(as, ARMI_AND|ARMI_K12|255, dest, left);
       } else {
 	uint32_t shift = st == IRT_I8 ? 24 : 16;
-	AR
+	ARMShift sh = st == IRT_U16 ? ARMSH_LSR : ARMSH_ASR;
+	emit_dm(as, ARMI_MOV|ARMF_SH(sh, shift), dest, RID_TMP);
+	emit_dm(as, ARMI_MOV|ARMF_SH(ARMSH_LSL, shift), RID_TMP, left);
+      }
+    } else {  /* Handle 32/32 bit no-op (cast). */
+      ra_leftov(as, dest, lref);  /* Do nothing, but may need to move regs. */
+    }
+  }
+}
+
+static void asm_strto(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_strscan_num];
+  IRRef args[2];
+  Reg rlo = 0, rhi = 0, tmp;
+  int destused = ra_used(ir);
+  int32_t ofs = 0;
+  ra_evictset(as, RSET_SCRATCH);
+#if LJ_SOFTFP
+  if (destused) {
+    if (ra_hasspill(ir->s) && ra_hasspill((ir+1)->s) &&
+	(ir->s & 1) == 0 && ir->s + 1 == (ir+1)->s) {
+      int i;
+      for (i = 0; i < 2; i++) {
+	Reg r = (ir+i)->r;
+	if (ra_hasreg(r)) {
+	  ra_free(as, r);
+	  ra_modified(as, r);
+	  emit_spload(as, ir+i, r, sps_scale((ir+i)->s));
+	}
+      }
+      ofs = sps_scale(ir->s);
+      destused = 0;
+    } else {
+      rhi = ra_dest(as, ir+1, RSET_GPR);
+      rlo = ra_dest(as, ir, rset_exclude(RSET_GPR, rhi));
+    }
+  }
+  asm_guardcc(as, CC_EQ);
+  if (destused) {
+    emit_lso(as, ARMI_LDR, rhi, RID_SP, 4);
+    emit_lso(as, ARMI_LDR, rlo, RID_SP, 0);
+  }
+#else
+  UNUSED(rhi);
+  if (destused) {
+    if (ra_hasspill(ir->s)) {
+      ofs = sps_scale(ir->s);
+      destused = 0;
+      if (ra_hasreg(ir->r)) {
+	ra_free(as, ir->r);
+	ra_modified(a
