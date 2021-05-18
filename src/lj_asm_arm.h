@@ -672,4 +672,52 @@ static void asm_strto(ASMState *as, IRIns *ir)
       destused = 0;
       if (ra_hasreg(ir->r)) {
 	ra_free(as, ir->r);
-	ra_modified(a
+	ra_modified(as, ir->r);
+	emit_spload(as, ir, ir->r, ofs);
+      }
+    } else {
+      rlo = ra_dest(as, ir, RSET_FPR);
+    }
+  }
+  asm_guardcc(as, CC_EQ);
+  if (destused)
+    emit_vlso(as, ARMI_VLDR_D, rlo, RID_SP, 0);
+#endif
+  emit_n(as, ARMI_CMP|ARMI_K12|0, RID_RET);  /* Test return status. */
+  args[0] = ir->op1;      /* GCstr *str */
+  args[1] = ASMREF_TMP1;  /* TValue *n  */
+  asm_gencall(as, ci, args);
+  tmp = ra_releasetmp(as, ASMREF_TMP1);
+  if (ofs == 0)
+    emit_dm(as, ARMI_MOV, tmp, RID_SP);
+  else
+    emit_opk(as, ARMI_ADD, tmp, RID_SP, ofs, RSET_GPR);
+}
+
+/* -- Memory references --------------------------------------------------- */
+
+/* Get pointer to TValue. */
+static void asm_tvptr(ASMState *as, Reg dest, IRRef ref, MSize mode)
+{
+  if ((mode & IRTMPREF_IN1)) {
+    IRIns *ir = IR(ref);
+    if (irt_isnum(ir->t)) {
+      if ((mode & IRTMPREF_OUT1)) {
+#if LJ_SOFTFP
+	lj_assertA(irref_isk(ref), "unsplit FP op");
+	emit_dm(as, ARMI_MOV, dest, RID_SP);
+	emit_lso(as, ARMI_STR,
+		 ra_allock(as, (int32_t)ir_knum(ir)->u32.lo, RSET_GPR),
+		 RID_SP, 0);
+	emit_lso(as, ARMI_STR,
+		 ra_allock(as, (int32_t)ir_knum(ir)->u32.hi, RSET_GPR),
+		 RID_SP, 4);
+#else
+	Reg src = ra_alloc1(as, ref, RSET_FPR);
+	emit_dm(as, ARMI_MOV, dest, RID_SP);
+	emit_vlso(as, ARMI_VSTR_D, src, RID_SP, 0);
+#endif
+      } else if (irref_isk(ref)) {
+	/* Use the number constant itself as a TValue. */
+	ra_allockreg(as, i32ptr(ir_knum(ir)), dest);
+      } else {
