@@ -721,3 +721,49 @@ static void asm_tvptr(ASMState *as, Reg dest, IRRef ref, MSize mode)
 	/* Use the number constant itself as a TValue. */
 	ra_allockreg(as, i32ptr(ir_knum(ir)), dest);
       } else {
+#if LJ_SOFTFP
+	lj_assertA(0, "unsplit FP op");
+#else
+	/* Otherwise force a spill and use the spill slot. */
+	emit_opk(as, ARMI_ADD, dest, RID_SP, ra_spill(as, ir), RSET_GPR);
+#endif
+      }
+    } else {
+      /* Otherwise use [sp] and [sp+4] to hold the TValue.
+      ** This assumes the following call has max. 4 args.
+      */
+      Reg type;
+      emit_dm(as, ARMI_MOV, dest, RID_SP);
+      if (!irt_ispri(ir->t)) {
+	Reg src = ra_alloc1(as, ref, RSET_GPR);
+	emit_lso(as, ARMI_STR, src, RID_SP, 0);
+      }
+      if (LJ_SOFTFP && (ir+1)->o == IR_HIOP && !irt_isnil((ir+1)->t))
+	type = ra_alloc1(as, ref+1, RSET_GPR);
+      else
+	type = ra_allock(as, irt_toitype(ir->t), RSET_GPR);
+      emit_lso(as, ARMI_STR, type, RID_SP, 4);
+    }
+  } else {
+    emit_dm(as, ARMI_MOV, dest, RID_SP);
+  }
+}
+
+static void asm_aref(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg idx, base;
+  if (irref_isk(ir->op2)) {
+    IRRef tab = IR(ir->op1)->op1;
+    int32_t ofs = asm_fuseabase(as, tab);
+    IRRef refa = ofs ? tab : ir->op1;
+    uint32_t k = emit_isk12(ARMI_ADD, ofs + 8*IR(ir->op2)->i);
+    if (k) {
+      base = ra_alloc1(as, refa, RSET_GPR);
+      emit_dn(as, ARMI_ADD^k, dest, base);
+      return;
+    }
+  }
+  base = ra_alloc1(as, ir->op1, RSET_GPR);
+  idx = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, base));
+  emit_dnm(as, ARMI_ADD|ARMF_SH(ARMSH_LSL, 3), d
