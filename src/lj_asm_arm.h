@@ -890,4 +890,39 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
       if (ra_hasreg(keynumhi)) {  /* Canonicalize +-0.0 to 0.0. */
 	if (keyhi == RID_TMP)
 	  emit_dm(as, ARMF_CC(ARMI_MOV, CC_NE), keyhi, keynumhi);
-	emit_d(as, ARMF_CC(ARMI_MOV, CC_EQ)|ARMI
+	emit_d(as, ARMF_CC(ARMI_MOV, CC_EQ)|ARMI_K12|0, keyhi);
+      }
+      emit_dnm(as, ARMI_AND, tmp, tmp, RID_TMP);
+      emit_dnm(as, ARMI_SUB|ARMF_SH(ARMSH_ROR, 32-HASH_ROT3), tmp, tmp, tmp+1);
+      emit_lso(as, ARMI_LDR, dest, tab, (int32_t)offsetof(GCtab, node));
+      emit_dnm(as, ARMI_EOR|ARMF_SH(ARMSH_ROR, 32-((HASH_ROT2+HASH_ROT1)&31)),
+	       tmp, tmp+1, tmp);
+      emit_lso(as, ARMI_LDR, RID_TMP, tab, (int32_t)offsetof(GCtab, hmask));
+      emit_dnm(as, ARMI_SUB|ARMF_SH(ARMSH_ROR, 32-HASH_ROT1), tmp+1, tmp+1, tmp);
+      if (ra_hasreg(keynumhi)) {
+	emit_dnm(as, ARMI_EOR, tmp+1, tmp, key);
+	emit_dnm(as, ARMI_ORR|ARMI_S, RID_TMP, tmp, key);  /* Test for +-0.0. */
+	emit_dnm(as, ARMI_ADD, tmp, keynumhi, keynumhi);
+#if !LJ_SOFTFP
+	emit_dnm(as, ARMI_VMOV_RR_D, key, keynumhi,
+		 (ra_alloc1(as, refkey, RSET_FPR) & 15));
+#endif
+      } else {
+	emit_dnm(as, ARMI_EOR, tmp+1, tmp, key);
+	emit_opk(as, ARMI_ADD, tmp, key, (int32_t)HASH_BIAS,
+		 rset_exclude(rset_exclude(RSET_GPR, tab), key));
+      }
+    }
+  }
+}
+
+static void asm_hrefk(ASMState *as, IRIns *ir)
+{
+  IRIns *kslot = IR(ir->op2);
+  IRIns *irkey = IR(kslot->op1);
+  int32_t ofs = (int32_t)(kslot->op2 * sizeof(Node));
+  int32_t kofs = ofs + (int32_t)offsetof(Node, key);
+  Reg dest = (ra_used(ir) || ofs > 4095) ? ra_dest(as, ir, RSET_GPR) : RID_NONE;
+  Reg node = ra_alloc1(as, ir->op1, RSET_GPR);
+  Reg key = RID_NONE, type = RID_TMP, idx = node;
+  RegSet allow = r
