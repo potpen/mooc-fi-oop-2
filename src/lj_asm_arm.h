@@ -766,4 +766,53 @@ static void asm_aref(ASMState *as, IRIns *ir)
   }
   base = ra_alloc1(as, ir->op1, RSET_GPR);
   idx = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, base));
-  emit_dnm(as, ARMI_ADD|ARMF_SH(ARMSH_LSL, 3), d
+  emit_dnm(as, ARMI_ADD|ARMF_SH(ARMSH_LSL, 3), dest, base, idx);
+}
+
+/* Inlined hash lookup. Specialized for key type and for const keys.
+** The equivalent C code is:
+**   Node *n = hashkey(t, key);
+**   do {
+**     if (lj_obj_equal(&n->key, key)) return &n->val;
+**   } while ((n = nextnode(n)));
+**   return niltv(L);
+*/
+static void asm_href(ASMState *as, IRIns *ir, IROp merge)
+{
+  RegSet allow = RSET_GPR;
+  int destused = ra_used(ir);
+  Reg dest = ra_dest(as, ir, allow);
+  Reg tab = ra_alloc1(as, ir->op1, rset_clear(allow, dest));
+  Reg key = 0, keyhi = 0, keynumhi = RID_NONE, tmp = RID_TMP;
+  IRRef refkey = ir->op2;
+  IRIns *irkey = IR(refkey);
+  IRType1 kt = irkey->t;
+  int32_t k = 0, khi = emit_isk12(ARMI_CMP, irt_toitype(kt));
+  uint32_t khash;
+  MCLabel l_end, l_loop;
+  rset_clear(allow, tab);
+  if (!irref_isk(refkey) || irt_isstr(kt)) {
+#if LJ_SOFTFP
+    key = ra_alloc1(as, refkey, allow);
+    rset_clear(allow, key);
+    if (irkey[1].o == IR_HIOP) {
+      if (ra_hasreg((irkey+1)->r)) {
+	keynumhi = (irkey+1)->r;
+	keyhi = RID_TMP;
+	ra_noweak(as, keynumhi);
+      } else {
+	keyhi = keynumhi = ra_allocref(as, refkey+1, allow);
+      }
+      rset_clear(allow, keynumhi);
+      khi = 0;
+    }
+#else
+    if (irt_isnum(kt)) {
+      key = ra_scratch(as, allow);
+      rset_clear(allow, key);
+      keyhi = keynumhi = ra_scratch(as, allow);
+      rset_clear(allow, keyhi);
+      khi = 0;
+    } else {
+      key = ra_alloc1(as, refkey, allow);
+      rset_clear(allow,
