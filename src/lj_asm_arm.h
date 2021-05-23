@@ -925,4 +925,49 @@ static void asm_hrefk(ASMState *as, IRIns *ir)
   Reg dest = (ra_used(ir) || ofs > 4095) ? ra_dest(as, ir, RSET_GPR) : RID_NONE;
   Reg node = ra_alloc1(as, ir->op1, RSET_GPR);
   Reg key = RID_NONE, type = RID_TMP, idx = node;
-  RegSet allow = r
+  RegSet allow = rset_exclude(RSET_GPR, node);
+  lj_assertA(ofs % sizeof(Node) == 0, "unaligned HREFK slot");
+  if (ofs > 4095) {
+    idx = dest;
+    rset_clear(allow, dest);
+    kofs = (int32_t)offsetof(Node, key);
+  } else if (ra_hasreg(dest)) {
+    emit_opk(as, ARMI_ADD, dest, node, ofs, allow);
+  }
+  asm_guardcc(as, CC_NE);
+  if (!irt_ispri(irkey->t)) {
+    RegSet even = (as->freeset & allow);
+    even = even & (even >> 1) & RSET_GPREVEN;
+    if (even) {
+      key = ra_scratch(as, even);
+      if (rset_test(as->freeset, key+1)) {
+	type = key+1;
+	ra_modified(as, type);
+      }
+    } else {
+      key = ra_scratch(as, allow);
+    }
+    rset_clear(allow, key);
+  }
+  rset_clear(allow, type);
+  if (irt_isnum(irkey->t)) {
+    emit_opk(as, ARMF_CC(ARMI_CMP, CC_EQ), 0, type,
+	     (int32_t)ir_knum(irkey)->u32.hi, allow);
+    emit_opk(as, ARMI_CMP, 0, key,
+	     (int32_t)ir_knum(irkey)->u32.lo, allow);
+  } else {
+    if (ra_hasreg(key))
+      emit_opk(as, ARMF_CC(ARMI_CMP, CC_EQ), 0, key, irkey->i, allow);
+    emit_n(as, ARMI_CMN|ARMI_K12|-irt_toitype(irkey->t), type);
+  }
+  emit_lso(as, ARMI_LDR, type, idx, kofs+4);
+  if (ra_hasreg(key)) emit_lso(as, ARMI_LDR, key, idx, kofs);
+  if (ofs > 4095)
+    emit_opk(as, ARMI_ADD, dest, node, ofs, RSET_GPR);
+}
+
+static void asm_uref(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  if (irref_isk(ir->op1)) {
+    GCfunc *fn = ir_kfunc(IR(ir
