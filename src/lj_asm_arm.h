@@ -865,4 +865,29 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     emit_lsox(as, ARMI_LDRD, tmp, dest, (int32_t)offsetof(Node, key));
   } else {
     emit_n(as, ARMI_CMP^khi, tmp);
-    e
+    emit_lso(as, ARMI_LDR, tmp, dest, (int32_t)offsetof(Node, key.it));
+  }
+  *l_loop = ARMF_CC(ARMI_B, CC_NE) | ((as->mcp-l_loop-2) & 0x00ffffffu);
+
+  /* Load main position relative to tab->node into dest. */
+  khash = irref_isk(refkey) ? ir_khash(as, irkey) : 1;
+  if (khash == 0) {
+    emit_lso(as, ARMI_LDR, dest, tab, (int32_t)offsetof(GCtab, node));
+  } else {
+    emit_dnm(as, ARMI_ADD|ARMF_SH(ARMSH_LSL, 3), dest, dest, tmp);
+    emit_dnm(as, ARMI_ADD|ARMF_SH(ARMSH_LSL, 1), tmp, tmp, tmp);
+    if (irt_isstr(kt)) {  /* Fetch of str->sid is cheaper than ra_allock. */
+      emit_dnm(as, ARMI_AND, tmp, tmp+1, RID_TMP);
+      emit_lso(as, ARMI_LDR, dest, tab, (int32_t)offsetof(GCtab, node));
+      emit_lso(as, ARMI_LDR, tmp+1, key, (int32_t)offsetof(GCstr, sid));
+      emit_lso(as, ARMI_LDR, RID_TMP, tab, (int32_t)offsetof(GCtab, hmask));
+    } else if (irref_isk(refkey)) {
+      emit_opk(as, ARMI_AND, tmp, RID_TMP, (int32_t)khash,
+	       rset_exclude(rset_exclude(RSET_GPR, tab), dest));
+      emit_lso(as, ARMI_LDR, dest, tab, (int32_t)offsetof(GCtab, node));
+      emit_lso(as, ARMI_LDR, RID_TMP, tab, (int32_t)offsetof(GCtab, hmask));
+    } else {  /* Must match with hash*() in lj_tab.c. */
+      if (ra_hasreg(keynumhi)) {  /* Canonicalize +-0.0 to 0.0. */
+	if (keyhi == RID_TMP)
+	  emit_dm(as, ARMF_CC(ARMI_MOV, CC_NE), keyhi, keynumhi);
+	emit_d(as, ARMF_CC(ARMI_MOV, CC_EQ)|ARMI
