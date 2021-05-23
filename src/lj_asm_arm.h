@@ -815,4 +815,54 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
       khi = 0;
     } else {
       key = ra_alloc1(as, refkey, allow);
-      rset_clear(allow,
+      rset_clear(allow, key);
+    }
+#endif
+  } else if (irt_isnum(kt)) {
+    int32_t val = (int32_t)ir_knum(irkey)->u32.lo;
+    k = emit_isk12(ARMI_CMP, val);
+    if (!k) {
+      key = ra_allock(as, val, allow);
+      rset_clear(allow, key);
+    }
+    val = (int32_t)ir_knum(irkey)->u32.hi;
+    khi = emit_isk12(ARMI_CMP, val);
+    if (!khi) {
+      keyhi = ra_allock(as, val, allow);
+      rset_clear(allow, keyhi);
+    }
+  } else if (!irt_ispri(kt)) {
+    k = emit_isk12(ARMI_CMP, irkey->i);
+    if (!k) {
+      key = ra_alloc1(as, refkey, allow);
+      rset_clear(allow, key);
+    }
+  }
+  if (!irt_ispri(kt))
+    tmp = ra_scratchpair(as, allow);
+
+  /* Key not found in chain: jump to exit (if merged) or load niltv. */
+  l_end = emit_label(as);
+  as->invmcp = NULL;
+  if (merge == IR_NE)
+    asm_guardcc(as, CC_AL);
+  else if (destused)
+    emit_loada(as, dest, niltvg(J2G(as->J)));
+
+  /* Follow hash chain until the end. */
+  l_loop = --as->mcp;
+  emit_n(as, ARMI_CMP|ARMI_K12|0, dest);
+  emit_lso(as, ARMI_LDR, dest, dest, (int32_t)offsetof(Node, next));
+
+  /* Type and value comparison. */
+  if (merge == IR_EQ)
+    asm_guardcc(as, CC_EQ);
+  else
+    emit_branch(as, ARMF_CC(ARMI_B, CC_EQ), l_end);
+  if (!irt_ispri(kt)) {
+    emit_nm(as, ARMF_CC(ARMI_CMP, CC_EQ)^k, tmp, key);
+    emit_nm(as, ARMI_CMP^khi, tmp+1, keyhi);
+    emit_lsox(as, ARMI_LDRD, tmp, dest, (int32_t)offsetof(Node, key));
+  } else {
+    emit_n(as, ARMI_CMP^khi, tmp);
+    e
