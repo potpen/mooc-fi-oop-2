@@ -1013,4 +1013,50 @@ static void asm_strref(ASMState *as, IRIns *ir)
     } else if (mayfuse(as, irr->op2) &&
 	       irr->o == IR_ADD && irref_isk(irr->op2) &&
 	       (k = emit_isk12(ARMI_ADD,
-			       (int32_t)sizeof(GCstr
+			       (int32_t)sizeof(GCstr) + IR(irr->op2)->i))) {
+      m = k;
+      right = ra_alloc1(as, irr->op1, rset_exclude(RSET_GPR, left));
+    } else {
+      right = ra_allocref(as, ir->op2, rset_exclude(RSET_GPR, left));
+    }
+    emit_dn(as, ARMI_ADD^m, dest, dest);
+    emit_dnm(as, ARMI_ADD, dest, left, right);
+    return;
+  }
+  r = ra_alloc1(as, ref, RSET_GPR);
+  emit_opk(as, ARMI_ADD, dest, r,
+	   sizeof(GCstr) + IR(refk)->i, rset_exclude(RSET_GPR, r));
+}
+
+/* -- Loads and stores ---------------------------------------------------- */
+
+static ARMIns asm_fxloadins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as);
+  switch (irt_type(ir->t)) {
+  case IRT_I8: return ARMI_LDRSB;
+  case IRT_U8: return ARMI_LDRB;
+  case IRT_I16: return ARMI_LDRSH;
+  case IRT_U16: return ARMI_LDRH;
+  case IRT_NUM: lj_assertA(!LJ_SOFTFP, "unsplit FP op"); return ARMI_VLDR_D;
+  case IRT_FLOAT: if (!LJ_SOFTFP) return ARMI_VLDR_S;  /* fallthrough */
+  default: return ARMI_LDR;
+  }
+}
+
+static ARMIns asm_fxstoreins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as);
+  switch (irt_type(ir->t)) {
+  case IRT_I8: case IRT_U8: return ARMI_STRB;
+  case IRT_I16: case IRT_U16: return ARMI_STRH;
+  case IRT_NUM: lj_assertA(!LJ_SOFTFP, "unsplit FP op"); return ARMI_VSTR_D;
+  case IRT_FLOAT: if (!LJ_SOFTFP) return ARMI_VSTR_S;  /* fallthrough */
+  default: return ARMI_STR;
+  }
+}
+
+static void asm_fload(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  ARMIns ai = as
