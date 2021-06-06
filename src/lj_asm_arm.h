@@ -1107,4 +1107,46 @@ static void asm_xload(ASMState *as, IRIns *ir)
 
 static void asm_xstore_(ASMState *as, IRIns *ir, int32_t ofs)
 {
-  if (ir-
+  if (ir->r != RID_SINK) {
+    Reg src = ra_alloc1(as, ir->op2,
+			(!LJ_SOFTFP && irt_isfp(ir->t)) ? RSET_FPR : RSET_GPR);
+    asm_fusexref(as, asm_fxstoreins(as, ir), src, ir->op1,
+		 rset_exclude(RSET_GPR, src), ofs);
+  }
+}
+
+#define asm_xstore(as, ir)	asm_xstore_(as, ir, 0)
+
+static void asm_ahuvload(ASMState *as, IRIns *ir)
+{
+  int hiop = (LJ_SOFTFP && (ir+1)->o == IR_HIOP);
+  IRType t = hiop ? IRT_NUM : irt_type(ir->t);
+  Reg dest = RID_NONE, type = RID_NONE, idx;
+  RegSet allow = RSET_GPR;
+  int32_t ofs = 0;
+  if (hiop && ra_used(ir+1)) {
+    type = ra_dest(as, ir+1, allow);
+    rset_clear(allow, type);
+  }
+  if (ra_used(ir)) {
+    lj_assertA((LJ_SOFTFP ? 0 : irt_isnum(ir->t)) ||
+	       irt_isint(ir->t) || irt_isaddr(ir->t),
+	       "bad load type %d", irt_type(ir->t));
+    dest = ra_dest(as, ir, (!LJ_SOFTFP && t == IRT_NUM) ? RSET_FPR : allow);
+    rset_clear(allow, dest);
+  }
+  idx = asm_fuseahuref(as, ir->op1, &ofs, allow,
+		       (!LJ_SOFTFP && t == IRT_NUM) ? 1024 : 4096);
+  if (ir->o == IR_VLOAD) ofs += 8 * ir->op2;
+  if (!hiop || type == RID_NONE) {
+    rset_clear(allow, idx);
+    if (ofs < 256 && ra_hasreg(dest) && (dest & 1) == 0 &&
+	rset_test((as->freeset & allow), dest+1)) {
+      type = dest+1;
+      ra_modified(as, type);
+    } else {
+      type = RID_TMP;
+    }
+  }
+  asm_guardcc(as, t == IRT_NUM ? CC_HS : CC_NE);
+  emit_n(as, ARMI_CMN|ARMI_K12|-irt_toitype_(t), ty
