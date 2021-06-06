@@ -1059,4 +1059,52 @@ static ARMIns asm_fxstoreins(ASMState *as, IRIns *ir)
 static void asm_fload(ASMState *as, IRIns *ir)
 {
   Reg dest = ra_dest(as, ir, RSET_GPR);
-  ARMIns ai = as
+  ARMIns ai = asm_fxloadins(as, ir);
+  Reg idx;
+  int32_t ofs;
+  if (ir->op1 == REF_NIL) {  /* FLOAD from GG_State with offset. */
+    idx = ra_allock(as, (int32_t)(ir->op2<<2) + (int32_t)J2GG(as->J), RSET_GPR);
+    ofs = 0;
+  } else {
+    idx = ra_alloc1(as, ir->op1, RSET_GPR);
+    if (ir->op2 == IRFL_TAB_ARRAY) {
+      ofs = asm_fuseabase(as, ir->op1);
+      if (ofs) {  /* Turn the t->array load into an add for colocated arrays. */
+	emit_dn(as, ARMI_ADD|ARMI_K12|ofs, dest, idx);
+	return;
+      }
+    }
+    ofs = field_ofs[ir->op2];
+  }
+  if ((ai & 0x04000000))
+    emit_lso(as, ai, dest, idx, ofs);
+  else
+    emit_lsox(as, ai, dest, idx, ofs);
+}
+
+static void asm_fstore(ASMState *as, IRIns *ir)
+{
+  if (ir->r != RID_SINK) {
+    Reg src = ra_alloc1(as, ir->op2, RSET_GPR);
+    IRIns *irf = IR(ir->op1);
+    Reg idx = ra_alloc1(as, irf->op1, rset_exclude(RSET_GPR, src));
+    int32_t ofs = field_ofs[irf->op2];
+    ARMIns ai = asm_fxstoreins(as, ir);
+    if ((ai & 0x04000000))
+      emit_lso(as, ai, src, idx, ofs);
+    else
+      emit_lsox(as, ai, src, idx, ofs);
+  }
+}
+
+static void asm_xload(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir,
+		     (!LJ_SOFTFP && irt_isfp(ir->t)) ? RSET_FPR : RSET_GPR);
+  lj_assertA(!(ir->op2 & IRXLOAD_UNALIGNED), "unaligned XLOAD");
+  asm_fusexref(as, asm_fxloadins(as, ir), dest, ir->op1, RSET_GPR, 0);
+}
+
+static void asm_xstore_(ASMState *as, IRIns *ir, int32_t ofs)
+{
+  if (ir-
