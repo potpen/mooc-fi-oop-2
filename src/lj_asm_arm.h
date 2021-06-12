@@ -1198,4 +1198,44 @@ static void asm_sload(ASMState *as, IRIns *ir)
   IRType t = hiop ? IRT_NUM : irt_type(ir->t);
   Reg dest = RID_NONE, type = RID_NONE, base;
   RegSet allow = RSET_GPR;
-  lj_assertA(!(ir->op2 & IRSLOAD_PARENT
+  lj_assertA(!(ir->op2 & IRSLOAD_PARENT),
+	     "bad parent SLOAD");  /* Handled by asm_head_side(). */
+  lj_assertA(irt_isguard(ir->t) || !(ir->op2 & IRSLOAD_TYPECHECK),
+	     "inconsistent SLOAD variant");
+#if LJ_SOFTFP
+  lj_assertA(!(ir->op2 & IRSLOAD_CONVERT),
+	     "unsplit SLOAD convert");  /* Handled by LJ_SOFTFP SPLIT. */
+  if (hiop && ra_used(ir+1)) {
+    type = ra_dest(as, ir+1, allow);
+    rset_clear(allow, type);
+  }
+#else
+  if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(ir->t) && t == IRT_INT) {
+    dest = ra_scratch(as, RSET_FPR);
+    asm_tointg(as, ir, dest);
+    t = IRT_NUM;  /* Continue with a regular number type check. */
+  } else
+#endif
+  if (ra_used(ir)) {
+    Reg tmp = RID_NONE;
+    if ((ir->op2 & IRSLOAD_CONVERT))
+      tmp = ra_scratch(as, t == IRT_INT ? RSET_FPR : RSET_GPR);
+    lj_assertA((LJ_SOFTFP ? 0 : irt_isnum(ir->t)) ||
+	       irt_isint(ir->t) || irt_isaddr(ir->t),
+	       "bad SLOAD type %d", irt_type(ir->t));
+    dest = ra_dest(as, ir, (!LJ_SOFTFP && t == IRT_NUM) ? RSET_FPR : allow);
+    rset_clear(allow, dest);
+    base = ra_alloc1(as, REF_BASE, allow);
+    if ((ir->op2 & IRSLOAD_CONVERT)) {
+      if (t == IRT_INT) {
+	emit_dn(as, ARMI_VMOV_R_S, dest, (tmp & 15));
+	emit_dm(as, ARMI_VCVT_S32_F64, (tmp & 15), (tmp & 15));
+	t = IRT_NUM;  /* Check for original type. */
+      } else {
+	emit_dm(as, ARMI_VCVT_F64_S32, (dest & 15), (dest & 15));
+	emit_dn(as, ARMI_VMOV_S_R, tmp, (dest & 15));
+	t = IRT_INT;  /* Check for original type. */
+      }
+      dest = tmp;
+    }
+    goto dotypec
