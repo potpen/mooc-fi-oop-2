@@ -1288,4 +1288,47 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   CTypeID id = (CTypeID)IR(ir->op1)->i;
   CTSize sz;
   CTInfo info = lj_ctype_info(cts, id, &sz);
-  const
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newgco];
+  IRRef args[4];
+  RegSet allow = (RSET_GPR & ~RSET_SCRATCH);
+  RegSet drop = RSET_SCRATCH;
+  lj_assertA(sz != CTSIZE_INVALID || (ir->o == IR_CNEW && ir->op2 != REF_NIL),
+	     "bad CNEW/CNEWI operands");
+
+  as->gcsteps++;
+  if (ra_hasreg(ir->r))
+    rset_clear(drop, ir->r);  /* Dest reg handled below. */
+  ra_evictset(as, drop);
+  if (ra_used(ir))
+    ra_destreg(as, ir, RID_RET);  /* GCcdata * */
+
+  /* Initialize immutable cdata object. */
+  if (ir->o == IR_CNEWI) {
+    int32_t ofs = sizeof(GCcdata);
+    lj_assertA(sz == 4 || sz == 8, "bad CNEWI size %d", sz);
+    if (sz == 8) {
+      ofs += 4; ir++;
+      lj_assertA(ir->o == IR_HIOP, "expected HIOP for CNEWI");
+    }
+    for (;;) {
+      Reg r = ra_alloc1(as, ir->op2, allow);
+      emit_lso(as, ARMI_STR, r, RID_RET, ofs);
+      rset_clear(allow, r);
+      if (ofs == sizeof(GCcdata)) break;
+      ofs -= 4; ir--;
+    }
+  } else if (ir->op2 != REF_NIL) {  /* Create VLA/VLS/aligned cdata. */
+    ci = &lj_ir_callinfo[IRCALL_lj_cdata_newv];
+    args[0] = ASMREF_L;     /* lua_State *L */
+    args[1] = ir->op1;      /* CTypeID id   */
+    args[2] = ir->op2;      /* CTSize sz    */
+    args[3] = ASMREF_TMP1;  /* CTSize align */
+    asm_gencall(as, ci, args);
+    emit_loadi(as, ra_releasetmp(as, ASMREF_TMP1), (int32_t)ctype_align(info));
+    return;
+  }
+
+  /* Initialize gct and ctypeid. lj_mem_newgco() already sets marked. */
+  {
+    uint32_t k = emit_isk12(ARMI_MOV, id);
+    R
