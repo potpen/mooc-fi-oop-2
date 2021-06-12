@@ -1238,4 +1238,54 @@ static void asm_sload(ASMState *as, IRIns *ir)
       }
       dest = tmp;
     }
-    goto dotypec
+    goto dotypecheck;
+  }
+  base = ra_alloc1(as, REF_BASE, allow);
+dotypecheck:
+  rset_clear(allow, base);
+  if ((ir->op2 & IRSLOAD_TYPECHECK)) {
+    if (ra_noreg(type)) {
+      if (ofs < 256 && ra_hasreg(dest) && (dest & 1) == 0 &&
+	  rset_test((as->freeset & allow), dest+1)) {
+	type = dest+1;
+	ra_modified(as, type);
+      } else {
+	type = RID_TMP;
+      }
+    }
+    asm_guardcc(as, t == IRT_NUM ? CC_HS : CC_NE);
+    if ((ir->op2 & IRSLOAD_KEYINDEX)) {
+      emit_n(as, ARMI_CMN|ARMI_K12|1, type);
+      emit_dn(as, ARMI_EOR^emit_isk12(ARMI_EOR, ~LJ_KEYINDEX), type, type);
+    } else {
+      emit_n(as, ARMI_CMN|ARMI_K12|-irt_toitype_(t), type);
+    }
+  }
+  if (ra_hasreg(dest)) {
+#if !LJ_SOFTFP
+    if (t == IRT_NUM) {
+      if (ofs < 1024) {
+	emit_vlso(as, ARMI_VLDR_D, dest, base, ofs);
+      } else {
+	if (ra_hasreg(type)) emit_lso(as, ARMI_LDR, type, base, ofs+4);
+	emit_vlso(as, ARMI_VLDR_D, dest, RID_TMP, 0);
+	emit_opk(as, ARMI_ADD, RID_TMP, base, ofs, allow);
+	return;
+      }
+    } else
+#endif
+      emit_lso(as, ARMI_LDR, dest, base, ofs);
+  }
+  if (ra_hasreg(type)) emit_lso(as, ARMI_LDR, type, base, ofs+4);
+}
+
+/* -- Allocations --------------------------------------------------------- */
+
+#if LJ_HASFFI
+static void asm_cnew(ASMState *as, IRIns *ir)
+{
+  CTState *cts = ctype_ctsG(J2G(as->J));
+  CTypeID id = (CTypeID)IR(ir->op1)->i;
+  CTSize sz;
+  CTInfo info = lj_ctype_info(cts, id, &sz);
+  const
