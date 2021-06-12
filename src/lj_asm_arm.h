@@ -1149,4 +1149,53 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
     }
   }
   asm_guardcc(as, t == IRT_NUM ? CC_HS : CC_NE);
-  emit_n(as, ARMI_CMN|ARMI_K12|-irt_toitype_(t), ty
+  emit_n(as, ARMI_CMN|ARMI_K12|-irt_toitype_(t), type);
+  if (ra_hasreg(dest)) {
+#if !LJ_SOFTFP
+    if (t == IRT_NUM)
+      emit_vlso(as, ARMI_VLDR_D, dest, idx, ofs);
+    else
+#endif
+      emit_lso(as, ARMI_LDR, dest, idx, ofs);
+  }
+  emit_lso(as, ARMI_LDR, type, idx, ofs+4);
+}
+
+static void asm_ahustore(ASMState *as, IRIns *ir)
+{
+  if (ir->r != RID_SINK) {
+    RegSet allow = RSET_GPR;
+    Reg idx, src = RID_NONE, type = RID_NONE;
+    int32_t ofs = 0;
+#if !LJ_SOFTFP
+    if (irt_isnum(ir->t)) {
+      src = ra_alloc1(as, ir->op2, RSET_FPR);
+      idx = asm_fuseahuref(as, ir->op1, &ofs, allow, 1024);
+      emit_vlso(as, ARMI_VSTR_D, src, idx, ofs);
+    } else
+#endif
+    {
+      int hiop = (LJ_SOFTFP && (ir+1)->o == IR_HIOP);
+      if (!irt_ispri(ir->t)) {
+	src = ra_alloc1(as, ir->op2, allow);
+	rset_clear(allow, src);
+      }
+      if (hiop)
+	type = ra_alloc1(as, (ir+1)->op2, allow);
+      else
+	type = ra_allock(as, (int32_t)irt_toitype(ir->t), allow);
+      idx = asm_fuseahuref(as, ir->op1, &ofs, rset_exclude(allow, type), 4096);
+      if (ra_hasreg(src)) emit_lso(as, ARMI_STR, src, idx, ofs);
+      emit_lso(as, ARMI_STR, type, idx, ofs+4);
+    }
+  }
+}
+
+static void asm_sload(ASMState *as, IRIns *ir)
+{
+  int32_t ofs = 8*((int32_t)ir->op1-1) + ((ir->op2 & IRSLOAD_FRAME) ? 4 : 0);
+  int hiop = (LJ_SOFTFP && (ir+1)->o == IR_HIOP);
+  IRType t = hiop ? IRT_NUM : irt_type(ir->t);
+  Reg dest = RID_NONE, type = RID_NONE, base;
+  RegSet allow = RSET_GPR;
+  lj_assertA(!(ir->op2 & IRSLOAD_PARENT
