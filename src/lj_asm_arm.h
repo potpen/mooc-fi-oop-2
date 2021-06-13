@@ -1331,4 +1331,40 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   /* Initialize gct and ctypeid. lj_mem_newgco() already sets marked. */
   {
     uint32_t k = emit_isk12(ARMI_MOV, id);
-    R
+    Reg r = k ? RID_R1 : ra_allock(as, id, allow);
+    emit_lso(as, ARMI_STRB, RID_TMP, RID_RET, offsetof(GCcdata, gct));
+    emit_lsox(as, ARMI_STRH, r, RID_RET, offsetof(GCcdata, ctypeid));
+    emit_d(as, ARMI_MOV|ARMI_K12|~LJ_TCDATA, RID_TMP);
+    if (k) emit_d(as, ARMI_MOV^k, RID_R1);
+  }
+  args[0] = ASMREF_L;     /* lua_State *L */
+  args[1] = ASMREF_TMP1;  /* MSize size   */
+  asm_gencall(as, ci, args);
+  ra_allockreg(as, (int32_t)(sz+sizeof(GCcdata)),
+	       ra_releasetmp(as, ASMREF_TMP1));
+}
+#endif
+
+/* -- Write barriers ------------------------------------------------------ */
+
+static void asm_tbar(ASMState *as, IRIns *ir)
+{
+  Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
+  Reg link = ra_scratch(as, rset_exclude(RSET_GPR, tab));
+  Reg gr = ra_allock(as, i32ptr(J2G(as->J)),
+		     rset_exclude(rset_exclude(RSET_GPR, tab), link));
+  Reg mark = RID_TMP;
+  MCLabel l_end = emit_label(as);
+  emit_lso(as, ARMI_STR, link, tab, (int32_t)offsetof(GCtab, gclist));
+  emit_lso(as, ARMI_STRB, mark, tab, (int32_t)offsetof(GCtab, marked));
+  emit_lso(as, ARMI_STR, tab, gr,
+	   (int32_t)offsetof(global_State, gc.grayagain));
+  emit_dn(as, ARMI_BIC|ARMI_K12|LJ_GC_BLACK, mark, mark);
+  emit_lso(as, ARMI_LDR, link, gr,
+	   (int32_t)offsetof(global_State, gc.grayagain));
+  emit_branch(as, ARMF_CC(ARMI_B, CC_EQ), l_end);
+  emit_n(as, ARMI_TST|ARMI_K12|LJ_GC_BLACK, mark);
+  emit_lso(as, ARMI_LDRB, mark, tab, (int32_t)offsetof(GCtab, marked));
+}
+
+static void asm_obar(A
