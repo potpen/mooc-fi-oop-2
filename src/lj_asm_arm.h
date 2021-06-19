@@ -1403,4 +1403,47 @@ static void asm_fparith(ASMState *as, IRIns *ir, ARMIns ai)
   Reg dest = ra_dest(as, ir, RSET_FPR);
   Reg right, left = ra_alloc2(as, ir, RSET_FPR);
   right = (left >> 8); left &= 255;
-  emit_dnm(as, ai, (dest & 15), (left & 15), (
+  emit_dnm(as, ai, (dest & 15), (left & 15), (right & 15));
+}
+
+static void asm_fpunary(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  Reg dest = ra_dest(as, ir, RSET_FPR);
+  Reg left = ra_hintalloc(as, ir->op1, dest, RSET_FPR);
+  emit_dm(as, ai, (dest & 15), (left & 15));
+}
+
+static void asm_callround(ASMState *as, IRIns *ir, int id)
+{
+  /* The modified regs must match with the *.dasc implementation. */
+  RegSet drop = RID2RSET(RID_R0)|RID2RSET(RID_R1)|RID2RSET(RID_R2)|
+		RID2RSET(RID_R3)|RID2RSET(RID_R12);
+  RegSet of;
+  Reg dest, src;
+  ra_evictset(as, drop);
+  dest = ra_dest(as, ir, RSET_FPR);
+  emit_dnm(as, ARMI_VMOV_D_RR, RID_RETLO, RID_RETHI, (dest & 15));
+  emit_call(as, id == IRFPM_FLOOR ? (void *)lj_vm_floor_sf :
+		id == IRFPM_CEIL ? (void *)lj_vm_ceil_sf :
+				   (void *)lj_vm_trunc_sf);
+  /* Workaround to protect argument GPRs from being used for remat. */
+  of = as->freeset;
+  as->freeset &= ~RSET_RANGE(RID_R0, RID_R1+1);
+  as->cost[RID_R0] = as->cost[RID_R1] = REGCOST(~0u, ASMREF_L);
+  src = ra_alloc1(as, ir->op1, RSET_FPR);  /* May alloc GPR to remat FPR. */
+  as->freeset |= (of & RSET_RANGE(RID_R0, RID_R1+1));
+  emit_dnm(as, ARMI_VMOV_RR_D, RID_R0, RID_R1, (src & 15));
+}
+
+static void asm_fpmath(ASMState *as, IRIns *ir)
+{
+  if (ir->op2 <= IRFPM_TRUNC)
+    asm_callround(as, ir, ir->op2);
+  else if (ir->op2 == IRFPM_SQRT)
+    asm_fpunary(as, ir, ARMI_VSQRT_D);
+  else
+    asm_callid(as, ir, IRCALL_lj_vm_floor + ir->op2);
+}
+#endif
+
+static int asm_swapops(ASMState *as, IRRef lref, 
