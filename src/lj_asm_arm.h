@@ -1531,4 +1531,69 @@ static void asm_intmul(ASMState *as, IRIns *ir)
     emit_nm(as, ARMI_TEQ|ARMF_SH(ARMSH_ASR, 31), RID_TMP, dest);
     emit_dnm(as, ARMI_SMULL|ARMF_S(right), dest, RID_TMP, left);
   } else {
-    if (!(as->flags & JIT_F_ARMV6) && dest == left
+    if (!(as->flags & JIT_F_ARMV6) && dest == left) tmp = left = RID_TMP;
+    emit_nm(as, ARMI_MUL|ARMF_S(right), dest, left);
+  }
+  /* Only need this for the dest == left == right case. */
+  if (ra_hasreg(tmp)) emit_dm(as, ARMI_MOV, tmp, right);
+}
+
+static void asm_add(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t)) {
+    if (!asm_fusemadd(as, ir, ARMI_VMLA_D, ARMI_VMLA_D))
+      asm_fparith(as, ir, ARMI_VADD_D);
+    return;
+  }
+#endif
+  asm_intop_s(as, ir, ARMI_ADD);
+}
+
+static void asm_sub(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t)) {
+    if (!asm_fusemadd(as, ir, ARMI_VNMLS_D, ARMI_VMLS_D))
+      asm_fparith(as, ir, ARMI_VSUB_D);
+    return;
+  }
+#endif
+  asm_intop_s(as, ir, ARMI_SUB);
+}
+
+static void asm_mul(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t)) {
+    asm_fparith(as, ir, ARMI_VMUL_D);
+    return;
+  }
+#endif
+  asm_intmul(as, ir);
+}
+
+#define asm_addov(as, ir)	asm_add(as, ir)
+#define asm_subov(as, ir)	asm_sub(as, ir)
+#define asm_mulov(as, ir)	asm_mul(as, ir)
+
+#if !LJ_SOFTFP
+#define asm_fpdiv(as, ir)	asm_fparith(as, ir, ARMI_VDIV_D)
+#define asm_abs(as, ir)		asm_fpunary(as, ir, ARMI_VABS_D)
+#endif
+
+static void asm_neg(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t)) {
+    asm_fpunary(as, ir, ARMI_VNEG_D);
+    return;
+  }
+#endif
+  asm_intneg(as, ir, ARMI_RSB);
+}
+
+static void asm_bitop(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  ai = asm_drop_cmp0(as, ai);
+  if (ir->op2 == 0)
