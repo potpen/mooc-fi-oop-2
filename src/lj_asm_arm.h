@@ -1491,4 +1491,44 @@ static ARMIns asm_drop_cmp0(ASMState *as, ARMIns ai)
     as->flagmcp = NULL;
     if (cc <= CC_NE) {
       as->mcp++;
-      ai |= AR
+      ai |= ARMI_S;
+    } else if (cc == CC_GE) {
+      *++as->mcp ^= ((CC_GE^CC_PL) << 28);
+      ai |= ARMI_S;
+    } else if (cc == CC_LT) {
+      *++as->mcp ^= ((CC_LT^CC_MI) << 28);
+      ai |= ARMI_S;
+    }  /* else: other conds don't work in general. */
+  }
+  return ai;
+}
+
+static void asm_intop_s(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  asm_intop(as, ir, asm_drop_cmp0(as, ai));
+}
+
+static void asm_intneg(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+  emit_dn(as, ai|ARMI_K12|0, dest, left);
+}
+
+/* NYI: use add/shift for MUL(OV) with constants. FOLD only does 2^k. */
+static void asm_intmul(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, rset_exclude(RSET_GPR, dest));
+  Reg right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  Reg tmp = RID_NONE;
+  /* ARMv5 restriction: dest != left and dest_hi != left. */
+  if (dest == left && left != right) { left = right; right = dest; }
+  if (irt_isguard(ir->t)) {  /* IR_MULOV */
+    if (!(as->flags & JIT_F_ARMV6) && dest == left)
+      tmp = left = ra_scratch(as, rset_exclude(RSET_GPR, left));
+    asm_guardcc(as, CC_NE);
+    emit_nm(as, ARMI_TEQ|ARMF_SH(ARMSH_ASR, 31), RID_TMP, dest);
+    emit_dnm(as, ARMI_SMULL|ARMF_S(right), dest, RID_TMP, left);
+  } else {
+    if (!(as->flags & JIT_F_ARMV6) && dest == left
