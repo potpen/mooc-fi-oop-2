@@ -1367,4 +1367,40 @@ static void asm_tbar(ASMState *as, IRIns *ir)
   emit_lso(as, ARMI_LDRB, mark, tab, (int32_t)offsetof(GCtab, marked));
 }
 
-static void asm_obar(A
+static void asm_obar(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_barrieruv];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg obj, val, tmp;
+  /* No need for other object barriers (yet). */
+  lj_assertA(IR(ir->op1)->o == IR_UREFC, "bad OBAR type");
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ir->op1;      /* TValue *tv      */
+  asm_gencall(as, ci, args);
+  if ((l_end[-1] >> 28) == CC_AL)
+    l_end[-1] = ARMF_CC(l_end[-1], CC_NE);
+  else
+    emit_branch(as, ARMF_CC(ARMI_B, CC_EQ), l_end);
+  ra_allockreg(as, i32ptr(J2G(as->J)), ra_releasetmp(as, ASMREF_TMP1));
+  obj = IR(ir->op1)->r;
+  tmp = ra_scratch(as, rset_exclude(RSET_GPR, obj));
+  emit_n(as, ARMF_CC(ARMI_TST, CC_NE)|ARMI_K12|LJ_GC_BLACK, tmp);
+  emit_n(as, ARMI_TST|ARMI_K12|LJ_GC_WHITES, RID_TMP);
+  val = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, obj));
+  emit_lso(as, ARMI_LDRB, tmp, obj,
+	   (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
+  emit_lso(as, ARMI_LDRB, RID_TMP, val, (int32_t)offsetof(GChead, marked));
+}
+
+/* -- Arithmetic and logic operations ------------------------------------- */
+
+#if !LJ_SOFTFP
+static void asm_fparith(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  Reg dest = ra_dest(as, ir, RSET_FPR);
+  Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+  right = (left >> 8); left &= 255;
+  emit_dnm(as, ai, (dest & 15), (left & 15), (
