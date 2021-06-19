@@ -1446,4 +1446,49 @@ static void asm_fpmath(ASMState *as, IRIns *ir)
 }
 #endif
 
-static int asm_swapops(ASMState *as, IRRef lref, 
+static int asm_swapops(ASMState *as, IRRef lref, IRRef rref)
+{
+  IRIns *ir;
+  if (irref_isk(rref))
+    return 0;  /* Don't swap constants to the left. */
+  if (irref_isk(lref))
+    return 1;  /* But swap constants to the right. */
+  ir = IR(rref);
+  if ((ir->o >= IR_BSHL && ir->o <= IR_BROR) ||
+      (ir->o == IR_ADD && ir->op1 == ir->op2))
+    return 0;  /* Don't swap fusable operands to the left. */
+  ir = IR(lref);
+  if ((ir->o >= IR_BSHL && ir->o <= IR_BROR) ||
+      (ir->o == IR_ADD && ir->op1 == ir->op2))
+    return 1;  /* But swap fusable operands to the right. */
+  return 0;  /* Otherwise don't swap. */
+}
+
+static void asm_intop(ASMState *as, IRIns *ir, ARMIns ai)
+{
+  IRRef lref = ir->op1, rref = ir->op2;
+  Reg left, dest = ra_dest(as, ir, RSET_GPR);
+  uint32_t m;
+  if (asm_swapops(as, lref, rref)) {
+    IRRef tmp = lref; lref = rref; rref = tmp;
+    if ((ai & ~ARMI_S) == ARMI_SUB || (ai & ~ARMI_S) == ARMI_SBC)
+      ai ^= (ARMI_SUB^ARMI_RSB);
+  }
+  left = ra_hintalloc(as, lref, dest, RSET_GPR);
+  m = asm_fuseopm(as, ai, rref, rset_exclude(RSET_GPR, left));
+  if (irt_isguard(ir->t)) {  /* For IR_ADDOV etc. */
+    asm_guardcc(as, CC_VS);
+    ai |= ARMI_S;
+  }
+  emit_dn(as, ai^m, dest, left);
+}
+
+/* Try to drop cmp r, #0. */
+static ARMIns asm_drop_cmp0(ASMState *as, ARMIns ai)
+{
+  if (as->flagmcp == as->mcp) {
+    uint32_t cc = (as->mcp[1] >> 28);
+    as->flagmcp = NULL;
+    if (cc <= CC_NE) {
+      as->mcp++;
+      ai |= AR
