@@ -1596,4 +1596,44 @@ static void asm_neg(ASMState *as, IRIns *ir)
 static void asm_bitop(ASMState *as, IRIns *ir, ARMIns ai)
 {
   ai = asm_drop_cmp0(as, ai);
-  if (ir->op2 == 0)
+  if (ir->op2 == 0) {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    uint32_t m = asm_fuseopm(as, ai, ir->op1, RSET_GPR);
+    emit_d(as, ai^m, dest);
+  } else {
+    /* NYI: Turn BAND !k12 into uxtb, uxth or bfc or shl+shr. */
+    asm_intop(as, ir, ai);
+  }
+}
+
+#define asm_bnot(as, ir)	asm_bitop(as, ir, ARMI_MVN)
+
+static void asm_bswap(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+  if ((as->flags & JIT_F_ARMV6)) {
+    emit_dm(as, ARMI_REV, dest, left);
+  } else {
+    Reg tmp2 = dest;
+    if (tmp2 == left)
+      tmp2 = ra_scratch(as, rset_exclude(rset_exclude(RSET_GPR, dest), left));
+    emit_dnm(as, ARMI_EOR|ARMF_SH(ARMSH_LSR, 8), dest, tmp2, RID_TMP);
+    emit_dm(as, ARMI_MOV|ARMF_SH(ARMSH_ROR, 8), tmp2, left);
+    emit_dn(as, ARMI_BIC|ARMI_K12|256*8|255, RID_TMP, RID_TMP);
+    emit_dnm(as, ARMI_EOR|ARMF_SH(ARMSH_ROR, 16), RID_TMP, left, left);
+  }
+}
+
+#define asm_band(as, ir)	asm_bitop(as, ir, ARMI_AND)
+#define asm_bor(as, ir)		asm_bitop(as, ir, ARMI_ORR)
+#define asm_bxor(as, ir)	asm_bitop(as, ir, ARMI_EOR)
+
+static void asm_bitshift(ASMState *as, IRIns *ir, ARMShift sh)
+{
+  if (irref_isk(ir->op2)) {  /* Constant shifts. */
+    /* NYI: Turn SHL+SHR or BAND+SHR into uxtb, uxth or ubfx. */
+    /* NYI: Turn SHL+ASR into sxtb, sxth or sbfx. */
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+    int32_t shift = (IR(ir->o
