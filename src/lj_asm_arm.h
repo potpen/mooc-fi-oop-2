@@ -1707,4 +1707,52 @@ static void asm_fpmin_max(ASMState *as, IRIns *ir, int cc)
   Reg right, left = ra_alloc2(as, ir, RSET_FPR);
   right = ((left >> 8) & 15); left &= 15;
   if (dest != left) emit_dm(as, ARMF_CC(ARMI_VMOV_D, cc^1), dest, left);
-  if (dest != right) emit_dm(as, ARMF_CC(ARMI_VMOV_D, cc), dest, right
+  if (dest != right) emit_dm(as, ARMF_CC(ARMI_VMOV_D, cc), dest, right);
+  emit_d(as, ARMI_VMRS, 0);
+  emit_dm(as, ARMI_VCMP_D, left, right);
+}
+#endif
+
+static void asm_min_max(ASMState *as, IRIns *ir, int cc, int fcc)
+{
+#if LJ_SOFTFP
+  UNUSED(fcc);
+#else
+  if (irt_isnum(ir->t))
+    asm_fpmin_max(as, ir, fcc);
+  else
+#endif
+    asm_intmin_max(as, ir, cc);
+}
+
+#define asm_min(as, ir)		asm_min_max(as, ir, CC_GT, CC_PL)
+#define asm_max(as, ir)		asm_min_max(as, ir, CC_LT, CC_LE)
+
+/* -- Comparisons --------------------------------------------------------- */
+
+/* Map of comparisons to flags. ORDER IR. */
+static const uint8_t asm_compmap[IR_ABC+1] = {
+  /* op  FP swp  int cc   FP cc */
+  /* LT       */ CC_GE + (CC_HS << 4),
+  /* GE    x  */ CC_LT + (CC_HI << 4),
+  /* LE       */ CC_GT + (CC_HI << 4),
+  /* GT    x  */ CC_LE + (CC_HS << 4),
+  /* ULT   x  */ CC_HS + (CC_LS << 4),
+  /* UGE      */ CC_LO + (CC_LO << 4),
+  /* ULE   x  */ CC_HI + (CC_LO << 4),
+  /* UGT      */ CC_LS + (CC_LS << 4),
+  /* EQ       */ CC_NE + (CC_NE << 4),
+  /* NE       */ CC_EQ + (CC_EQ << 4),
+  /* ABC      */ CC_LS + (CC_LS << 4)  /* Same as UGT. */
+};
+
+#if LJ_SOFTFP
+/* FP comparisons. */
+static void asm_sfpcomp(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_softfp_cmp];
+  RegSet drop = RSET_SCRATCH;
+  Reg r;
+  IRRef args[4];
+  int swp = (((ir->o ^ (ir->o >> 2)) & ~(ir->o >> 3) & 1) << 1);
+  args[swp^0] = ir->op1; args[swp^1] = (ir+1)->op
