@@ -1636,4 +1636,40 @@ static void asm_bitshift(ASMState *as, IRIns *ir, ARMShift sh)
     /* NYI: Turn SHL+ASR into sxtb, sxth or sbfx. */
     Reg dest = ra_dest(as, ir, RSET_GPR);
     Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
-    int32_t shift = (IR(ir->o
+    int32_t shift = (IR(ir->op2)->i & 31);
+    emit_dm(as, ARMI_MOV|ARMF_SH(sh, shift), dest, left);
+  } else {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+    Reg right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+    emit_dm(as, ARMI_MOV|ARMF_RSH(sh, right), dest, left);
+  }
+}
+
+#define asm_bshl(as, ir)	asm_bitshift(as, ir, ARMSH_LSL)
+#define asm_bshr(as, ir)	asm_bitshift(as, ir, ARMSH_LSR)
+#define asm_bsar(as, ir)	asm_bitshift(as, ir, ARMSH_ASR)
+#define asm_bror(as, ir)	asm_bitshift(as, ir, ARMSH_ROR)
+#define asm_brol(as, ir)	lj_assertA(0, "unexpected BROL")
+
+static void asm_intmin_max(ASMState *as, IRIns *ir, int cc)
+{
+  uint32_t kcmp = 0, kmov = 0;
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+  Reg right = 0;
+  if (irref_isk(ir->op2)) {
+    kcmp = emit_isk12(ARMI_CMP, IR(ir->op2)->i);
+    if (kcmp) kmov = emit_isk12(ARMI_MOV, IR(ir->op2)->i);
+  }
+  if (!kmov) {
+    kcmp = 0;
+    right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  }
+  if (kmov || dest != right) {
+    emit_dm(as, ARMF_CC(ARMI_MOV, cc)^kmov, dest, right);
+    cc ^= 1;  /* Must use opposite conditions for paired moves. */
+  } else {
+    cc ^= (CC_LT^CC_GT);  /* Otherwise may swap CC_LT <-> CC_GT. */
+  }
+  if (dest != left) emit
