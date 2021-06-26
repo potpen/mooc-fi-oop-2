@@ -1672,4 +1672,39 @@ static void asm_intmin_max(ASMState *as, IRIns *ir, int cc)
   } else {
     cc ^= (CC_LT^CC_GT);  /* Otherwise may swap CC_LT <-> CC_GT. */
   }
-  if (dest != left) emit
+  if (dest != left) emit_dm(as, ARMF_CC(ARMI_MOV, cc), dest, left);
+  emit_nm(as, ARMI_CMP^kcmp, left, right);
+}
+
+#if LJ_SOFTFP
+static void asm_sfpmin_max(ASMState *as, IRIns *ir, int cc)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_softfp_cmp];
+  RegSet drop = RSET_SCRATCH;
+  Reg r;
+  IRRef args[4];
+  args[0] = ir->op1; args[1] = (ir+1)->op1;
+  args[2] = ir->op2; args[3] = (ir+1)->op2;
+  /* __aeabi_cdcmple preserves r0-r3. */
+  if (ra_hasreg(ir->r)) rset_clear(drop, ir->r);
+  if (ra_hasreg((ir+1)->r)) rset_clear(drop, (ir+1)->r);
+  if (!rset_test(as->freeset, RID_R2) &&
+      regcost_ref(as->cost[RID_R2]) == args[2]) rset_clear(drop, RID_R2);
+  if (!rset_test(as->freeset, RID_R3) &&
+      regcost_ref(as->cost[RID_R3]) == args[3]) rset_clear(drop, RID_R3);
+  ra_evictset(as, drop);
+  ra_destpair(as, ir);
+  emit_dm(as, ARMF_CC(ARMI_MOV, cc), RID_RETHI, RID_R3);
+  emit_dm(as, ARMF_CC(ARMI_MOV, cc), RID_RETLO, RID_R2);
+  emit_call(as, (void *)ci->func);
+  for (r = RID_R0; r <= RID_R3; r++)
+    ra_leftov(as, r, args[r-RID_R0]);
+}
+#else
+static void asm_fpmin_max(ASMState *as, IRIns *ir, int cc)
+{
+  Reg dest = (ra_dest(as, ir, RSET_FPR) & 15);
+  Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+  right = ((left >> 8) & 15); left &= 15;
+  if (dest != left) emit_dm(as, ARMF_CC(ARMI_VMOV_D, cc^1), dest, left);
+  if (dest != right) emit_dm(as, ARMF_CC(ARMI_VMOV_D, cc), dest, right
