@@ -1841,4 +1841,51 @@ notst:
   emit_n(as, ARMI_CMP^m, left);
   /* Signed comparison with zero and referencing previous ins? */
   if (cmpprev0 && (cc <= CC_NE || cc >= CC_GE))
-    as->flagmcp = as->mc
+    as->flagmcp = as->mcp;  /* Allow elimination of the compare. */
+}
+
+static void asm_comp(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t))
+    asm_fpcomp(as, ir);
+  else
+#endif
+    asm_intcomp(as, ir);
+}
+
+#define asm_equal(as, ir)	asm_comp(as, ir)
+
+#if LJ_HASFFI
+/* 64 bit integer comparisons. */
+static void asm_int64comp(ASMState *as, IRIns *ir)
+{
+  int signedcomp = (ir->o <= IR_GT);
+  ARMCC cclo, cchi;
+  Reg leftlo, lefthi;
+  uint32_t mlo, mhi;
+  RegSet allow = RSET_GPR, oldfree;
+
+  /* Always use unsigned comparison for loword. */
+  cclo = asm_compmap[ir->o + (signedcomp ? 4 : 0)] & 15;
+  leftlo = ra_alloc1(as, ir->op1, allow);
+  oldfree = as->freeset;
+  mlo = asm_fuseopm(as, ARMI_CMP, ir->op2, rset_clear(allow, leftlo));
+  allow &= ~(oldfree & ~as->freeset);  /* Update for allocs of asm_fuseopm. */
+
+  /* Use signed or unsigned comparison for hiword. */
+  cchi = asm_compmap[ir->o] & 15;
+  lefthi = ra_alloc1(as, (ir+1)->op1, allow);
+  mhi = asm_fuseopm(as, ARMI_CMP, (ir+1)->op2, rset_clear(allow, lefthi));
+
+  /* All register allocations must be performed _before_ this point. */
+  if (signedcomp) {
+    MCLabel l_around = emit_label(as);
+    asm_guardcc(as, cclo);
+    emit_n(as, ARMI_CMP^mlo, leftlo);
+    emit_branch(as, ARMF_CC(ARMI_B, CC_NE), l_around);
+    if (cchi == CC_GE || cchi == CC_LE) cchi ^= 6;  /* GE -> GT, LE -> LT */
+    asm_guardcc(as, cchi);
+  } else {
+    asm_guardcc(as, cclo);
+    emit_n(as, ARMF_CC(ARMI_CMP, CC_E
