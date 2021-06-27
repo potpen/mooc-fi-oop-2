@@ -1755,4 +1755,52 @@ static void asm_sfpcomp(ASMState *as, IRIns *ir)
   Reg r;
   IRRef args[4];
   int swp = (((ir->o ^ (ir->o >> 2)) & ~(ir->o >> 3) & 1) << 1);
-  args[swp^0] = ir->op1; args[swp^1] = (ir+1)->op
+  args[swp^0] = ir->op1; args[swp^1] = (ir+1)->op1;
+  args[swp^2] = ir->op2; args[swp^3] = (ir+1)->op2;
+  /* __aeabi_cdcmple preserves r0-r3. This helps to reduce spills. */
+  for (r = RID_R0; r <= RID_R3; r++)
+    if (!rset_test(as->freeset, r) &&
+	regcost_ref(as->cost[r]) == args[r-RID_R0]) rset_clear(drop, r);
+  ra_evictset(as, drop);
+  asm_guardcc(as, (asm_compmap[ir->o] >> 4));
+  emit_call(as, (void *)ci->func);
+  for (r = RID_R0; r <= RID_R3; r++)
+    ra_leftov(as, r, args[r-RID_R0]);
+}
+#else
+/* FP comparisons. */
+static void asm_fpcomp(ASMState *as, IRIns *ir)
+{
+  Reg left, right;
+  ARMIns ai;
+  int swp = ((ir->o ^ (ir->o >> 2)) & ~(ir->o >> 3) & 1);
+  if (!swp && irref_isk(ir->op2) && ir_knum(IR(ir->op2))->u64 == 0) {
+    left = (ra_alloc1(as, ir->op1, RSET_FPR) & 15);
+    right = 0;
+    ai = ARMI_VCMPZ_D;
+  } else {
+    left = ra_alloc2(as, ir, RSET_FPR);
+    if (swp) {
+      right = (left & 15); left = ((left >> 8) & 15);
+    } else {
+      right = ((left >> 8) & 15); left &= 15;
+    }
+    ai = ARMI_VCMP_D;
+  }
+  asm_guardcc(as, (asm_compmap[ir->o] >> 4));
+  emit_d(as, ARMI_VMRS, 0);
+  emit_dm(as, ai, left, right);
+}
+#endif
+
+/* Integer comparisons. */
+static void asm_intcomp(ASMState *as, IRIns *ir)
+{
+  ARMCC cc = (asm_compmap[ir->o] & 15);
+  IRRef lref = ir->op1, rref = ir->op2;
+  Reg left;
+  uint32_t m;
+  int cmpprev0 = 0;
+  lj_assertA(irt_isint(ir->t) || irt_isu32(ir->t) || irt_isaddr(ir->t),
+	     "bad comparison data type %d", irt_type(ir->t));
+  if (asm_swapops(as, lref, rre
