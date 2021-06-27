@@ -1803,4 +1803,42 @@ static void asm_intcomp(ASMState *as, IRIns *ir)
   int cmpprev0 = 0;
   lj_assertA(irt_isint(ir->t) || irt_isu32(ir->t) || irt_isaddr(ir->t),
 	     "bad comparison data type %d", irt_type(ir->t));
-  if (asm_swapops(as, lref, rre
+  if (asm_swapops(as, lref, rref)) {
+    Reg tmp = lref; lref = rref; rref = tmp;
+    if (cc >= CC_GE) cc ^= 7;  /* LT <-> GT, LE <-> GE */
+    else if (cc > CC_NE) cc ^= 11;  /* LO <-> HI, LS <-> HS */
+  }
+  if (irref_isk(rref) && IR(rref)->i == 0) {
+    IRIns *irl = IR(lref);
+    cmpprev0 = (irl+1 == ir);
+    /* Combine comp(BAND(left, right), 0) into tst left, right. */
+    if (cmpprev0 && irl->o == IR_BAND && !ra_used(irl)) {
+      IRRef blref = irl->op1, brref = irl->op2;
+      uint32_t m2 = 0;
+      Reg bleft;
+      if (asm_swapops(as, blref, brref)) {
+	Reg tmp = blref; blref = brref; brref = tmp;
+      }
+      if (irref_isk(brref)) {
+	m2 = emit_isk12(ARMI_AND, IR(brref)->i);
+	if ((m2 & (ARMI_AND^ARMI_BIC)))
+	  goto notst;  /* Not beneficial if we miss a constant operand. */
+      }
+      if (cc == CC_GE) cc = CC_PL;
+      else if (cc == CC_LT) cc = CC_MI;
+      else if (cc > CC_NE) goto notst;  /* Other conds don't work with tst. */
+      bleft = ra_alloc1(as, blref, RSET_GPR);
+      if (!m2) m2 = asm_fuseopm(as, 0, brref, rset_exclude(RSET_GPR, bleft));
+      asm_guardcc(as, cc);
+      emit_n(as, ARMI_TST^m2, bleft);
+      return;
+    }
+  }
+notst:
+  left = ra_alloc1(as, lref, RSET_GPR);
+  m = asm_fuseopm(as, ARMI_CMP, rref, rset_exclude(RSET_GPR, left));
+  asm_guardcc(as, cc);
+  emit_n(as, ARMI_CMP^m, left);
+  /* Signed comparison with zero and referencing previous ins? */
+  if (cmpprev0 && (cc <= CC_NE || cc >= CC_GE))
+    as->flagmcp = as->mc
