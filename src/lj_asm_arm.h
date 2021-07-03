@@ -1939,4 +1939,51 @@ static void asm_hiop(ASMState *as, IRIns *ir)
 #if LJ_HASFFI
   case IR_ADD:
     as->curins--;
-    asm_in
+    asm_intop(as, ir, ARMI_ADC);
+    asm_intop(as, ir-1, ARMI_ADD|ARMI_S);
+    break;
+  case IR_SUB:
+    as->curins--;
+    asm_intop(as, ir, ARMI_SBC);
+    asm_intop(as, ir-1, ARMI_SUB|ARMI_S);
+    break;
+  case IR_NEG:
+    as->curins--;
+    asm_intneg(as, ir, ARMI_RSC);
+    asm_intneg(as, ir-1, ARMI_RSB|ARMI_S);
+    break;
+  case IR_CNEWI:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+#if LJ_SOFTFP
+  case IR_SLOAD: case IR_ALOAD: case IR_HLOAD: case IR_ULOAD: case IR_VLOAD:
+  case IR_STRTO:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RSET_GPR);  /* Mark lo op as used. */
+    break;
+  case IR_ASTORE: case IR_HSTORE: case IR_USTORE: case IR_TOSTR: case IR_TMPREF:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+  case IR_CALLN: case IR_CALLL: case IR_CALLS: case IR_CALLXS:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RID2RSET(RID_RETLO));  /* Mark lo op as used. */
+    break;
+  default: lj_assertA(0, "bad HIOP for op %d", (ir-1)->o); break;
+  }
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+static void asm_prof(ASMState *as, IRIns *ir)
+{
+  UNUSED(ir);
+  asm_guardcc(as, CC_NE);
+  emit_n(as, ARMI_TST|ARMI_K12|HOOK_PROFILE, RID_TMP);
+  emit_lsptr(as, ARMI_LDRB, RID_TMP, (void *)&J2G(as->J)->hookmask);
+}
+
+/* -- Stack handling ------------------------------------------------------ */
+
+/* Check Lua stack size for overflow. Use exit handler 
