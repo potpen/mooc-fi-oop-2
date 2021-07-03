@@ -1986,4 +1986,47 @@ static void asm_prof(ASMState *as, IRIns *ir)
 
 /* -- Stack handling ------------------------------------------------------ */
 
-/* Check Lua stack size for overflow. Use exit handler 
+/* Check Lua stack size for overflow. Use exit handler as fallback. */
+static void asm_stack_check(ASMState *as, BCReg topslot,
+			    IRIns *irp, RegSet allow, ExitNo exitno)
+{
+  Reg pbase;
+  uint32_t k;
+  if (irp) {
+    if (!ra_hasspill(irp->s)) {
+      pbase = irp->r;
+      lj_assertA(ra_hasreg(pbase), "base reg lost");
+    } else if (allow) {
+      pbase = rset_pickbot(allow);
+    } else {
+      pbase = RID_RET;
+      emit_lso(as, ARMI_LDR, RID_RET, RID_SP, 0);  /* Restore temp. register. */
+    }
+  } else {
+    pbase = RID_BASE;
+  }
+  emit_branch(as, ARMF_CC(ARMI_BL, CC_LS), exitstub_addr(as->J, exitno));
+  k = emit_isk12(0, (int32_t)(8*topslot));
+  lj_assertA(k, "slot offset %d does not fit in K12", 8*topslot);
+  emit_n(as, ARMI_CMP^k, RID_TMP);
+  emit_dnm(as, ARMI_SUB, RID_TMP, RID_TMP, pbase);
+  emit_lso(as, ARMI_LDR, RID_TMP, RID_TMP,
+	   (int32_t)offsetof(lua_State, maxstack));
+  if (irp) {  /* Must not spill arbitrary registers in head of side trace. */
+    int32_t i = i32ptr(&J2G(as->J)->cur_L);
+    if (ra_hasspill(irp->s))
+      emit_lso(as, ARMI_LDR, pbase, RID_SP, sps_scale(irp->s));
+    emit_lso(as, ARMI_LDR, RID_TMP, RID_TMP, (i & 4095));
+    if (ra_hasspill(irp->s) && !allow)
+      emit_lso(as, ARMI_STR, RID_RET, RID_SP, 0);  /* Save temp. register. */
+    emit_loadi(as, RID_TMP, (i & ~4095));
+  } else {
+    emit_getgl(as, RID_TMP, cur_L);
+  }
+}
+
+/* Restore Lua stack from on-trace state. */
+static void asm_stack_restore(ASMState *as, SnapShot *snap)
+{
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+  Sn
