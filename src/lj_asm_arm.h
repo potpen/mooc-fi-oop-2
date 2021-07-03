@@ -1888,4 +1888,55 @@ static void asm_int64comp(ASMState *as, IRIns *ir)
     asm_guardcc(as, cchi);
   } else {
     asm_guardcc(as, cclo);
-    emit_n(as, ARMF_CC(ARMI_CMP, CC_E
+    emit_n(as, ARMF_CC(ARMI_CMP, CC_EQ)^mlo, leftlo);
+  }
+  emit_n(as, ARMI_CMP^mhi, lefthi);
+}
+#endif
+
+/* -- Split register ops -------------------------------------------------- */
+
+/* Hiword op of a split 32/32 bit op. Previous op is the loword op. */
+static void asm_hiop(ASMState *as, IRIns *ir)
+{
+  /* HIOP is marked as a store because it needs its own DCE logic. */
+  int uselo = ra_used(ir-1), usehi = ra_used(ir);  /* Loword/hiword used? */
+  if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
+#if LJ_HASFFI || LJ_SOFTFP
+  if ((ir-1)->o <= IR_NE) {  /* 64 bit integer or FP comparisons. ORDER IR. */
+    as->curins--;  /* Always skip the loword comparison. */
+#if LJ_SOFTFP
+    if (!irt_isint(ir->t)) {
+      asm_sfpcomp(as, ir-1);
+      return;
+    }
+#endif
+#if LJ_HASFFI
+    asm_int64comp(as, ir-1);
+#endif
+    return;
+#if LJ_SOFTFP
+  } else if ((ir-1)->o == IR_MIN || (ir-1)->o == IR_MAX) {
+    as->curins--;  /* Always skip the loword min/max. */
+    if (uselo || usehi)
+      asm_sfpmin_max(as, ir-1, (ir-1)->o == IR_MIN ? CC_PL : CC_LE);
+    return;
+#elif LJ_HASFFI
+  } else if ((ir-1)->o == IR_CONV) {
+    as->curins--;  /* Always skip the CONV. */
+    if (usehi || uselo)
+      asm_conv64(as, ir);
+    return;
+#endif
+  } else if ((ir-1)->o == IR_XSTORE) {
+    if ((ir-1)->r != RID_SINK)
+      asm_xstore_(as, ir, 4);
+    return;
+  }
+#endif
+  if (!usehi) return;  /* Skip unused hiword op for all remaining ops. */
+  switch ((ir-1)->o) {
+#if LJ_HASFFI
+  case IR_ADD:
+    as->curins--;
+    asm_in
