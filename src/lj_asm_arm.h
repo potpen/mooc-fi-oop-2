@@ -2064,4 +2064,46 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
       if (!irt_ispri(ir->t)) {
 	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPREVEN, RID_BASE));
 	emit_lso(as, ARMI_STR, src, RID_BASE, ofs);
-	if (rset_test(as->freese
+	if (rset_test(as->freeset, src+1)) odd = RID2RSET(src+1);
+      }
+      if ((sn & (SNAP_CONT|SNAP_FRAME))) {
+	if (s == 0) continue;  /* Do not overwrite link to previous frame. */
+	type = ra_allock(as, (int32_t)(*flinks--), odd);
+#if LJ_SOFTFP
+      } else if ((sn & SNAP_SOFTFPNUM)) {
+	type = ra_alloc1(as, ref+1, rset_exclude(RSET_GPRODD, RID_BASE));
+#endif
+      } else if ((sn & SNAP_KEYINDEX)) {
+	type = ra_allock(as, (int32_t)LJ_KEYINDEX, odd);
+      } else {
+	type = ra_allock(as, (int32_t)irt_toitype(ir->t), odd);
+      }
+      emit_lso(as, ARMI_STR, type, RID_BASE, ofs+4);
+    }
+    checkmclim(as);
+  }
+  lj_assertA(map + nent == flinks, "inconsistent frames in snapshot");
+}
+
+/* -- GC handling --------------------------------------------------------- */
+
+/* Marker to prevent patching the GC check exit. */
+#define ARM_NOPATCH_GC_CHECK	(ARMI_BIC|ARMI_K12)
+
+/* Check GC threshold and do one or more GC steps. */
+static void asm_gc_check(ASMState *as)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg tmp1, tmp2;
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
+  asm_guardcc(as, CC_NE);  /* Assumes asm_snap_prep() already done. */
+  *--as->mcp = ARM_NOPATCH_GC_CHECK;
+  emit_n(as, ARMI_CMP|ARMI_K12|0, RID_RET);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  asm_gencall(as, ci, args);
+  tmp1 = ra_releasetm
