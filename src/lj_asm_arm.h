@@ -2029,4 +2029,39 @@ static void asm_stack_check(ASMState *as, BCReg topslot,
 static void asm_stack_restore(ASMState *as, SnapShot *snap)
 {
   SnapEntry *map = &as->T->snapmap[snap->mapofs];
-  Sn
+  SnapEntry *flinks = &as->T->snapmap[snap_nextofs(as->T, snap)-1];
+  MSize n, nent = snap->nent;
+  /* Store the value of all modified slots to the Lua stack. */
+  for (n = 0; n < nent; n++) {
+    SnapEntry sn = map[n];
+    BCReg s = snap_slot(sn);
+    int32_t ofs = 8*((int32_t)s-1);
+    IRRef ref = snap_ref(sn);
+    IRIns *ir = IR(ref);
+    if ((sn & SNAP_NORESTORE))
+      continue;
+    if (irt_isnum(ir->t)) {
+#if LJ_SOFTFP
+      RegSet odd = rset_exclude(RSET_GPRODD, RID_BASE);
+      Reg tmp;
+      /* LJ_SOFTFP: must be a number constant. */
+      lj_assertA(irref_isk(ref), "unsplit FP op");
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.lo,
+		      rset_exclude(RSET_GPREVEN, RID_BASE));
+      emit_lso(as, ARMI_STR, tmp, RID_BASE, ofs);
+      if (rset_test(as->freeset, tmp+1)) odd = RID2RSET(tmp+1);
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.hi, odd);
+      emit_lso(as, ARMI_STR, tmp, RID_BASE, ofs+4);
+#else
+      Reg src = ra_alloc1(as, ref, RSET_FPR);
+      emit_vlso(as, ARMI_VSTR_D, src, RID_BASE, ofs);
+#endif
+    } else {
+      RegSet odd = rset_exclude(RSET_GPRODD, RID_BASE);
+      Reg type;
+      lj_assertA(irt_ispri(ir->t) || irt_isaddr(ir->t) || irt_isinteger(ir->t),
+		 "restore of IR type %d", irt_type(ir->t));
+      if (!irt_ispri(ir->t)) {
+	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPREVEN, RID_BASE));
+	emit_lso(as, ARMI_STR, src, RID_BASE, ofs);
+	if (rset_test(as->freese
