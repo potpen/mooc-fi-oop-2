@@ -2106,4 +2106,53 @@ static void asm_gc_check(ASMState *as)
   args[0] = ASMREF_TMP1;  /* global_State *g */
   args[1] = ASMREF_TMP2;  /* MSize steps     */
   asm_gencall(as, ci, args);
-  tmp1 = ra_releasetm
+  tmp1 = ra_releasetmp(as, ASMREF_TMP1);
+  tmp2 = ra_releasetmp(as, ASMREF_TMP2);
+  emit_loadi(as, tmp2, as->gcsteps);
+  /* Jump around GC step if GC total < GC threshold. */
+  emit_branch(as, ARMF_CC(ARMI_B, CC_LS), l_end);
+  emit_nm(as, ARMI_CMP, RID_TMP, tmp2);
+  emit_lso(as, ARMI_LDR, tmp2, tmp1,
+	   (int32_t)offsetof(global_State, gc.threshold));
+  emit_lso(as, ARMI_LDR, RID_TMP, tmp1,
+	   (int32_t)offsetof(global_State, gc.total));
+  ra_allockreg(as, i32ptr(J2G(as->J)), tmp1);
+  as->gcsteps = 0;
+  checkmclim(as);
+}
+
+/* -- Loop handling ------------------------------------------------------- */
+
+/* Fixup the loop branch. */
+static void asm_loop_fixup(ASMState *as)
+{
+  MCode *p = as->mctop;
+  MCode *target = as->mcp;
+  if (as->loopinv) {  /* Inverted loop branch? */
+    /* asm_guardcc already inverted the bcc and patched the final bl. */
+    p[-2] |= ((uint32_t)(target-p) & 0x00ffffffu);
+  } else {
+    p[-1] = ARMI_B | ((uint32_t)((target-p)-1) & 0x00ffffffu);
+  }
+}
+
+/* Fixup the tail of the loop. */
+static void asm_loop_tail_fixup(ASMState *as)
+{
+  UNUSED(as);  /* Nothing to do. */
+}
+
+/* -- Head of trace ------------------------------------------------------- */
+
+/* Reload L register from g->cur_L. */
+static void asm_head_lreg(ASMState *as)
+{
+  IRIns *ir = IR(ASMREF_L);
+  if (ra_used(ir)) {
+    Reg r = ra_dest(as, ir, RSET_GPR);
+    emit_getgl(as, r, cur_L);
+    ra_evictk(as);
+  }
+}
+
+/* Coalesce BASE register 
