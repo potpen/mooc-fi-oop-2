@@ -2155,4 +2155,53 @@ static void asm_head_lreg(ASMState *as)
   }
 }
 
-/* Coalesce BASE register 
+/* Coalesce BASE register for a root trace. */
+static void asm_head_root_base(ASMState *as)
+{
+  IRIns *ir;
+  asm_head_lreg(as);
+  ir = IR(REF_BASE);
+  if (ra_hasreg(ir->r) && (rset_test(as->modset, ir->r) || irt_ismarked(ir->t)))
+    ra_spill(as, ir);
+  ra_destreg(as, ir, RID_BASE);
+}
+
+/* Coalesce BASE register for a side trace. */
+static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
+{
+  IRIns *ir;
+  asm_head_lreg(as);
+  ir = IR(REF_BASE);
+  if (ra_hasreg(ir->r) && (rset_test(as->modset, ir->r) || irt_ismarked(ir->t)))
+    ra_spill(as, ir);
+  if (ra_hasspill(irp->s)) {
+    rset_clear(allow, ra_dest(as, ir, allow));
+  } else {
+    Reg r = irp->r;
+    lj_assertA(ra_hasreg(r), "base reg lost");
+    rset_clear(allow, r);
+    if (r != ir->r && !rset_test(as->freeset, r))
+      ra_restore(as, regcost_ref(as->cost[r]));
+    ra_destreg(as, ir, r);
+  }
+  return allow;
+}
+
+/* -- Tail of trace ------------------------------------------------------- */
+
+/* Fixup the tail code. */
+static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+{
+  MCode *p = as->mctop;
+  MCode *target;
+  int32_t spadj = as->T->spadjust;
+  if (spadj == 0) {
+    as->mctop = --p;
+  } else {
+    /* Patch stack adjustment. */
+    uint32_t k = emit_isk12(ARMI_ADD, spadj);
+    lj_assertA(k, "stack adjustment %d does not fit in K12", spadj);
+    p[-2] = (ARMI_ADD^k) | ARMF_D(RID_SP) | ARMF_N(RID_SP);
+  }
+  /* Patch exit branch. */
+  target 
