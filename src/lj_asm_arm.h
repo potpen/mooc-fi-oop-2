@@ -2204,4 +2204,48 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
     p[-2] = (ARMI_ADD^k) | ARMF_D(RID_SP) | ARMF_N(RID_SP);
   }
   /* Patch exit branch. */
-  target 
+  target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
+  p[-1] = ARMI_B|(((target-p)-1)&0x00ffffffu);
+}
+
+/* Prepare tail of code. */
+static void asm_tail_prep(ASMState *as)
+{
+  MCode *p = as->mctop - 1;  /* Leave room for exit branch. */
+  if (as->loopref) {
+    as->invmcp = as->mcp = p;
+  } else {
+    as->mcp = p-1;  /* Leave room for stack pointer adjustment. */
+    as->invmcp = NULL;
+  }
+  *p = 0;  /* Prevent load/store merging. */
+}
+
+/* -- Trace setup --------------------------------------------------------- */
+
+/* Ensure there are enough stack slots for call arguments. */
+static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  uint32_t i, nargs = CCI_XNARGS(ci);
+  int nslots = 0, ngpr = REGARG_NUMGPR, nfpr = REGARG_NUMFPR, fprodd = 0;
+  asm_collectargs(as, ir, ci, args);
+  for (i = 0; i < nargs; i++) {
+    if (!LJ_SOFTFP && args[i] && irt_isfp(IR(args[i])->t)) {
+      if (!LJ_ABI_SOFTFP && !(ci->flags & CCI_VARARG)) {
+	if (irt_isnum(IR(args[i])->t)) {
+	  if (nfpr > 0) nfpr--;
+	  else fprodd = 0, nslots = (nslots + 3) & ~1;
+	} else {
+	  if (fprodd) fprodd--;
+	  else if (nfpr > 0) fprodd = 1, nfpr--;
+	  else nslots++;
+	}
+      } else if (irt_isnum(IR(args[i])->t)) {
+	ngpr &= ~1;
+	if (ngpr > 0) ngpr -= 2; else nslots += 2;
+      } else {
+	if (ngpr > 0) ngpr--; else nslots++;
+      }
+    } else {
+      if (
