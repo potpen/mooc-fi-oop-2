@@ -2248,4 +2248,43 @@ static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
 	if (ngpr > 0) ngpr--; else nslots++;
       }
     } else {
-      if (
+      if (ngpr > 0) ngpr--; else nslots++;
+    }
+  }
+  if (nslots > as->evenspill)  /* Leave room for args in stack slots. */
+    as->evenspill = nslots;
+  return REGSP_HINT(RID_RET);
+}
+
+static void asm_setup_target(ASMState *as)
+{
+  /* May need extra exit for asm_stack_check on side traces. */
+  asm_exitstub_setup(as, as->T->nsnap + (as->parent ? 1 : 0));
+}
+
+/* -- Trace patching ------------------------------------------------------ */
+
+/* Patch exit jumps of existing machine code to a new target. */
+void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+{
+  MCode *p = T->mcode;
+  MCode *pe = (MCode *)((char *)p + T->szmcode);
+  MCode *cstart = NULL, *cend = p;
+  MCode *mcarea = lj_mcode_patch(J, p, 0);
+  MCode *px = exitstub_addr(J, exitno) - 2;
+  for (; p < pe; p++) {
+    /* Look for bl_cc exitstub, replace with b_cc target. */
+    uint32_t ins = *p;
+    if ((ins & 0x0f000000u) == 0x0b000000u && ins < 0xf0000000u &&
+	((ins ^ (px-p)) & 0x00ffffffu) == 0 &&
+	p[-1] != ARM_NOPATCH_GC_CHECK) {
+      *p = (ins & 0xfe000000u) | (((target-p)-2) & 0x00ffffffu);
+      cend = p+1;
+      if (!cstart) cstart = p;
+    }
+  }
+  lj_assertJ(cstart != NULL, "exit stub %d not found", exitno);
+  lj_mcode_sync(cstart, cend);
+  lj_mcode_patch(J, mcarea, 1);
+}
+
