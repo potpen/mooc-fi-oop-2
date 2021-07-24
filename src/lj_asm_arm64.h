@@ -1546,3 +1546,526 @@ static void asm_bitshift(ASMState *as, IRIns *ir, A64Ins ai, A64Shift sh)
     /* Fuse BSHL + BSHR/BSAR into UBFM/SBFM aka UBFX/SBFX/UBFIZ/SBFIZ. */
     if ((sh == A64SH_LSR || sh == A64SH_ASR) && canfuse(as, irl)) {
       if (irl->o == IR_BSHL && irref_isk(irl->op2)) {
+	int32_t shift2 = (IR(irl->op2)->i & shmask);
+	shift = ((shift - shift2) & shmask);
+	shmask -= shift2;
+	ir = irl;
+      }
+    }
+
+    left = ra_alloc1(as, ir->op1, RSET_GPR);
+    switch (sh) {
+    case A64SH_LSL:
+      emit_dn(as, ai | A64F_IMMS(shmask-shift) |
+		  A64F_IMMR((shmask-shift+1)&shmask), dest, left);
+      break;
+    case A64SH_LSR: case A64SH_ASR:
+      emit_dn(as, ai | A64F_IMMS(shmask) | A64F_IMMR(shift), dest, left);
+      break;
+    case A64SH_ROR:
+      emit_dnm(as, ai | A64F_IMMS(shift), dest, left, left);
+      break;
+    }
+  } else {  /* Variable-length shifts. */
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+    Reg right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+    emit_dnm(as, (shmask == 63 ? A64I_SHRx : A64I_SHRw) | A64F_BSH(sh), dest, left, right);
+  }
+}
+
+#define asm_bshl(as, ir)	asm_bitshift(as, ir, A64I_UBFMw, A64SH_LSL)
+#define asm_bshr(as, ir)	asm_bitshift(as, ir, A64I_UBFMw, A64SH_LSR)
+#define asm_bsar(as, ir)	asm_bitshift(as, ir, A64I_SBFMw, A64SH_ASR)
+#define asm_bror(as, ir)	asm_bitshift(as, ir, A64I_EXTRw, A64SH_ROR)
+#define asm_brol(as, ir)	lj_assertA(0, "unexpected BROL")
+
+static void asm_intmin_max(ASMState *as, IRIns *ir, A64CC cc)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+  Reg right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  emit_dnm(as, A64I_CSELw|A64F_CC(cc), dest, left, right);
+  emit_nm(as, A64I_CMPw, left, right);
+}
+
+static void asm_fpmin_max(ASMState *as, IRIns *ir, A64CC fcc)
+{
+  Reg dest = (ra_dest(as, ir, RSET_FPR) & 31);
+  Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+  right = ((left >> 8) & 31); left &= 31;
+  emit_dnm(as, A64I_FCSELd | A64F_CC(fcc), dest, right, left);
+  emit_nm(as, A64I_FCMPd, left, right);
+}
+
+static void asm_min_max(ASMState *as, IRIns *ir, A64CC cc, A64CC fcc)
+{
+  if (irt_isnum(ir->t))
+    asm_fpmin_max(as, ir, fcc);
+  else
+    asm_intmin_max(as, ir, cc);
+}
+
+#define asm_min(as, ir)		asm_min_max(as, ir, CC_LT, CC_PL)
+#define asm_max(as, ir)		asm_min_max(as, ir, CC_GT, CC_LE)
+
+/* -- Comparisons --------------------------------------------------------- */
+
+/* Map of comparisons to flags. ORDER IR. */
+static const uint8_t asm_compmap[IR_ABC+1] = {
+  /* op  FP swp  int cc   FP cc */
+  /* LT       */ CC_GE + (CC_HS << 4),
+  /* GE    x  */ CC_LT + (CC_HI << 4),
+  /* LE       */ CC_GT + (CC_HI << 4),
+  /* GT    x  */ CC_LE + (CC_HS << 4),
+  /* ULT   x  */ CC_HS + (CC_LS << 4),
+  /* UGE      */ CC_LO + (CC_LO << 4),
+  /* ULE   x  */ CC_HI + (CC_LO << 4),
+  /* UGT      */ CC_LS + (CC_LS << 4),
+  /* EQ       */ CC_NE + (CC_NE << 4),
+  /* NE       */ CC_EQ + (CC_EQ << 4),
+  /* ABC      */ CC_LS + (CC_LS << 4)  /* Same as UGT. */
+};
+
+/* FP comparisons. */
+static void asm_fpcomp(ASMState *as, IRIns *ir)
+{
+  Reg left, right;
+  A64Ins ai;
+  int swp = ((ir->o ^ (ir->o >> 2)) & ~(ir->o >> 3) & 1);
+  if (!swp && irref_isk(ir->op2) && ir_knum(IR(ir->op2))->u64 == 0) {
+    left = (ra_alloc1(as, ir->op1, RSET_FPR) & 31);
+    right = 0;
+    ai = A64I_FCMPZd;
+  } else {
+    left = ra_alloc2(as, ir, RSET_FPR);
+    if (swp) {
+      right = (left & 31); left = ((left >> 8) & 31);
+    } else {
+      right = ((left >> 8) & 31); left &= 31;
+    }
+    ai = A64I_FCMPd;
+  }
+  asm_guardcc(as, (asm_compmap[ir->o] >> 4));
+  emit_nm(as, ai, left, right);
+}
+
+/* Integer comparisons. */
+static void asm_intcomp(ASMState *as, IRIns *ir)
+{
+  A64CC oldcc, cc = (asm_compmap[ir->o] & 15);
+  A64Ins ai = irt_is64(ir->t) ? A64I_CMPx : A64I_CMPw;
+  IRRef lref = ir->op1, rref = ir->op2;
+  Reg left;
+  uint32_t m;
+  int cmpprev0 = 0;
+  lj_assertA(irt_is64(ir->t) || irt_isint(ir->t) ||
+	     irt_isu32(ir->t) || irt_isaddr(ir->t) || irt_isu8(ir->t),
+	     "bad comparison data type %d", irt_type(ir->t));
+  if (asm_swapops(as, lref, rref)) {
+    IRRef tmp = lref; lref = rref; rref = tmp;
+    if (cc >= CC_GE) cc ^= 7;  /* LT <-> GT, LE <-> GE */
+    else if (cc > CC_NE) cc ^= 11;  /* LO <-> HI, LS <-> HS */
+  }
+  oldcc = cc;
+  if (irref_isk(rref) && get_k64val(as, rref) == 0) {
+    IRIns *irl = IR(lref);
+    if (cc == CC_GE) cc = CC_PL;
+    else if (cc == CC_LT) cc = CC_MI;
+    else if (cc > CC_NE) goto nocombine;  /* Other conds don't work with tst. */
+    cmpprev0 = (irl+1 == ir);
+    /* Combine and-cmp-bcc into tbz/tbnz or and-cmp into tst. */
+    if (cmpprev0 && irl->o == IR_BAND && !ra_used(irl)) {
+      IRRef blref = irl->op1, brref = irl->op2;
+      uint32_t m2 = 0;
+      Reg bleft;
+      if (asm_swapops(as, blref, brref)) {
+	Reg tmp = blref; blref = brref; brref = tmp;
+      }
+      if (irref_isk(brref)) {
+	uint64_t k = get_k64val(as, brref);
+	if (k && !(k & (k-1)) && (cc == CC_EQ || cc == CC_NE)) {
+	  asm_guardtnb(as, cc == CC_EQ ? A64I_TBZ : A64I_TBNZ,
+		       ra_alloc1(as, blref, RSET_GPR), emit_ctz64(k));
+	  return;
+	}
+	m2 = emit_isk13(k, irt_is64(irl->t));
+      }
+      bleft = ra_alloc1(as, blref, RSET_GPR);
+      ai = (irt_is64(irl->t) ? A64I_TSTx : A64I_TSTw);
+      if (!m2)
+	m2 = asm_fuseopm(as, ai, brref, rset_exclude(RSET_GPR, bleft));
+      asm_guardcc(as, cc);
+      emit_n(as, ai^m2, bleft);
+      return;
+    }
+    if (cc == CC_EQ || cc == CC_NE) {
+      /* Combine cmp-bcc into cbz/cbnz. */
+      ai = cc == CC_EQ ? A64I_CBZ : A64I_CBNZ;
+      if (irt_is64(ir->t)) ai |= A64I_X;
+      asm_guardcnb(as, ai, ra_alloc1(as, lref, RSET_GPR));
+      return;
+    }
+  }
+nocombine:
+  left = ra_alloc1(as, lref, RSET_GPR);
+  m = asm_fuseopm(as, ai, rref, rset_exclude(RSET_GPR, left));
+  asm_guardcc(as, cc);
+  emit_n(as, ai^m, left);
+  /* Signed comparison with zero and referencing previous ins? */
+  if (cmpprev0 && (oldcc <= CC_NE || oldcc >= CC_GE))
+    as->flagmcp = as->mcp;  /* Allow elimination of the compare. */
+}
+
+static void asm_comp(ASMState *as, IRIns *ir)
+{
+  if (irt_isnum(ir->t))
+    asm_fpcomp(as, ir);
+  else
+    asm_intcomp(as, ir);
+}
+
+#define asm_equal(as, ir)	asm_comp(as, ir)
+
+/* -- Split register ops -------------------------------------------------- */
+
+/* Hiword op of a split 64/64 bit op. Previous op is the loword op. */
+static void asm_hiop(ASMState *as, IRIns *ir)
+{
+  /* HIOP is marked as a store because it needs its own DCE logic. */
+  int uselo = ra_used(ir-1), usehi = ra_used(ir);  /* Loword/hiword used? */
+  if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
+  if (!usehi) return;  /* Skip unused hiword op for all remaining ops. */
+  switch ((ir-1)->o) {
+  case IR_CALLN:
+  case IR_CALLL:
+  case IR_CALLS:
+  case IR_CALLXS:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RID2RSET(RID_RETLO));  /* Mark lo op as used. */
+    break;
+  default: lj_assertA(0, "bad HIOP for op %d", (ir-1)->o); break;
+  }
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+static void asm_prof(ASMState *as, IRIns *ir)
+{
+  uint32_t k = emit_isk13(HOOK_PROFILE, 0);
+  lj_assertA(k != 0, "HOOK_PROFILE does not fit in K13");
+  UNUSED(ir);
+  asm_guardcc(as, CC_NE);
+  emit_n(as, A64I_TSTw^k, RID_TMP);
+  emit_lsptr(as, A64I_LDRB, RID_TMP, (void *)&J2G(as->J)->hookmask);
+}
+
+/* -- Stack handling ------------------------------------------------------ */
+
+/* Check Lua stack size for overflow. Use exit handler as fallback. */
+static void asm_stack_check(ASMState *as, BCReg topslot,
+			    IRIns *irp, RegSet allow, ExitNo exitno)
+{
+  Reg pbase;
+  uint32_t k;
+  if (irp) {
+    if (!ra_hasspill(irp->s)) {
+      pbase = irp->r;
+      lj_assertA(ra_hasreg(pbase), "base reg lost");
+    } else if (allow) {
+      pbase = rset_pickbot(allow);
+    } else {
+      pbase = RID_RET;
+      emit_lso(as, A64I_LDRx, RID_RET, RID_SP, 0);  /* Restore temp register. */
+    }
+  } else {
+    pbase = RID_BASE;
+  }
+  emit_cond_branch(as, CC_LS, asm_exitstub_addr(as, exitno));
+  k = emit_isk12((8*topslot));
+  lj_assertA(k, "slot offset %d does not fit in K12", 8*topslot);
+  emit_n(as, A64I_CMPx^k, RID_TMP);
+  emit_dnm(as, A64I_SUBx, RID_TMP, RID_TMP, pbase);
+  emit_lso(as, A64I_LDRx, RID_TMP, RID_TMP,
+	   (int32_t)offsetof(lua_State, maxstack));
+  if (irp) {  /* Must not spill arbitrary registers in head of side trace. */
+    if (ra_hasspill(irp->s))
+      emit_lso(as, A64I_LDRx, pbase, RID_SP, sps_scale(irp->s));
+    emit_lso(as, A64I_LDRx, RID_TMP, RID_GL, glofs(as, &J2G(as->J)->cur_L));
+    if (ra_hasspill(irp->s) && !allow)
+      emit_lso(as, A64I_STRx, RID_RET, RID_SP, 0);  /* Save temp register. */
+  } else {
+    emit_getgl(as, RID_TMP, cur_L);
+  }
+}
+
+/* Restore Lua stack from on-trace state. */
+static void asm_stack_restore(ASMState *as, SnapShot *snap)
+{
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+#ifdef LUA_USE_ASSERT
+  SnapEntry *flinks = &as->T->snapmap[snap_nextofs(as->T, snap)-1-LJ_FR2];
+#endif
+  MSize n, nent = snap->nent;
+  /* Store the value of all modified slots to the Lua stack. */
+  for (n = 0; n < nent; n++) {
+    SnapEntry sn = map[n];
+    BCReg s = snap_slot(sn);
+    int32_t ofs = 8*((int32_t)s-1-LJ_FR2);
+    IRRef ref = snap_ref(sn);
+    IRIns *ir = IR(ref);
+    if ((sn & SNAP_NORESTORE))
+      continue;
+    if ((sn & SNAP_KEYINDEX)) {
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      Reg r = irref_isk(ref) ? ra_allock(as, ir->i, allow) :
+			       ra_alloc1(as, ref, allow);
+      rset_clear(allow, r);
+      emit_lso(as, A64I_STRw, r, RID_BASE, ofs);
+      emit_lso(as, A64I_STRw, ra_allock(as, LJ_KEYINDEX, allow), RID_BASE, ofs+4);
+    } else if (irt_isnum(ir->t)) {
+      Reg src = ra_alloc1(as, ref, RSET_FPR);
+      emit_lso(as, A64I_STRd, (src & 31), RID_BASE, ofs);
+    } else {
+      asm_tvstore64(as, RID_BASE, ofs, ref);
+    }
+    checkmclim(as);
+  }
+  lj_assertA(map + nent == flinks, "inconsistent frames in snapshot");
+}
+
+/* -- GC handling --------------------------------------------------------- */
+
+/* Marker to prevent patching the GC check exit. */
+#define ARM64_NOPATCH_GC_CHECK \
+  (A64I_ORRx|A64F_D(RID_TMP)|A64F_M(RID_TMP)|A64F_N(RID_TMP))
+
+/* Check GC threshold and do one or more GC steps. */
+static void asm_gc_check(ASMState *as)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg tmp2;
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
+  asm_guardcnb(as, A64I_CBNZ, RID_RET); /* Assumes asm_snap_prep() is done. */
+  *--as->mcp = ARM64_NOPATCH_GC_CHECK;
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  asm_gencall(as, ci, args);
+  emit_dm(as, A64I_MOVx, ra_releasetmp(as, ASMREF_TMP1), RID_GL);
+  tmp2 = ra_releasetmp(as, ASMREF_TMP2);
+  emit_loadi(as, tmp2, as->gcsteps);
+  /* Jump around GC step if GC total < GC threshold. */
+  emit_cond_branch(as, CC_LS, l_end);
+  emit_nm(as, A64I_CMPx, RID_TMP, tmp2);
+  emit_getgl(as, tmp2, gc.threshold);
+  emit_getgl(as, RID_TMP, gc.total);
+  as->gcsteps = 0;
+  checkmclim(as);
+}
+
+/* -- Loop handling ------------------------------------------------------- */
+
+/* Fixup the loop branch. */
+static void asm_loop_fixup(ASMState *as)
+{
+  MCode *p = as->mctop;
+  MCode *target = as->mcp;
+  if (as->loopinv) {  /* Inverted loop branch? */
+    uint32_t mask = (p[-2] & 0x7e000000) == 0x36000000 ? 0x3fffu : 0x7ffffu;
+    ptrdiff_t delta = target - (p - 2);
+    /* asm_guard* already inverted the bcc/tnb/cnb and patched the final b. */
+    p[-2] |= ((uint32_t)delta & mask) << 5;
+  } else {
+    ptrdiff_t delta = target - (p - 1);
+    p[-1] = A64I_B | A64F_S26(delta);
+  }
+}
+
+/* Fixup the tail of the loop. */
+static void asm_loop_tail_fixup(ASMState *as)
+{
+  UNUSED(as);  /* Nothing to do. */
+}
+
+/* -- Head of trace ------------------------------------------------------- */
+
+/* Reload L register from g->cur_L. */
+static void asm_head_lreg(ASMState *as)
+{
+  IRIns *ir = IR(ASMREF_L);
+  if (ra_used(ir)) {
+    Reg r = ra_dest(as, ir, RSET_GPR);
+    emit_getgl(as, r, cur_L);
+    ra_evictk(as);
+  }
+}
+
+/* Coalesce BASE register for a root trace. */
+static void asm_head_root_base(ASMState *as)
+{
+  IRIns *ir;
+  asm_head_lreg(as);
+  ir = IR(REF_BASE);
+  if (ra_hasreg(ir->r) && (rset_test(as->modset, ir->r) || irt_ismarked(ir->t)))
+    ra_spill(as, ir);
+  ra_destreg(as, ir, RID_BASE);
+}
+
+/* Coalesce BASE register for a side trace. */
+static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
+{
+  IRIns *ir;
+  asm_head_lreg(as);
+  ir = IR(REF_BASE);
+  if (ra_hasreg(ir->r) && (rset_test(as->modset, ir->r) || irt_ismarked(ir->t)))
+    ra_spill(as, ir);
+  if (ra_hasspill(irp->s)) {
+    rset_clear(allow, ra_dest(as, ir, allow));
+  } else {
+    Reg r = irp->r;
+    lj_assertA(ra_hasreg(r), "base reg lost");
+    rset_clear(allow, r);
+    if (r != ir->r && !rset_test(as->freeset, r))
+      ra_restore(as, regcost_ref(as->cost[r]));
+    ra_destreg(as, ir, r);
+  }
+  return allow;
+}
+
+/* -- Tail of trace ------------------------------------------------------- */
+
+/* Fixup the tail code. */
+static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+{
+  MCode *p = as->mctop;
+  MCode *target;
+  /* Undo the sp adjustment in BC_JLOOP when exiting to the interpreter. */
+  int32_t spadj = as->T->spadjust + (lnk ? 0 : sps_scale(SPS_FIXED));
+  if (spadj == 0) {
+    *--p = A64I_LE(A64I_NOP);
+    as->mctop = p;
+  } else {
+    /* Patch stack adjustment. */
+    uint32_t k = emit_isk12(spadj);
+    lj_assertA(k, "stack adjustment %d does not fit in K12", spadj);
+    p[-2] = (A64I_ADDx^k) | A64F_D(RID_SP) | A64F_N(RID_SP);
+  }
+  /* Patch exit branch. */
+  target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
+  p[-1] = A64I_B | A64F_S26((target-p)+1);
+}
+
+/* Prepare tail of code. */
+static void asm_tail_prep(ASMState *as)
+{
+  MCode *p = as->mctop - 1;  /* Leave room for exit branch. */
+  if (as->loopref) {
+    as->invmcp = as->mcp = p;
+  } else {
+    as->mcp = p-1;  /* Leave room for stack pointer adjustment. */
+    as->invmcp = NULL;
+  }
+  *p = 0;  /* Prevent load/store merging. */
+}
+
+/* -- Trace setup --------------------------------------------------------- */
+
+/* Ensure there are enough stack slots for call arguments. */
+static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  uint32_t i, nargs = CCI_XNARGS(ci);
+  int nslots = 0, ngpr = REGARG_NUMGPR, nfpr = REGARG_NUMFPR;
+  asm_collectargs(as, ir, ci, args);
+  for (i = 0; i < nargs; i++) {
+    if (args[i] && irt_isfp(IR(args[i])->t)) {
+      if (nfpr > 0) nfpr--; else nslots += 2;
+    } else {
+      if (ngpr > 0) ngpr--; else nslots += 2;
+    }
+  }
+  if (nslots > as->evenspill)  /* Leave room for args in stack slots. */
+    as->evenspill = nslots;
+  return REGSP_HINT(RID_RET);
+}
+
+static void asm_setup_target(ASMState *as)
+{
+  /* May need extra exit for asm_stack_check on side traces. */
+  asm_exitstub_setup(as, as->T->nsnap + (as->parent ? 1 : 0));
+}
+
+#if LJ_BE
+/* ARM64 instructions are always little-endian. Swap for ARM64BE. */
+static void asm_mcode_fixup(MCode *mcode, MSize size)
+{
+  MCode *pe = (MCode *)((char *)mcode + size);
+  while (mcode < pe) {
+    MCode ins = *mcode;
+    *mcode++ = lj_bswap(ins);
+  }
+}
+#define LJ_TARGET_MCODE_FIXUP	1
+#endif
+
+/* -- Trace patching ------------------------------------------------------ */
+
+/* Patch exit jumps of existing machine code to a new target. */
+void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+{
+  MCode *p = T->mcode;
+  MCode *pe = (MCode *)((char *)p + T->szmcode);
+  MCode *cstart = NULL;
+  MCode *mcarea = lj_mcode_patch(J, p, 0);
+  MCode *px = exitstub_trace_addr(T, exitno);
+  int patchlong = 1;
+  /* Note: this assumes a trace exit is only ever patched once. */
+  for (; p < pe; p++) {
+    /* Look for exitstub branch, replace with branch to target. */
+    ptrdiff_t delta = target - p;
+    MCode ins = A64I_LE(*p);
+    if ((ins & 0xff000000u) == 0x54000000u &&
+	((ins ^ ((px-p)<<5)) & 0x00ffffe0u) == 0) {
+      /* Patch bcc, if within range. */
+      if (A64F_S_OK(delta, 19)) {
+	*p = A64I_LE((ins & 0xff00001fu) | A64F_S19(delta));
+	if (!cstart) cstart = p;
+      }
+    } else if ((ins & 0xfc000000u) == 0x14000000u &&
+	       ((ins ^ (px-p)) & 0x03ffffffu) == 0) {
+      /* Patch b. */
+      lj_assertJ(A64F_S_OK(delta, 26), "branch target out of range");
+      *p = A64I_LE((ins & 0xfc000000u) | A64F_S26(delta));
+      if (!cstart) cstart = p;
+    } else if ((ins & 0x7e000000u) == 0x34000000u &&
+	       ((ins ^ ((px-p)<<5)) & 0x00ffffe0u) == 0) {
+      /* Patch cbz/cbnz, if within range. */
+      if (p[-1] == ARM64_NOPATCH_GC_CHECK) {
+	patchlong = 0;
+      } else if (A64F_S_OK(delta, 19)) {
+	*p = A64I_LE((ins & 0xff00001fu) | A64F_S19(delta));
+	if (!cstart) cstart = p;
+      }
+    } else if ((ins & 0x7e000000u) == 0x36000000u &&
+	       ((ins ^ ((px-p)<<5)) & 0x0007ffe0u) == 0) {
+      /* Patch tbz/tbnz, if within range. */
+      if (A64F_S_OK(delta, 14)) {
+	*p = A64I_LE((ins & 0xfff8001fu) | A64F_S14(delta));
+	if (!cstart) cstart = p;
+      }
+    }
+  }
+  /* Always patch long-range branch in exit stub itself. Except, if we can't. */
+  if (patchlong) {
+    ptrdiff_t delta = target - px;
+    lj_assertJ(A64F_S_OK(delta, 26), "branch target out of range");
+    *px = A64I_B | A64F_S26(delta);
+    if (!cstart) cstart = px;
+  }
+  if (cstart) lj_mcode_sync(cstart, px+1);
+  lj_mcode_patch(J, mcarea, 1);
+}
