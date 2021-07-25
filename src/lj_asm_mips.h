@@ -77,4 +77,49 @@ static MCode *asm_sparejump_use(MCode *mcarea, MCode tjump)
 {
   MCode *mxp = (MCode *)((char *)mcarea + ((MCLink *)mcarea)->size);
   int slot = MIPS_SPAREJUMP;
-  while
+  while (slot--) {
+    mxp -= 2;
+    if (*mxp == tjump) {
+      return mxp;
+    } else if (*mxp == MIPSI_NOP) {
+      *mxp = tjump;
+      return mxp;
+    }
+  }
+  return NULL;
+}
+
+/* Setup exit stub after the end of each trace. */
+static void asm_exitstub_setup(ASMState *as)
+{
+  MCode *mxp = as->mctop;
+  /* sw TMP, 0(sp); j ->vm_exit_handler; li TMP, traceno */
+  *--mxp = MIPSI_LI|MIPSF_T(RID_TMP)|as->T->traceno;
+  *--mxp = MIPSI_J|((((uintptr_t)(void *)lj_vm_exit_handler)>>2)&0x03ffffffu);
+  lj_assertA(((uintptr_t)mxp ^ (uintptr_t)(void *)lj_vm_exit_handler)>>28 == 0,
+	     "branch target out of range");
+  *--mxp = MIPSI_SW|MIPSF_T(RID_TMP)|MIPSF_S(RID_SP)|0;
+  as->mctop = mxp;
+}
+
+/* Keep this in-sync with exitstub_trace_addr(). */
+#define asm_exitstub_addr(as)	((as)->mctop)
+
+/* Emit conditional branch to exit for guard. */
+static void asm_guard(ASMState *as, MIPSIns mi, Reg rs, Reg rt)
+{
+  MCode *target = asm_exitstub_addr(as);
+  MCode *p = as->mcp;
+  if (LJ_UNLIKELY(p == as->invmcp)) {
+    as->invmcp = NULL;
+    as->loopinv = 1;
+    as->mcp = p+1;
+#if !LJ_TARGET_MIPSR6
+    mi = mi ^ ((mi>>28) == 1 ? 0x04000000u : 0x00010000u);  /* Invert cond. */
+#else
+    mi = mi ^ ((mi>>28) == 1 ? 0x04000000u :
+	       (mi>>28) == 4 ? 0x00800000u : 0x00010000u);  /* Invert cond. */
+#endif
+    target = p;  /* Patch target later in asm_loop_fixup. */
+  }
+  emit_ti(as, MIPSI_LI, RID_TMP, as-
