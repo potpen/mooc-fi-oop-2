@@ -172,4 +172,54 @@ static Reg asm_fuseahuref(ASMState *as, IRRef ref, int32_t *ofsp, RegSet allow)
 	  }
 	}
       }
-    } else if (ir->o == IR_HREF
+    } else if (ir->o == IR_HREFK) {
+      if (mayfuse(as, ref)) {
+	int32_t ofs = (int32_t)(IR(ir->op2)->op2 * sizeof(Node));
+	if (checki16(ofs)) {
+	  *ofsp = ofs;
+	  return ra_alloc1(as, ir->op1, allow);
+	}
+      }
+    } else if (ir->o == IR_UREFC) {
+      if (irref_isk(ir->op1)) {
+	GCfunc *fn = ir_kfunc(IR(ir->op1));
+	intptr_t ofs = (intptr_t)&gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv.tv;
+	intptr_t jgl = (intptr_t)J2G(as->J);
+	if ((uintptr_t)(ofs-jgl) < 65536) {
+	  *ofsp = ofs-jgl-32768;
+	  return RID_JGL;
+	} else {
+	  *ofsp = (int16_t)ofs;
+	  return ra_allock(as, ofs-(int16_t)ofs, allow);
+	}
+      }
+    } else if (ir->o == IR_TMPREF) {
+      *ofsp = (int32_t)(offsetof(global_State, tmptv)-32768);
+      return RID_JGL;
+    }
+  }
+  *ofsp = 0;
+  return ra_alloc1(as, ref, allow);
+}
+
+/* Fuse XLOAD/XSTORE reference into load/store operand. */
+static void asm_fusexref(ASMState *as, MIPSIns mi, Reg rt, IRRef ref,
+			 RegSet allow, int32_t ofs)
+{
+  IRIns *ir = IR(ref);
+  Reg base;
+  if (ra_noreg(ir->r) && canfuse(as, ir)) {
+    if (ir->o == IR_ADD) {
+      intptr_t ofs2;
+      if (irref_isk(ir->op2) && (ofs2 = ofs + get_kval(as, ir->op2),
+				 checki16(ofs2))) {
+	ref = ir->op1;
+	ofs = (int32_t)ofs2;
+      }
+    } else if (ir->o == IR_STRREF) {
+      intptr_t ofs2 = 65536;
+      lj_assertA(ofs == 0, "bad usage");
+      ofs = (int32_t)sizeof(GCstr);
+      if (irref_isk(ir->op2)) {
+	ofs2 = ofs + get_kval(as, ir->op2);
+	r
