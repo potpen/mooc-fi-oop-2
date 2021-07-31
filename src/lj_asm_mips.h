@@ -122,4 +122,54 @@ static void asm_guard(ASMState *as, MIPSIns mi, Reg rs, Reg rt)
 #endif
     target = p;  /* Patch target later in asm_loop_fixup. */
   }
-  emit_ti(as, MIPSI_LI, RID_TMP, as-
+  emit_ti(as, MIPSI_LI, RID_TMP, as->snapno);
+  emit_branch(as, mi, rs, rt, target);
+}
+
+/* -- Operand fusion ------------------------------------------------------ */
+
+/* Limit linear search to this distance. Avoids O(n^2) behavior. */
+#define CONFLICT_SEARCH_LIM	31
+
+/* Check if there's no conflicting instruction between curins and ref. */
+static int noconflict(ASMState *as, IRRef ref, IROp conflict)
+{
+  IRIns *ir = as->ir;
+  IRRef i = as->curins;
+  if (i > ref + CONFLICT_SEARCH_LIM)
+    return 0;  /* Give up, ref is too far away. */
+  while (--i > ref)
+    if (ir[i].o == conflict)
+      return 0;  /* Conflict found. */
+  return 1;  /* Ok, no conflict. */
+}
+
+/* Fuse the array base of colocated arrays. */
+static int32_t asm_fuseabase(ASMState *as, IRRef ref)
+{
+  IRIns *ir = IR(ref);
+  if (ir->o == IR_TNEW && ir->op1 <= LJ_MAX_COLOSIZE &&
+      !neverfuse(as) && noconflict(as, ref, IR_NEWREF))
+    return (int32_t)sizeof(GCtab);
+  return 0;
+}
+
+/* Fuse array/hash/upvalue reference into register+offset operand. */
+static Reg asm_fuseahuref(ASMState *as, IRRef ref, int32_t *ofsp, RegSet allow)
+{
+  IRIns *ir = IR(ref);
+  if (ra_noreg(ir->r)) {
+    if (ir->o == IR_AREF) {
+      if (mayfuse(as, ref)) {
+	if (irref_isk(ir->op2)) {
+	  IRRef tab = IR(ir->op1)->op1;
+	  int32_t ofs = asm_fuseabase(as, tab);
+	  IRRef refa = ofs ? tab : ir->op1;
+	  ofs += 8*IR(ir->op2)->i;
+	  if (checki16(ofs)) {
+	    *ofsp = ofs;
+	    return ra_alloc1(as, refa, allow);
+	  }
+	}
+      }
+    } else if (ir->o == IR_HREF
