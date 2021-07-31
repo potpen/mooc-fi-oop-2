@@ -273,4 +273,56 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 	ra_leftov(as, fpr, ref);
 	fpr += LJ_32 ? 2 : 1;
 	gpr += (LJ_32 && irt_isnum(ir->t)) ? 2 : 1;
-  
+      } else
+#endif
+      {
+#if LJ_32 && !LJ_SOFTFP
+	fpr = REGARG_LASTFPR+1;
+#endif
+	if (LJ_32 && irt_isnum(ir->t)) gpr = (gpr+1) & ~1;
+	if (gpr <= REGARG_LASTGPR) {
+	  lj_assertA(rset_test(as->freeset, gpr),
+		     "reg %d not free", gpr);  /* Already evicted. */
+#if !LJ_SOFTFP
+	  if (irt_isfp(ir->t)) {
+	    RegSet of = as->freeset;
+	    Reg r;
+	    /* Workaround to protect argument GPRs from being used for remat. */
+	    as->freeset &= ~RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1);
+	    r = ra_alloc1(as, ref, RSET_FPR);
+	    as->freeset |= (of & RSET_RANGE(REGARG_FIRSTGPR, REGARG_LASTGPR+1));
+	    if (irt_isnum(ir->t)) {
+#if LJ_32
+	      emit_tg(as, MIPSI_MFC1, gpr+(LJ_BE?0:1), r+1);
+	      emit_tg(as, MIPSI_MFC1, gpr+(LJ_BE?1:0), r);
+	      lj_assertA(rset_test(as->freeset, gpr+1),
+			 "reg %d not free", gpr+1);  /* Already evicted. */
+	      gpr += 2;
+#else
+	      emit_tg(as, MIPSI_DMFC1, gpr, r);
+	      gpr++; fpr++;
+#endif
+	    } else if (irt_isfloat(ir->t)) {
+	      emit_tg(as, MIPSI_MFC1, gpr, r);
+	      gpr++;
+#if LJ_64
+	      fpr++;
+#endif
+	    }
+	  } else
+#endif
+	  {
+	    ra_leftov(as, gpr, ref);
+	    gpr++;
+#if LJ_64 && !LJ_SOFTFP
+	    fpr++;
+#endif
+	  }
+	} else {
+	  Reg r = ra_alloc1z(as, ref, !LJ_SOFTFP && irt_isfp(ir->t) ? RSET_FPR : RSET_GPR);
+#if LJ_32
+	  if (irt_isnum(ir->t)) ofs = (ofs + 4) & ~4;
+	  emit_spstore(as, ir, r, ofs);
+	  ofs += irt_isnum(ir->t) ? 8 : 4;
+#else
+	  emit_spstore(as, ir, r, ofs 
