@@ -222,4 +222,55 @@ static void asm_fusexref(ASMState *as, MIPSIns mi, Reg rt, IRRef ref,
       ofs = (int32_t)sizeof(GCstr);
       if (irref_isk(ir->op2)) {
 	ofs2 = ofs + get_kval(as, ir->op2);
-	r
+	ref = ir->op1;
+      } else if (irref_isk(ir->op1)) {
+	ofs2 = ofs + get_kval(as, ir->op1);
+	ref = ir->op2;
+      }
+      if (!checki16(ofs2)) {
+	/* NYI: Fuse ADD with constant. */
+	Reg right, left = ra_alloc2(as, ir, allow);
+	right = (left >> 8); left &= 255;
+	emit_hsi(as, mi, rt, RID_TMP, ofs);
+	emit_dst(as, MIPSI_AADDU, RID_TMP, left, right);
+	return;
+      }
+      ofs = ofs2;
+    }
+  }
+  base = ra_alloc1(as, ref, allow);
+  emit_hsi(as, mi, rt, base, ofs);
+}
+
+/* -- Calls --------------------------------------------------------------- */
+
+/* Generate a call to a C function. */
+static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
+{
+  uint32_t n, nargs = CCI_XNARGS(ci);
+  int32_t ofs = LJ_32 ? 16 : 0;
+#if LJ_SOFTFP
+  Reg gpr = REGARG_FIRSTGPR;
+#else
+  Reg gpr, fpr = REGARG_FIRSTFPR;
+#endif
+  if ((void *)ci->func)
+    emit_call(as, (void *)ci->func, 1);
+#if !LJ_SOFTFP
+  for (gpr = REGARG_FIRSTGPR; gpr <= REGARG_LASTGPR; gpr++)
+    as->cost[gpr] = REGCOST(~0u, ASMREF_L);
+  gpr = REGARG_FIRSTGPR;
+#endif
+  for (n = 0; n < nargs; n++) {  /* Setup args. */
+    IRRef ref = args[n];
+    if (ref) {
+      IRIns *ir = IR(ref);
+#if !LJ_SOFTFP
+      if (irt_isfp(ir->t) && fpr <= REGARG_LASTFPR &&
+	  !(ci->flags & CCI_VARARG)) {
+	lj_assertA(rset_test(as->freeset, fpr),
+		   "reg %d not free", fpr);  /* Already evicted. */
+	ra_leftov(as, fpr, ref);
+	fpr += LJ_32 ? 2 : 1;
+	gpr += (LJ_32 && irt_isnum(ir->t)) ? 2 : 1;
+  
