@@ -325,4 +325,61 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 	  emit_spstore(as, ir, r, ofs);
 	  ofs += irt_isnum(ir->t) ? 8 : 4;
 #else
-	  emit_spstore(as, ir, r, ofs 
+	  emit_spstore(as, ir, r, ofs + ((LJ_BE && !irt_isfp(ir->t) && !irt_is64(ir->t)) ? 4 : 0));
+	  ofs += 8;
+#endif
+	}
+      }
+    } else {
+#if !LJ_SOFTFP
+      fpr = REGARG_LASTFPR+1;
+#endif
+      if (gpr <= REGARG_LASTGPR) {
+	gpr++;
+#if LJ_64 && !LJ_SOFTFP
+	fpr++;
+#endif
+      } else {
+	ofs += LJ_32 ? 4 : 8;
+      }
+    }
+    checkmclim(as);
+  }
+}
+
+/* Setup result reg/sp for call. Evict scratch regs. */
+static void asm_setupresult(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  RegSet drop = RSET_SCRATCH;
+  int hiop = ((ir+1)->o == IR_HIOP && !irt_isnil((ir+1)->t));
+#if !LJ_SOFTFP
+  if ((ci->flags & CCI_NOFPRCLOBBER))
+    drop &= ~RSET_FPR;
+#endif
+  if (ra_hasreg(ir->r))
+    rset_clear(drop, ir->r);  /* Dest reg handled below. */
+  if (hiop && ra_hasreg((ir+1)->r))
+    rset_clear(drop, (ir+1)->r);  /* Dest reg handled below. */
+  ra_evictset(as, drop);  /* Evictions must be performed first. */
+  if (ra_used(ir)) {
+    lj_assertA(!irt_ispri(ir->t), "PRI dest");
+    if (!LJ_SOFTFP && irt_isfp(ir->t)) {
+      if ((ci->flags & CCI_CASTU64)) {
+	int32_t ofs = sps_scale(ir->s);
+	Reg dest = ir->r;
+	if (ra_hasreg(dest)) {
+	  ra_free(as, dest);
+	  ra_modified(as, dest);
+#if LJ_32
+	  emit_tg(as, MIPSI_MTC1, RID_RETHI, dest+1);
+	  emit_tg(as, MIPSI_MTC1, RID_RETLO, dest);
+#else
+	  emit_tg(as, MIPSI_DMTC1, RID_RET, dest);
+#endif
+	}
+	if (ofs) {
+#if LJ_32
+	  emit_tsi(as, MIPSI_SW, RID_RETLO, RID_SP, ofs+(LJ_BE?4:0));
+	  emit_tsi(as, MIPSI_SW, RID_RETHI, RID_SP, ofs+(LJ_BE?0:4));
+#else
+	  emit_tsi(as, M
