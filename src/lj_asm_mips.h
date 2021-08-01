@@ -433,4 +433,43 @@ static void asm_callround(ASMState *as, IRIns *ir, IRCallID id)
 		|RID2RSET(RID_F21)
 #endif
 		;
-  if (ra_hasreg(ir->r)) rse
+  if (ra_hasreg(ir->r)) rset_clear(drop, ir->r);
+  ra_evictset(as, drop);
+  ra_destreg(as, ir, RID_FPRET);
+  emit_call(as, (void *)lj_ir_callinfo[id].func, 0);
+  ra_leftov(as, REGARG_FIRSTFPR, ir->op1);
+}
+#endif
+
+/* -- Returns ------------------------------------------------------------- */
+
+/* Return to lower frame. Guard that it goes to the right spot. */
+static void asm_retf(ASMState *as, IRIns *ir)
+{
+  Reg base = ra_alloc1(as, REF_BASE, RSET_GPR);
+  void *pc = ir_kptr(IR(ir->op2));
+  int32_t delta = 1+LJ_FR2+bc_a(*((const BCIns *)pc - 1));
+  as->topslot -= (BCReg)delta;
+  if ((int32_t)as->topslot < 0) as->topslot = 0;
+  irt_setmark(IR(REF_BASE)->t);  /* Children must not coalesce with BASE reg. */
+  emit_setgl(as, base, jit_base);
+  emit_addptr(as, base, -8*delta);
+  asm_guard(as, MIPSI_BNE, RID_TMP,
+	    ra_allock(as, igcptr(pc), rset_exclude(RSET_GPR, base)));
+  emit_tsi(as, MIPSI_AL, RID_TMP, base, -8);
+}
+
+/* -- Buffer operations --------------------------------------------------- */
+
+#if LJ_HASBUFFER
+static void asm_bufhdr_write(ASMState *as, Reg sb)
+{
+  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, sb));
+  IRIns irgc;
+  irgc.ot = IRT(0, IRT_PGC);  /* GC type. */
+  emit_storeofs(as, &irgc, RID_TMP, sb, offsetof(SBuf, L));
+  if ((as->flags & JIT_F_MIPSXXR2)) {
+    emit_tsml(as, LJ_64 ? MIPSI_DINS : MIPSI_INS, RID_TMP, tmp,
+	      lj_fls(SBUF_MASK_FLAG), 0);
+  } else {
+    emit_dst(as, M
