@@ -382,4 +382,55 @@ static void asm_setupresult(ASMState *as, IRIns *ir, const CCallInfo *ci)
 	  emit_tsi(as, MIPSI_SW, RID_RETLO, RID_SP, ofs+(LJ_BE?4:0));
 	  emit_tsi(as, MIPSI_SW, RID_RETHI, RID_SP, ofs+(LJ_BE?0:4));
 #else
-	  emit_tsi(as, M
+	  emit_tsi(as, MIPSI_SD, RID_RET, RID_SP, ofs);
+#endif
+	}
+      } else {
+	ra_destreg(as, ir, RID_FPRET);
+      }
+    } else if (hiop) {
+      ra_destpair(as, ir);
+    } else {
+      ra_destreg(as, ir, RID_RET);
+    }
+  }
+}
+
+static void asm_callx(ASMState *as, IRIns *ir)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  CCallInfo ci;
+  IRRef func;
+  IRIns *irf;
+  ci.flags = asm_callx_flags(as, ir);
+  asm_collectargs(as, ir, &ci, args);
+  asm_setupresult(as, ir, &ci);
+  func = ir->op2; irf = IR(func);
+  if (irf->o == IR_CARG) { func = irf->op1; irf = IR(func); }
+  if (irref_isk(func)) {  /* Call to constant address. */
+    ci.func = (ASMFunction)(void *)get_kval(as, func);
+  } else {  /* Need specific register for indirect calls. */
+    Reg r = ra_alloc1(as, func, RID2RSET(RID_CFUNCADDR));
+    MCode *p = as->mcp;
+    if (r == RID_CFUNCADDR)
+      *--p = MIPSI_NOP;
+    else
+      *--p = MIPSI_MOVE | MIPSF_D(RID_CFUNCADDR) | MIPSF_S(r);
+    *--p = MIPSI_JALR | MIPSF_S(r);
+    as->mcp = p;
+    ci.func = (ASMFunction)(void *)0;
+  }
+  asm_gencall(as, &ci, args);
+}
+
+#if !LJ_SOFTFP
+static void asm_callround(ASMState *as, IRIns *ir, IRCallID id)
+{
+  /* The modified regs must match with the *.dasc implementation. */
+  RegSet drop = RID2RSET(RID_R1)|RID2RSET(RID_R12)|RID2RSET(RID_FPRET)|
+		RID2RSET(RID_F2)|RID2RSET(RID_F4)|RID2RSET(REGARG_FIRSTFPR)
+#if LJ_TARGET_MIPSR6
+		|RID2RSET(RID_F21)
+#endif
+		;
+  if (ra_hasreg(ir->r)) rse
