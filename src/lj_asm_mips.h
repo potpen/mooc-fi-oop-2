@@ -472,4 +472,47 @@ static void asm_bufhdr_write(ASMState *as, Reg sb)
     emit_tsml(as, LJ_64 ? MIPSI_DINS : MIPSI_INS, RID_TMP, tmp,
 	      lj_fls(SBUF_MASK_FLAG), 0);
   } else {
-    emit_dst(as, M
+    emit_dst(as, MIPSI_OR, RID_TMP, RID_TMP, tmp);
+    emit_tsi(as, MIPSI_ANDI, tmp, tmp, SBUF_MASK_FLAG);
+  }
+  emit_getgl(as, RID_TMP, cur_L);
+  emit_loadofs(as, &irgc, tmp, sb, offsetof(SBuf, L));
+}
+#endif
+
+/* -- Type conversions ---------------------------------------------------- */
+
+#if !LJ_SOFTFP
+static void asm_tointg(ASMState *as, IRIns *ir, Reg left)
+{
+  Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, left));
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+#if !LJ_TARGET_MIPSR6
+  asm_guard(as, MIPSI_BC1F, 0, 0);
+  emit_fgh(as, MIPSI_C_EQ_D, 0, tmp, left);
+#else
+  asm_guard(as, MIPSI_BC1EQZ, 0, (tmp&31));
+  emit_fgh(as, MIPSI_CMP_EQ_D, tmp, tmp, left);
+#endif
+  emit_fg(as, MIPSI_CVT_D_W, tmp, tmp);
+  emit_tg(as, MIPSI_MFC1, dest, tmp);
+  emit_fg(as, MIPSI_CVT_W_D, tmp, left);
+}
+
+static void asm_tobit(ASMState *as, IRIns *ir)
+{
+  RegSet allow = RSET_FPR;
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, allow);
+  Reg right = ra_alloc1(as, ir->op2, rset_clear(allow, left));
+  Reg tmp = ra_scratch(as, rset_clear(allow, right));
+  emit_tg(as, MIPSI_MFC1, dest, tmp);
+  emit_fgh(as, MIPSI_ADD_D, tmp, left, right);
+}
+#elif LJ_64  /* && LJ_SOFTFP */
+static void asm_tointg(ASMState *as, IRIns *ir, Reg r)
+{
+  /* The modified regs must match with the *.dasc implementation. */
+  RegSet drop = RID2RSET(REGARG_FIRSTGPR)|RID2RSET(RID_RET)|RID2RSET(RID_RET+1)|
+		RID2RSET(RID_R1)|RID2RSET(RID_R12);
+  if (ra_h
