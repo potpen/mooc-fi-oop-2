@@ -515,4 +515,47 @@ static void asm_tointg(ASMState *as, IRIns *ir, Reg r)
   /* The modified regs must match with the *.dasc implementation. */
   RegSet drop = RID2RSET(REGARG_FIRSTGPR)|RID2RSET(RID_RET)|RID2RSET(RID_RET+1)|
 		RID2RSET(RID_R1)|RID2RSET(RID_R12);
-  if (ra_h
+  if (ra_hasreg(ir->r)) rset_clear(drop, ir->r);
+  ra_evictset(as, drop);
+  /* Return values are in RID_RET (converted value) and RID_RET+1 (status). */
+  ra_destreg(as, ir, RID_RET);
+  asm_guard(as, MIPSI_BNE, RID_RET+1, RID_ZERO);
+  emit_call(as, (void *)lj_ir_callinfo[IRCALL_lj_vm_tointg].func, 0);
+  if (r == RID_NONE)
+    ra_leftov(as, REGARG_FIRSTGPR, ir->op1);
+  else if (r != REGARG_FIRSTGPR)
+    emit_move(as, REGARG_FIRSTGPR, r);
+}
+
+static void asm_tobit(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  emit_dta(as, MIPSI_SLL, dest, dest, 0);
+  asm_callid(as, ir, IRCALL_lj_vm_tobit);
+}
+#endif
+
+static void asm_conv(ASMState *as, IRIns *ir)
+{
+  IRType st = (IRType)(ir->op2 & IRCONV_SRCMASK);
+#if !LJ_SOFTFP32
+  int stfp = (st == IRT_NUM || st == IRT_FLOAT);
+#endif
+#if LJ_64
+  int st64 = (st == IRT_I64 || st == IRT_U64 || st == IRT_P64);
+#endif
+  IRRef lref = ir->op1;
+#if LJ_32
+  /* 64 bit integer conversions are handled by SPLIT. */
+  lj_assertA(!(irt_isint64(ir->t) || (st == IRT_I64 || st == IRT_U64)),
+	     "IR %04d has unsplit 64 bit type",
+	     (int)(ir - as->ir) - REF_BIAS);
+#endif
+#if LJ_SOFTFP32
+  /* FP conversions are handled by SPLIT. */
+  lj_assertA(!irt_isfp(ir->t) && !(st == IRT_NUM || st == IRT_FLOAT),
+	     "IR %04d has FP type",
+	     (int)(ir - as->ir) - REF_BIAS);
+  /* Can't check for same types: SPLIT uses CONV int.int + BXOR for sfp NEG. */
+#else
+  lj_assertA(irt_type(ir->t) != st, "inconsistent ty
