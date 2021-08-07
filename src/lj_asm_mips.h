@@ -558,4 +558,33 @@ static void asm_conv(ASMState *as, IRIns *ir)
 	     (int)(ir - as->ir) - REF_BIAS);
   /* Can't check for same types: SPLIT uses CONV int.int + BXOR for sfp NEG. */
 #else
-  lj_assertA(irt_type(ir->t) != st, "inconsistent ty
+  lj_assertA(irt_type(ir->t) != st, "inconsistent types for CONV");
+#if !LJ_SOFTFP
+  if (irt_isfp(ir->t)) {
+    Reg dest = ra_dest(as, ir, RSET_FPR);
+    if (stfp) {  /* FP to FP conversion. */
+      emit_fg(as, st == IRT_NUM ? MIPSI_CVT_S_D : MIPSI_CVT_D_S,
+	      dest, ra_alloc1(as, lref, RSET_FPR));
+    } else if (st == IRT_U32) {  /* U32 to FP conversion. */
+      /* y = (x ^ 0x8000000) + 2147483648.0 */
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+      Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, dest));
+      if (irt_isfloat(ir->t))
+	emit_fg(as, MIPSI_CVT_S_D, dest, dest);
+      /* Must perform arithmetic with doubles to keep the precision. */
+      emit_fgh(as, MIPSI_ADD_D, dest, dest, tmp);
+      emit_fg(as, MIPSI_CVT_D_W, dest, dest);
+      emit_lsptr(as, MIPSI_LDC1, (tmp & 31),
+		 (void *)&as->J->k64[LJ_K64_2P31], RSET_GPR);
+      emit_tg(as, MIPSI_MTC1, RID_TMP, dest);
+      emit_dst(as, MIPSI_XOR, RID_TMP, RID_TMP, left);
+      emit_ti(as, MIPSI_LUI, RID_TMP, 0x8000);
+#if LJ_64
+    } else if(st == IRT_U64) {  /* U64 to FP conversion. */
+      /* if (x >= 1u<<63) y = (double)(int64_t)(x&(1u<<63)-1) + pow(2.0, 63) */
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+      Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, dest));
+      MCLabel l_end = emit_label(as);
+      if (irt_isfloat(ir->t)) {
+	emit_fgh(as, MIPSI_ADD_S, dest, dest, tmp);
+	emit_lsptr(as, MIPSI_LWC1, (tmp & 3
