@@ -587,4 +587,39 @@ static void asm_conv(ASMState *as, IRIns *ir)
       MCLabel l_end = emit_label(as);
       if (irt_isfloat(ir->t)) {
 	emit_fgh(as, MIPSI_ADD_S, dest, dest, tmp);
-	emit_lsptr(as, MIPSI_LWC1, (tmp & 3
+	emit_lsptr(as, MIPSI_LWC1, (tmp & 31), (void *)&as->J->k32[LJ_K32_2P63],
+		   rset_exclude(RSET_GPR, left));
+	emit_fg(as, MIPSI_CVT_S_L, dest, dest);
+      } else {
+	emit_fgh(as, MIPSI_ADD_D, dest, dest, tmp);
+	emit_lsptr(as, MIPSI_LDC1, (tmp & 31), (void *)&as->J->k64[LJ_K64_2P63],
+		   rset_exclude(RSET_GPR, left));
+	emit_fg(as, MIPSI_CVT_D_L, dest, dest);
+      }
+      emit_branch(as, MIPSI_BGEZ, left, RID_ZERO, l_end);
+      emit_tg(as, MIPSI_DMTC1, RID_TMP, dest);
+      emit_tsml(as, MIPSI_DEXTM, RID_TMP, left, 30, 0);
+#endif
+    } else {  /* Integer to FP conversion. */
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+#if LJ_32
+      emit_fg(as, irt_isfloat(ir->t) ? MIPSI_CVT_S_W : MIPSI_CVT_D_W,
+	      dest, dest);
+      emit_tg(as, MIPSI_MTC1, left, dest);
+#else
+      MIPSIns mi = irt_isfloat(ir->t) ?
+	(st64 ? MIPSI_CVT_S_L : MIPSI_CVT_S_W) :
+	(st64 ? MIPSI_CVT_D_L : MIPSI_CVT_D_W);
+      emit_fg(as, mi, dest, dest);
+      emit_tg(as, st64 ? MIPSI_DMTC1 : MIPSI_MTC1, left, dest);
+#endif
+    }
+  } else if (stfp) {  /* FP to integer conversion. */
+    if (irt_isguard(ir->t)) {
+      /* Checked conversions are only supported from number to int. */
+      lj_assertA(irt_isint(ir->t) && st == IRT_NUM,
+		 "bad type for checked CONV");
+      asm_tointg(as, ir, ra_alloc1(as, lref, RSET_FPR));
+    } else {
+      Reg dest = ra_dest(as, ir, RSET_GPR);
+      Reg left = ra_allo
