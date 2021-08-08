@@ -622,4 +622,39 @@ static void asm_conv(ASMState *as, IRIns *ir)
       asm_tointg(as, ir, ra_alloc1(as, lref, RSET_FPR));
     } else {
       Reg dest = ra_dest(as, ir, RSET_GPR);
-      Reg left = ra_allo
+      Reg left = ra_alloc1(as, lref, RSET_FPR);
+      Reg tmp = ra_scratch(as, rset_exclude(RSET_FPR, left));
+      if (irt_isu32(ir->t)) {  /* FP to U32 conversion. */
+	/* y = (int)floor(x - 2147483648.0) ^ 0x80000000 */
+	emit_dst(as, MIPSI_XOR, dest, dest, RID_TMP);
+	emit_ti(as, MIPSI_LUI, RID_TMP, 0x8000);
+	emit_tg(as, MIPSI_MFC1, dest, tmp);
+	emit_fg(as, st == IRT_FLOAT ? MIPSI_FLOOR_W_S : MIPSI_FLOOR_W_D,
+		tmp, tmp);
+	emit_fgh(as, st == IRT_FLOAT ? MIPSI_SUB_S : MIPSI_SUB_D,
+		 tmp, left, tmp);
+	if (st == IRT_FLOAT)
+	  emit_lsptr(as, MIPSI_LWC1, (tmp & 31),
+		     (void *)&as->J->k32[LJ_K32_2P31], RSET_GPR);
+	else
+	  emit_lsptr(as, MIPSI_LDC1, (tmp & 31),
+		     (void *)&as->J->k64[LJ_K64_2P31], RSET_GPR);
+#if LJ_64
+      } else if (irt_isu64(ir->t)) {  /* FP to U64 conversion. */
+	MCLabel l_end;
+	emit_tg(as, MIPSI_DMFC1, dest, tmp);
+	l_end = emit_label(as);
+	/* For inputs >= 2^63 add -2^64 and convert again. */
+	if (st == IRT_NUM) {
+	  emit_fg(as, MIPSI_TRUNC_L_D, tmp, tmp);
+	  emit_fgh(as, MIPSI_ADD_D, tmp, left, tmp);
+	  emit_lsptr(as, MIPSI_LDC1, (tmp & 31),
+		     (void *)&as->J->k64[LJ_K64_M2P64],
+		     rset_exclude(RSET_GPR, dest));
+	  emit_fg(as, MIPSI_TRUNC_L_D, tmp, left);  /* Delay slot. */
+#if !LJ_TARGET_MIPSR6
+	 emit_branch(as, MIPSI_BC1T, 0, 0, l_end);
+	 emit_fgh(as, MIPSI_C_OLT_D, 0, left, tmp);
+#else
+	 emit_branch(as, MIPSI_BC1NEZ, 0, (left&31), l_end);
+	 emit_fgh(as, MIPSI_CMP_LT_D, left, l
