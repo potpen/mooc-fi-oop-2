@@ -701,4 +701,42 @@ static void asm_conv(ASMState *as, IRIns *ir)
 #if LJ_64 && LJ_HASFFI
     if (stfp) {  /* FP to FP conversion. */
       asm_callid(as, ir, irt_isnum(ir->t) ? IRCALL_softfp_f2d :
-			
+					    IRCALL_softfp_d2f);
+    } else {  /* Integer to FP conversion. */
+      IRCallID cid = ((IRT_IS64 >> st) & 1) ?
+	(irt_isnum(ir->t) ?
+	 (st == IRT_I64 ? IRCALL_fp64_l2d : IRCALL_fp64_ul2d) :
+	 (st == IRT_I64 ? IRCALL_fp64_l2f : IRCALL_fp64_ul2f)) :
+	(irt_isnum(ir->t) ?
+	 (st == IRT_INT ? IRCALL_softfp_i2d : IRCALL_softfp_ui2d) :
+	 (st == IRT_INT ? IRCALL_softfp_i2f : IRCALL_softfp_ui2f));
+      asm_callid(as, ir, cid);
+    }
+#else
+    asm_callid(as, ir, IRCALL_softfp_i2d);
+#endif
+  } else if (stfp) {  /* FP to integer conversion. */
+    if (irt_isguard(ir->t)) {
+      /* Checked conversions are only supported from number to int. */
+      lj_assertA(irt_isint(ir->t) && st == IRT_NUM,
+		 "bad type for checked CONV");
+      asm_tointg(as, ir, RID_NONE);
+    } else {
+      IRCallID cid = irt_is64(ir->t) ?
+	((st == IRT_NUM) ?
+	 (irt_isi64(ir->t) ? IRCALL_fp64_d2l : IRCALL_fp64_d2ul) :
+	 (irt_isi64(ir->t) ? IRCALL_fp64_f2l : IRCALL_fp64_f2ul)) :
+	((st == IRT_NUM) ?
+	 (irt_isint(ir->t) ? IRCALL_softfp_d2i : IRCALL_softfp_d2ui) :
+	 (irt_isint(ir->t) ? IRCALL_softfp_f2i : IRCALL_softfp_f2ui));
+      asm_callid(as, ir, cid);
+    }
+  } else
+#endif
+#endif
+  {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    if (st >= IRT_I8 && st <= IRT_U16) {  /* Extend to 32 bit integer. */
+      Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+      lj_assertA(irt_isint(ir->t) || irt_isu32(ir->t), "bad type for CONV EXT");
+     
