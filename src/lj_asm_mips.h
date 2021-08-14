@@ -739,4 +739,41 @@ static void asm_conv(ASMState *as, IRIns *ir)
     if (st >= IRT_I8 && st <= IRT_U16) {  /* Extend to 32 bit integer. */
       Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
       lj_assertA(irt_isint(ir->t) || irt_isu32(ir->t), "bad type for CONV EXT");
-     
+      if ((ir->op2 & IRCONV_SEXT)) {
+	if (LJ_64 || (as->flags & JIT_F_MIPSXXR2)) {
+	  emit_dst(as, st == IRT_I8 ? MIPSI_SEB : MIPSI_SEH, dest, 0, left);
+	} else {
+	  uint32_t shift = st == IRT_I8 ? 24 : 16;
+	  emit_dta(as, MIPSI_SRA, dest, dest, shift);
+	  emit_dta(as, MIPSI_SLL, dest, left, shift);
+	}
+      } else {
+	emit_tsi(as, MIPSI_ANDI, dest, left,
+		 (int32_t)(st == IRT_U8 ? 0xff : 0xffff));
+      }
+    } else {  /* 32/64 bit integer conversions. */
+#if LJ_32
+      /* Only need to handle 32/32 bit no-op (cast) on 32 bit archs. */
+      ra_leftov(as, dest, lref);  /* Do nothing, but may need to move regs. */
+#else
+      if (irt_is64(ir->t)) {
+	if (st64) {
+	  /* 64/64 bit no-op (cast)*/
+	  ra_leftov(as, dest, lref);
+	} else {
+	  Reg left = ra_alloc1(as, lref, RSET_GPR);
+	  if ((ir->op2 & IRCONV_SEXT)) {  /* 32 to 64 bit sign extension. */
+	    emit_dta(as, MIPSI_SLL, dest, left, 0);
+	  } else {  /* 32 to 64 bit zero extension. */
+	    emit_tsml(as, MIPSI_DEXT, dest, left, 31, 0);
+	  }
+	}
+      } else {
+	if (st64 && !(ir->op2 & IRCONV_NONE)) {
+	  /* This is either a 32 bit reg/reg mov which zeroes the hiword
+	  ** or a load of the loword from a 64 bit address.
+	  */
+	  Reg left = ra_alloc1(as, lref, RSET_GPR);
+	  emit_tsml(as, MIPSI_DEXT, dest, left, 31, 0);
+	} else {  /* 32/32 bit no-op (cast). */
+	  /* Do nothing, but may need 
