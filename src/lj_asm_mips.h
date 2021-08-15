@@ -776,4 +776,55 @@ static void asm_conv(ASMState *as, IRIns *ir)
 	  Reg left = ra_alloc1(as, lref, RSET_GPR);
 	  emit_tsml(as, MIPSI_DEXT, dest, left, 31, 0);
 	} else {  /* 32/32 bit no-op (cast). */
-	  /* Do nothing, but may need 
+	  /* Do nothing, but may need to move regs. */
+	  ra_leftov(as, dest, lref);
+	}
+      }
+#endif
+    }
+  }
+}
+
+static void asm_strto(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_strscan_num];
+  IRRef args[2];
+  int32_t ofs = 0;
+#if LJ_SOFTFP32
+  ra_evictset(as, RSET_SCRATCH);
+  if (ra_used(ir)) {
+    if (ra_hasspill(ir->s) && ra_hasspill((ir+1)->s) &&
+	(ir->s & 1) == LJ_BE && (ir->s ^ 1) == (ir+1)->s) {
+      int i;
+      for (i = 0; i < 2; i++) {
+	Reg r = (ir+i)->r;
+	if (ra_hasreg(r)) {
+	  ra_free(as, r);
+	  ra_modified(as, r);
+	  emit_spload(as, ir+i, r, sps_scale((ir+i)->s));
+	}
+      }
+      ofs = sps_scale(ir->s & ~1);
+    } else {
+      Reg rhi = ra_dest(as, ir+1, RSET_GPR);
+      Reg rlo = ra_dest(as, ir, rset_exclude(RSET_GPR, rhi));
+      emit_tsi(as, MIPSI_LW, rhi, RID_SP, ofs+(LJ_BE?0:4));
+      emit_tsi(as, MIPSI_LW, rlo, RID_SP, ofs+(LJ_BE?4:0));
+    }
+  }
+#else
+  RegSet drop = RSET_SCRATCH;
+  if (ra_hasreg(ir->r)) rset_set(drop, ir->r);  /* Spill dest reg (if any). */
+  ra_evictset(as, drop);
+  ofs = sps_scale(ir->s);
+#endif
+  asm_guard(as, MIPSI_BEQ, RID_RET, RID_ZERO);  /* Test return status. */
+  args[0] = ir->op1;      /* GCstr *str */
+  args[1] = ASMREF_TMP1;  /* TValue *n  */
+  asm_gencall(as, ci, args);
+  /* Store the result to the spill slot or temp slots. */
+  emit_tsi(as, MIPSI_AADDIU, ra_releasetmp(as, ASMREF_TMP1),
+	   RID_SP, ofs);
+}
+
+/* -- Memory refer
