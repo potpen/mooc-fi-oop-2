@@ -827,4 +827,45 @@ static void asm_strto(ASMState *as, IRIns *ir)
 	   RID_SP, ofs);
 }
 
-/* -- Memory refer
+/* -- Memory references --------------------------------------------------- */
+
+#if LJ_64
+/* Store tagged value for ref at base+ofs. */
+static void asm_tvstore64(ASMState *as, Reg base, int32_t ofs, IRRef ref)
+{
+  RegSet allow = rset_exclude(RSET_GPR, base);
+  IRIns *ir = IR(ref);
+  lj_assertA(irt_ispri(ir->t) || irt_isaddr(ir->t) || irt_isinteger(ir->t),
+	     "store of IR type %d", irt_type(ir->t));
+  if (irref_isk(ref)) {
+    TValue k;
+    lj_ir_kvalue(as->J->L, &k, ir);
+    emit_tsi(as, MIPSI_SD, ra_allock(as, (int64_t)k.u64, allow), base, ofs);
+  } else {
+    Reg src = ra_alloc1(as, ref, allow);
+    Reg type = ra_allock(as, (int64_t)irt_toitype(ir->t) << 47,
+			 rset_exclude(allow, src));
+    emit_tsi(as, MIPSI_SD, RID_TMP, base, ofs);
+    if (irt_isinteger(ir->t)) {
+      emit_dst(as, MIPSI_DADDU, RID_TMP, RID_TMP, type);
+      emit_tsml(as, MIPSI_DEXT, RID_TMP, src, 31, 0);
+    } else {
+      emit_dst(as, MIPSI_DADDU, RID_TMP, src, type);
+    }
+  }
+}
+#endif
+
+/* Get pointer to TValue. */
+static void asm_tvptr(ASMState *as, Reg dest, IRRef ref, MSize mode)
+{
+  int32_t tmpofs = (int32_t)(offsetof(global_State, tmptv)-32768);
+  if ((mode & IRTMPREF_IN1)) {
+    IRIns *ir = IR(ref);
+    if (irt_isnum(ir->t)) {
+      if ((mode & IRTMPREF_OUT1)) {
+#if LJ_SOFTFP
+	emit_tsi(as, MIPSI_AADDIU, dest, RID_JGL, tmpofs);
+#if LJ_64
+	emit_setgl(as, ra_alloc1(as, ref, RSET_GPR), tmptv.u64);
+#e
