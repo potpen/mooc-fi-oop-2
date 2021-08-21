@@ -917,4 +917,55 @@ static void asm_tvptr(ASMState *as, Reg dest, IRRef ref, MSize mode)
   }
 }
 
-static void asm_ar
+static void asm_aref(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg idx, base;
+  if (irref_isk(ir->op2)) {
+    IRRef tab = IR(ir->op1)->op1;
+    int32_t ofs = asm_fuseabase(as, tab);
+    IRRef refa = ofs ? tab : ir->op1;
+    ofs += 8*IR(ir->op2)->i;
+    if (checki16(ofs)) {
+      base = ra_alloc1(as, refa, RSET_GPR);
+      emit_tsi(as, MIPSI_AADDIU, dest, base, ofs);
+      return;
+    }
+  }
+  base = ra_alloc1(as, ir->op1, RSET_GPR);
+  idx = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, base));
+#if !LJ_TARGET_MIPSR6
+  emit_dst(as, MIPSI_AADDU, dest, RID_TMP, base);
+  emit_dta(as, MIPSI_SLL, RID_TMP, idx, 3);
+#else
+  emit_dst(as, MIPSI_ALSA | MIPSF_A(3-1), dest, idx, base);
+#endif
+}
+
+/* Inlined hash lookup. Specialized for key type and for const keys.
+** The equivalent C code is:
+**   Node *n = hashkey(t, key);
+**   do {
+**     if (lj_obj_equal(&n->key, key)) return &n->val;
+**   } while ((n = nextnode(n)));
+**   return niltv(L);
+*/
+static void asm_href(ASMState *as, IRIns *ir, IROp merge)
+{
+  RegSet allow = RSET_GPR;
+  int destused = ra_used(ir);
+  Reg dest = ra_dest(as, ir, allow);
+  Reg tab = ra_alloc1(as, ir->op1, rset_clear(allow, dest));
+  Reg key = RID_NONE, type = RID_NONE, tmpnum = RID_NONE, tmp1 = RID_TMP, tmp2;
+#if LJ_64
+  Reg cmp64 = RID_NONE;
+#endif
+  IRRef refkey = ir->op2;
+  IRIns *irkey = IR(refkey);
+  int isk = irref_isk(refkey);
+  IRType1 kt = irkey->t;
+  uint32_t khash;
+  MCLabel l_end, l_loop, l_next;
+
+  rset_clear(allow, tab);
+  if (
