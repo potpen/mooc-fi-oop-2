@@ -1017,4 +1017,43 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
 #endif
 
   /* Key not found in chain: jump to exit (if merged) or load niltv. */
-  l_end = emit_labe
+  l_end = emit_label(as);
+  as->invmcp = NULL;
+  if (merge == IR_NE)
+    asm_guard(as, MIPSI_B, RID_ZERO, RID_ZERO);
+  else if (destused)
+    emit_loada(as, dest, niltvg(J2G(as->J)));
+  /* Follow hash chain until the end. */
+  emit_move(as, dest, tmp1);
+  l_loop = --as->mcp;
+  emit_tsi(as, MIPSI_AL, tmp1, dest, (int32_t)offsetof(Node, next));
+  l_next = emit_label(as);
+
+  /* Type and value comparison. */
+  if (merge == IR_EQ) {  /* Must match asm_guard(). */
+    emit_ti(as, MIPSI_LI, RID_TMP, as->snapno);
+    l_end = asm_exitstub_addr(as);
+  }
+  if (!LJ_SOFTFP && irt_isnum(kt)) {
+#if !LJ_TARGET_MIPSR6
+    emit_branch(as, MIPSI_BC1T, 0, 0, l_end);
+    emit_fgh(as, MIPSI_C_EQ_D, 0, tmpnum, key);
+#else
+    emit_branch(as, MIPSI_BC1NEZ, 0, (tmpnum&31), l_end);
+    emit_fgh(as, MIPSI_CMP_EQ_D, tmpnum, tmpnum, key);
+#endif
+    *--as->mcp = MIPSI_NOP;  /* Avoid NaN comparison overhead. */
+    emit_branch(as, MIPSI_BEQ, tmp1, RID_ZERO, l_next);
+    emit_tsi(as, MIPSI_SLTIU, tmp1, tmp1, (int32_t)LJ_TISNUM);
+#if LJ_32
+    emit_hsi(as, MIPSI_LDC1, tmpnum, dest, (int32_t)offsetof(Node, key.n));
+  } else {
+    if (irt_ispri(kt)) {
+      emit_branch(as, MIPSI_BEQ, tmp1, type, l_end);
+    } else {
+      emit_branch(as, MIPSI_BEQ, tmp2, key, l_end);
+      emit_tsi(as, MIPSI_LW, tmp2, dest, (int32_t)offsetof(Node, key.gcr));
+      emit_branch(as, MIPSI_BNE, tmp1, type, l_next);
+    }
+  }
+  emit_tsi(as, MIPSI_LW, tmp1
