@@ -1056,4 +1056,37 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
       emit_branch(as, MIPSI_BNE, tmp1, type, l_next);
     }
   }
-  emit_tsi(as, MIPSI_LW, tmp1
+  emit_tsi(as, MIPSI_LW, tmp1, dest, (int32_t)offsetof(Node, key.it));
+  *l_loop = MIPSI_BNE | MIPSF_S(tmp1) | ((as->mcp-l_loop-1) & 0xffffu);
+#else
+    emit_dta(as, MIPSI_DSRA32, tmp1, tmp1, 15);
+    emit_tg(as, MIPSI_DMTC1, tmp1, tmpnum);
+    emit_tsi(as, MIPSI_LD, tmp1, dest, (int32_t)offsetof(Node, key.u64));
+  } else {
+    emit_branch(as, MIPSI_BEQ, tmp1, cmp64, l_end);
+    emit_tsi(as, MIPSI_LD, tmp1, dest, (int32_t)offsetof(Node, key.u64));
+  }
+  *l_loop = MIPSI_BNE | MIPSF_S(tmp1) | ((as->mcp-l_loop-1) & 0xffffu);
+  if (!isk && irt_isaddr(kt)) {
+    type = ra_allock(as, (int64_t)irt_toitype(kt) << 47, allow);
+    emit_dst(as, MIPSI_DADDU, tmp2, key, type);
+    rset_clear(allow, type);
+  }
+#endif
+
+  /* Load main position relative to tab->node into dest. */
+  khash = isk ? ir_khash(as, irkey) : 1;
+  if (khash == 0) {
+    emit_tsi(as, MIPSI_AL, dest, tab, (int32_t)offsetof(GCtab, node));
+  } else {
+    Reg tmphash = tmp1;
+    if (isk)
+      tmphash = ra_allock(as, khash, allow);
+    emit_dst(as, MIPSI_AADDU, dest, dest, tmp1);
+    lj_assertA(sizeof(Node) == 24, "bad Node size");
+    emit_dst(as, MIPSI_SUBU, tmp1, tmp2, tmp1);
+    emit_dta(as, MIPSI_SLL, tmp1, tmp1, 3);
+    emit_dta(as, MIPSI_SLL, tmp2, tmp1, 5);
+    emit_dst(as, MIPSI_AND, tmp1, tmp2, tmphash);
+    emit_tsi(as, MIPSI_AL, dest, tab, (int32_t)offsetof(GCtab, node));
+    emit_tsi(as, MIPSI_LW, tmp2, tab, (int32_t)offsetof(GCtab, hm
