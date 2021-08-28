@@ -1177,4 +1177,42 @@ static void asm_hrefk(ASMState *as, IRIns *ir)
   if (irt_isnum(irkey->t)) {
     lo = (int32_t)ir_knum(irkey)->u32.lo;
     hi = (int32_t)ir_knum(irkey)->u32.hi;
-  } else
+  } else {
+    lo = irkey->i;
+    hi = irt_toitype(irkey->t);
+    if (!ra_hasreg(key))
+      goto nolo;
+  }
+  asm_guard(as, MIPSI_BNE, key, lo ? ra_allock(as, lo, allow) : RID_ZERO);
+nolo:
+  asm_guard(as, MIPSI_BNE, type, hi ? ra_allock(as, hi, allow) : RID_ZERO);
+  if (ra_hasreg(key)) emit_tsi(as, MIPSI_LW, key, idx, kofs+(LJ_BE?4:0));
+  emit_tsi(as, MIPSI_LW, type, idx, kofs+(LJ_BE?0:4));
+#else
+  if (irt_ispri(irkey->t)) {
+    lj_assertA(!irt_isnil(irkey->t), "bad HREFK key type");
+    k = ~((int64_t)~irt_toitype(irkey->t) << 47);
+  } else if (irt_isnum(irkey->t)) {
+    k = (int64_t)ir_knum(irkey)->u64;
+  } else {
+    k = ((int64_t)irt_toitype(irkey->t) << 47) | (int64_t)ir_kgc(irkey);
+  }
+  asm_guard(as, MIPSI_BNE, key, ra_allock(as, k, allow));
+  emit_tsi(as, MIPSI_LD, key, idx, kofs);
+#endif
+  if (ofs > 32736)
+    emit_tsi(as, MIPSI_AADDU, dest, node, ra_allock(as, ofs, allow));
+}
+
+static void asm_uref(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  if (irref_isk(ir->op1)) {
+    GCfunc *fn = ir_kfunc(IR(ir->op1));
+    MRef *v = &gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv.v;
+    emit_lsptr(as, MIPSI_AL, dest, v, RSET_GPR);
+  } else {
+    Reg uv = ra_scratch(as, RSET_GPR);
+    Reg func = ra_alloc1(as, ir->op1, RSET_GPR);
+    if (ir->o == IR_UREFC) {
+      asm_guard(as, MIPSI_BEQ, RID_TMP, R
