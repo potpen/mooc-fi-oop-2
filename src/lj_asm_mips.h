@@ -1089,4 +1089,42 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     emit_dta(as, MIPSI_SLL, tmp2, tmp1, 5);
     emit_dst(as, MIPSI_AND, tmp1, tmp2, tmphash);
     emit_tsi(as, MIPSI_AL, dest, tab, (int32_t)offsetof(GCtab, node));
-    emit_tsi(as, MIPSI_LW, tmp2, tab, (int32_t)offsetof(GCtab, hm
+    emit_tsi(as, MIPSI_LW, tmp2, tab, (int32_t)offsetof(GCtab, hmask));
+    if (isk) {
+      /* Nothing to do. */
+    } else if (irt_isstr(kt)) {
+      emit_tsi(as, MIPSI_LW, tmp1, key, (int32_t)offsetof(GCstr, sid));
+    } else {  /* Must match with hash*() in lj_tab.c. */
+      emit_dst(as, MIPSI_SUBU, tmp1, tmp1, tmp2);
+      emit_rotr(as, tmp2, tmp2, dest, (-HASH_ROT3)&31);
+      emit_dst(as, MIPSI_XOR, tmp1, tmp1, tmp2);
+      emit_rotr(as, tmp1, tmp1, dest, (-HASH_ROT2-HASH_ROT1)&31);
+      emit_dst(as, MIPSI_SUBU, tmp2, tmp2, dest);
+#if LJ_32
+      if (LJ_SOFTFP ? (irkey[1].o == IR_HIOP) : irt_isnum(kt)) {
+	emit_dst(as, MIPSI_XOR, tmp2, tmp2, tmp1);
+	if ((as->flags & JIT_F_MIPSXXR2)) {
+	  emit_dta(as, MIPSI_ROTR, dest, tmp1, (-HASH_ROT1)&31);
+	} else {
+	  emit_dst(as, MIPSI_OR, dest, dest, tmp1);
+	  emit_dta(as, MIPSI_SLL, tmp1, tmp1, HASH_ROT1);
+	  emit_dta(as, MIPSI_SRL, dest, tmp1, (-HASH_ROT1)&31);
+	}
+	emit_dst(as, MIPSI_ADDU, tmp1, tmp1, tmp1);
+#if LJ_SOFTFP
+	emit_ds(as, MIPSI_MOVE, tmp1, type);
+	emit_ds(as, MIPSI_MOVE, tmp2, key);
+#else
+	emit_tg(as, MIPSI_MFC1, tmp2, key);
+	emit_tg(as, MIPSI_MFC1, tmp1, key+1);
+#endif
+      } else {
+	emit_dst(as, MIPSI_XOR, tmp2, key, tmp1);
+	emit_rotr(as, dest, tmp1, tmp2, (-HASH_ROT1)&31);
+	emit_dst(as, MIPSI_ADDU, tmp1, key, ra_allock(as, HASH_BIAS, allow));
+      }
+#else
+      emit_dst(as, MIPSI_XOR, tmp2, tmp2, tmp1);
+      emit_dta(as, MIPSI_ROTR, dest, tmp1, (-HASH_ROT1)&31);
+      if (irt_isnum(kt)) {
+	emit_dst(as, MIPS
