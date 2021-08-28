@@ -1127,4 +1127,54 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
       emit_dst(as, MIPSI_XOR, tmp2, tmp2, tmp1);
       emit_dta(as, MIPSI_ROTR, dest, tmp1, (-HASH_ROT1)&31);
       if (irt_isnum(kt)) {
-	emit_dst(as, MIPS
+	emit_dst(as, MIPSI_ADDU, tmp1, tmp1, tmp1);
+	emit_dta(as, MIPSI_DSRA32, tmp1, LJ_SOFTFP ? key : tmp1, 0);
+	emit_dta(as, MIPSI_SLL, tmp2, LJ_SOFTFP ? key : tmp1, 0);
+#if !LJ_SOFTFP
+	emit_tg(as, MIPSI_DMFC1, tmp1, key);
+#endif
+      } else {
+	checkmclim(as);
+	emit_dta(as, MIPSI_DSRA32, tmp1, tmp1, 0);
+	emit_dta(as, MIPSI_SLL, tmp2, key, 0);
+	emit_dst(as, MIPSI_DADDU, tmp1, key, type);
+      }
+#endif
+    }
+  }
+}
+
+static void asm_hrefk(ASMState *as, IRIns *ir)
+{
+  IRIns *kslot = IR(ir->op2);
+  IRIns *irkey = IR(kslot->op1);
+  int32_t ofs = (int32_t)(kslot->op2 * sizeof(Node));
+  int32_t kofs = ofs + (int32_t)offsetof(Node, key);
+  Reg dest = (ra_used(ir)||ofs > 32736) ? ra_dest(as, ir, RSET_GPR) : RID_NONE;
+  Reg node = ra_alloc1(as, ir->op1, RSET_GPR);
+  RegSet allow = rset_exclude(RSET_GPR, node);
+  Reg idx = node;
+#if LJ_32
+  Reg key = RID_NONE, type = RID_TMP;
+  int32_t lo, hi;
+#else
+  Reg key = ra_scratch(as, allow);
+  int64_t k;
+#endif
+  lj_assertA(ofs % sizeof(Node) == 0, "unaligned HREFK slot");
+  if (ofs > 32736) {
+    idx = dest;
+    rset_clear(allow, dest);
+    kofs = (int32_t)offsetof(Node, key);
+  } else if (ra_hasreg(dest)) {
+    emit_tsi(as, MIPSI_AADDIU, dest, node, ofs);
+  }
+#if LJ_32
+  if (!irt_ispri(irkey->t)) {
+    key = ra_scratch(as, allow);
+    rset_clear(allow, key);
+  }
+  if (irt_isnum(irkey->t)) {
+    lo = (int32_t)ir_knum(irkey)->u32.lo;
+    hi = (int32_t)ir_knum(irkey)->u32.hi;
+  } else
