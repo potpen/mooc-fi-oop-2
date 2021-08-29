@@ -1215,4 +1215,49 @@ static void asm_uref(ASMState *as, IRIns *ir)
     Reg uv = ra_scratch(as, RSET_GPR);
     Reg func = ra_alloc1(as, ir->op1, RSET_GPR);
     if (ir->o == IR_UREFC) {
-      asm_guard(as, MIPSI_BEQ, RID_TMP, R
+      asm_guard(as, MIPSI_BEQ, RID_TMP, RID_ZERO);
+      emit_tsi(as, MIPSI_AADDIU, dest, uv, (int32_t)offsetof(GCupval, tv));
+      emit_tsi(as, MIPSI_LBU, RID_TMP, uv, (int32_t)offsetof(GCupval, closed));
+    } else {
+      emit_tsi(as, MIPSI_AL, dest, uv, (int32_t)offsetof(GCupval, v));
+    }
+    emit_tsi(as, MIPSI_AL, uv, func, (int32_t)offsetof(GCfuncL, uvptr) +
+	     (int32_t)sizeof(MRef) * (int32_t)(ir->op2 >> 8));
+  }
+}
+
+static void asm_fref(ASMState *as, IRIns *ir)
+{
+  UNUSED(as); UNUSED(ir);
+  lj_assertA(!ra_used(ir), "unfused FREF");
+}
+
+static void asm_strref(ASMState *as, IRIns *ir)
+{
+#if LJ_32
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  IRRef ref = ir->op2, refk = ir->op1;
+  int32_t ofs = (int32_t)sizeof(GCstr);
+  Reg r;
+  if (irref_isk(ref)) {
+    IRRef tmp = refk; refk = ref; ref = tmp;
+  } else if (!irref_isk(refk)) {
+    Reg right, left = ra_alloc1(as, ir->op1, RSET_GPR);
+    IRIns *irr = IR(ir->op2);
+    if (ra_hasreg(irr->r)) {
+      ra_noweak(as, irr->r);
+      right = irr->r;
+    } else if (mayfuse(as, irr->op2) &&
+	       irr->o == IR_ADD && irref_isk(irr->op2) &&
+	       checki16(ofs + IR(irr->op2)->i)) {
+      ofs += IR(irr->op2)->i;
+      right = ra_alloc1(as, irr->op1, rset_exclude(RSET_GPR, left));
+    } else {
+      right = ra_allocref(as, ir->op2, rset_exclude(RSET_GPR, left));
+    }
+    emit_tsi(as, MIPSI_ADDIU, dest, dest, ofs);
+    emit_dst(as, MIPSI_ADDU, dest, left, right);
+    return;
+  }
+  r = ra_alloc1(as, ref, RSET_GPR);
+  ofs += IR(r
