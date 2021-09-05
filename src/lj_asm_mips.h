@@ -1260,4 +1260,52 @@ static void asm_strref(ASMState *as, IRIns *ir)
     return;
   }
   r = ra_alloc1(as, ref, RSET_GPR);
-  ofs += IR(r
+  ofs += IR(refk)->i;
+  if (checki16(ofs))
+    emit_tsi(as, MIPSI_ADDIU, dest, r, ofs);
+  else
+    emit_dst(as, MIPSI_ADDU, dest, r,
+	     ra_allock(as, ofs, rset_exclude(RSET_GPR, r)));
+#else
+  RegSet allow = RSET_GPR;
+  Reg dest = ra_dest(as, ir, allow);
+  Reg base = ra_alloc1(as, ir->op1, allow);
+  IRIns *irr = IR(ir->op2);
+  int32_t ofs = sizeof(GCstr);
+  rset_clear(allow, base);
+  if (irref_isk(ir->op2) && checki16(ofs + irr->i)) {
+    emit_tsi(as, MIPSI_DADDIU, dest, base, ofs + irr->i);
+  } else {
+    emit_tsi(as, MIPSI_DADDIU, dest, dest, ofs);
+    emit_dst(as, MIPSI_DADDU, dest, base, ra_alloc1(as, ir->op2, allow));
+  }
+#endif
+}
+
+/* -- Loads and stores ---------------------------------------------------- */
+
+static MIPSIns asm_fxloadins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as);
+  switch (irt_type(ir->t)) {
+  case IRT_I8: return MIPSI_LB;
+  case IRT_U8: return MIPSI_LBU;
+  case IRT_I16: return MIPSI_LH;
+  case IRT_U16: return MIPSI_LHU;
+  case IRT_NUM:
+    lj_assertA(!LJ_SOFTFP32, "unsplit FP op");
+    if (!LJ_SOFTFP) return MIPSI_LDC1;
+  /* fallthrough */
+  case IRT_FLOAT: if (!LJ_SOFTFP) return MIPSI_LWC1;
+  /* fallthrough */
+  default: return (LJ_64 && irt_is64(ir->t)) ? MIPSI_LD : MIPSI_LW;
+  }
+}
+
+static MIPSIns asm_fxstoreins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as);
+  switch (irt_type(ir->t)) {
+  case IRT_I8: case IRT_U8: return MIPSI_SB;
+  case IRT_I16: case IRT_U16: return MIPSI_SH;
+  cas
