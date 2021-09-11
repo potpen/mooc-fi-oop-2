@@ -1308,4 +1308,52 @@ static MIPSIns asm_fxstoreins(ASMState *as, IRIns *ir)
   switch (irt_type(ir->t)) {
   case IRT_I8: case IRT_U8: return MIPSI_SB;
   case IRT_I16: case IRT_U16: return MIPSI_SH;
-  cas
+  case IRT_NUM:
+    lj_assertA(!LJ_SOFTFP32, "unsplit FP op");
+    if (!LJ_SOFTFP) return MIPSI_SDC1;
+  /* fallthrough */
+  case IRT_FLOAT: if (!LJ_SOFTFP) return MIPSI_SWC1;
+  /* fallthrough */
+  default: return (LJ_64 && irt_is64(ir->t)) ? MIPSI_SD : MIPSI_SW;
+  }
+}
+
+static void asm_fload(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  MIPSIns mi = asm_fxloadins(as, ir);
+  Reg idx;
+  int32_t ofs;
+  if (ir->op1 == REF_NIL) {  /* FLOAD from GG_State with offset. */
+    idx = RID_JGL;
+    ofs = (ir->op2 << 2) - 32768 - GG_OFS(g);
+  } else {
+    idx = ra_alloc1(as, ir->op1, RSET_GPR);
+    if (ir->op2 == IRFL_TAB_ARRAY) {
+      ofs = asm_fuseabase(as, ir->op1);
+      if (ofs) {  /* Turn the t->array load into an add for colocated arrays. */
+	emit_tsi(as, MIPSI_AADDIU, dest, idx, ofs);
+	return;
+      }
+    }
+    ofs = field_ofs[ir->op2];
+  }
+  lj_assertA(!irt_isfp(ir->t), "bad FP FLOAD");
+  emit_tsi(as, mi, dest, idx, ofs);
+}
+
+static void asm_fstore(ASMState *as, IRIns *ir)
+{
+  if (ir->r != RID_SINK) {
+    Reg src = ra_alloc1z(as, ir->op2, RSET_GPR);
+    IRIns *irf = IR(ir->op1);
+    Reg idx = ra_alloc1(as, irf->op1, rset_exclude(RSET_GPR, src));
+    int32_t ofs = field_ofs[irf->op2];
+    MIPSIns mi = asm_fxstoreins(as, ir);
+    lj_assertA(!irt_isfp(ir->t), "bad FP FSTORE");
+    emit_tsi(as, mi, src, idx, ofs);
+  }
+}
+
+static void asm_xload(ASMState *as, IRIns *ir)
+{
