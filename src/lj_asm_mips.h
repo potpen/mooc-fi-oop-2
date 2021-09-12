@@ -1357,3 +1357,50 @@ static void asm_fstore(ASMState *as, IRIns *ir)
 
 static void asm_xload(ASMState *as, IRIns *ir)
 {
+  Reg dest = ra_dest(as, ir,
+    (!LJ_SOFTFP && irt_isfp(ir->t)) ? RSET_FPR : RSET_GPR);
+  lj_assertA(LJ_TARGET_UNALIGNED || !(ir->op2 & IRXLOAD_UNALIGNED),
+	     "unaligned XLOAD");
+  asm_fusexref(as, asm_fxloadins(as, ir), dest, ir->op1, RSET_GPR, 0);
+}
+
+static void asm_xstore_(ASMState *as, IRIns *ir, int32_t ofs)
+{
+  if (ir->r != RID_SINK) {
+    Reg src = ra_alloc1z(as, ir->op2,
+      (!LJ_SOFTFP && irt_isfp(ir->t)) ? RSET_FPR : RSET_GPR);
+    asm_fusexref(as, asm_fxstoreins(as, ir), src, ir->op1,
+		 rset_exclude(RSET_GPR, src), ofs);
+  }
+}
+
+#define asm_xstore(as, ir)	asm_xstore_(as, ir, 0)
+
+static void asm_ahuvload(ASMState *as, IRIns *ir)
+{
+  int hiop = (LJ_SOFTFP32 && (ir+1)->o == IR_HIOP);
+  Reg dest = RID_NONE, type = RID_TMP, idx;
+  RegSet allow = RSET_GPR;
+  int32_t ofs = 0;
+  IRType1 t = ir->t;
+  if (hiop) {
+    t.irt = IRT_NUM;
+    if (ra_used(ir+1)) {
+      type = ra_dest(as, ir+1, allow);
+      rset_clear(allow, type);
+    }
+  }
+  if (ra_used(ir)) {
+    lj_assertA((LJ_SOFTFP32 ? 0 : irt_isnum(ir->t)) ||
+	       irt_isint(ir->t) || irt_isaddr(ir->t),
+	       "bad load type %d", irt_type(ir->t));
+    dest = ra_dest(as, ir, (!LJ_SOFTFP && irt_isnum(t)) ? RSET_FPR : allow);
+    rset_clear(allow, dest);
+#if LJ_64
+    if (irt_isaddr(t))
+      emit_tsml(as, MIPSI_DEXTM, dest, dest, 14, 0);
+    else if (irt_isint(t))
+      emit_dta(as, MIPSI_SLL, dest, dest, 0);
+#endif
+  }
+  idx = asm_fuseahuref(as, ir->op1,
