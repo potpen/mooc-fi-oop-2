@@ -1403,4 +1403,52 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
       emit_dta(as, MIPSI_SLL, dest, dest, 0);
 #endif
   }
-  idx = asm_fuseahuref(as, ir->op1,
+  idx = asm_fuseahuref(as, ir->op1, &ofs, allow);
+  if (ir->o == IR_VLOAD) ofs += 8 * ir->op2;
+  rset_clear(allow, idx);
+  if (irt_isnum(t)) {
+    asm_guard(as, MIPSI_BEQ, RID_TMP, RID_ZERO);
+    emit_tsi(as, MIPSI_SLTIU, RID_TMP, type, (int32_t)LJ_TISNUM);
+  } else {
+    asm_guard(as, MIPSI_BNE, type,
+	      ra_allock(as, (int32_t)irt_toitype(t), allow));
+  }
+#if LJ_32
+  if (ra_hasreg(dest)) {
+    if (!LJ_SOFTFP && irt_isnum(t))
+      emit_hsi(as, MIPSI_LDC1, dest, idx, ofs);
+    else
+      emit_tsi(as, MIPSI_LW, dest, idx, ofs+(LJ_BE?4:0));
+  }
+  emit_tsi(as, MIPSI_LW, type, idx, ofs+(LJ_BE?0:4));
+#else
+  if (ra_hasreg(dest)) {
+    if (!LJ_SOFTFP && irt_isnum(t)) {
+      emit_hsi(as, MIPSI_LDC1, dest, idx, ofs);
+      dest = type;
+    }
+  } else {
+    dest = type;
+  }
+  emit_dta(as, MIPSI_DSRA32, type, dest, 15);
+  emit_tsi(as, MIPSI_LD, dest, idx, ofs);
+#endif
+}
+
+static void asm_ahustore(ASMState *as, IRIns *ir)
+{
+  RegSet allow = RSET_GPR;
+  Reg idx, src = RID_NONE, type = RID_NONE;
+  int32_t ofs = 0;
+  if (ir->r == RID_SINK)
+    return;
+  if (!LJ_SOFTFP32 && irt_isnum(ir->t)) {
+    src = ra_alloc1(as, ir->op2, LJ_SOFTFP ? RSET_GPR : RSET_FPR);
+    idx = asm_fuseahuref(as, ir->op1, &ofs, allow);
+    emit_hsi(as, LJ_SOFTFP ? MIPSI_SD : MIPSI_SDC1, src, idx, ofs);
+  } else {
+#if LJ_32
+    if (!irt_ispri(ir->t)) {
+      src = ra_alloc1(as, ir->op2, allow);
+      rset_clear(allow, src);
+   
