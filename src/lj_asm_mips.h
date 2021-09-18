@@ -1497,4 +1497,39 @@ static void asm_sload(ASMState *as, IRIns *ir)
   if (hiop)
     t.irt = IRT_NUM;
 #else
-  int32_
+  int32_t ofs = 8*((int32_t)ir->op1-2);
+#endif
+  lj_assertA(!(ir->op2 & IRSLOAD_PARENT),
+	     "bad parent SLOAD");  /* Handled by asm_head_side(). */
+  lj_assertA(irt_isguard(ir->t) || !(ir->op2 & IRSLOAD_TYPECHECK),
+	     "inconsistent SLOAD variant");
+#if LJ_SOFTFP32
+  lj_assertA(!(ir->op2 & IRSLOAD_CONVERT),
+	     "unsplit SLOAD convert");  /* Handled by LJ_SOFTFP SPLIT. */
+  if (hiop && ra_used(ir+1)) {
+    type = ra_dest(as, ir+1, allow);
+    rset_clear(allow, type);
+  }
+#else
+  if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
+    dest = ra_scratch(as, LJ_SOFTFP ? allow : RSET_FPR);
+    asm_tointg(as, ir, dest);
+    t.irt = IRT_NUM;  /* Continue with a regular number type check. */
+  } else
+#endif
+  if (ra_used(ir)) {
+    lj_assertA((LJ_SOFTFP32 ? 0 : irt_isnum(ir->t)) ||
+	       irt_isint(ir->t) || irt_isaddr(ir->t),
+	       "bad SLOAD type %d", irt_type(ir->t));
+    dest = ra_dest(as, ir, (!LJ_SOFTFP && irt_isnum(t)) ? RSET_FPR : allow);
+    rset_clear(allow, dest);
+    base = ra_alloc1(as, REF_BASE, allow);
+    rset_clear(allow, base);
+    if (!LJ_SOFTFP32 && (ir->op2 & IRSLOAD_CONVERT)) {
+      if (irt_isint(t)) {
+	Reg tmp = ra_scratch(as, LJ_SOFTFP ? RSET_GPR : RSET_FPR);
+#if LJ_SOFTFP
+	ra_evictset(as, rset_exclude(RSET_SCRATCH, dest));
+	ra_destreg(as, ir, RID_RET);
+	emit_call(as, (void *)lj_ir_callinfo[IRCALL_softfp_d2i].func, 0);
+	i
