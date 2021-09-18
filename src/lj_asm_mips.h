@@ -1578,4 +1578,42 @@ dotypecheck:
       emit_tsi(as, MIPSI_SLTIU, RID_TMP, type, (int32_t)LJ_TISNUM);
     } else {
       Reg ktype = ra_allock(as, (ir->op2 & IRSLOAD_KEYINDEX) ? LJ_KEYINDEX : irt_toitype(t), allow);
-      asm_guard(
+      asm_guard(as, MIPSI_BNE, type, ktype);
+    }
+  }
+  if (ra_hasreg(dest)) {
+    if (!LJ_SOFTFP && irt_isnum(t))
+      emit_hsi(as, MIPSI_LDC1, dest, base, ofs);
+    else
+      emit_tsi(as, MIPSI_LW, dest, base, ofs ^ (LJ_BE?4:0));
+  }
+  if (ra_hasreg(type))
+    emit_tsi(as, MIPSI_LW, type, base, ofs ^ (LJ_BE?0:4));
+#else
+  if ((ir->op2 & IRSLOAD_TYPECHECK)) {
+    type = dest < RID_MAX_GPR ? dest : RID_TMP;
+    if (irt_ispri(t)) {
+      asm_guard(as, MIPSI_BNE, type,
+		ra_allock(as, ~((int64_t)~irt_toitype(t) << 47) , allow));
+    } else if ((ir->op2 & IRSLOAD_KEYINDEX)) {
+      asm_guard(as, MIPSI_BNE, RID_TMP,
+		ra_allock(as, (int32_t)LJ_KEYINDEX, allow));
+      emit_dta(as, MIPSI_DSRA32, RID_TMP, type, 0);
+    } else {
+      if (irt_isnum(t)) {
+	asm_guard(as, MIPSI_BEQ, RID_TMP, RID_ZERO);
+	emit_tsi(as, MIPSI_SLTIU, RID_TMP, RID_TMP, (int32_t)LJ_TISNUM);
+	if (!LJ_SOFTFP && ra_hasreg(dest))
+	  emit_hsi(as, MIPSI_LDC1, dest, base, ofs);
+      } else {
+	asm_guard(as, MIPSI_BNE, RID_TMP,
+		  ra_allock(as, (int32_t)irt_toitype(t), allow));
+      }
+      emit_dta(as, MIPSI_DSRA32, RID_TMP, type, 15);
+    }
+    emit_tsi(as, MIPSI_LD, type, base, ofs);
+  } else if (ra_hasreg(dest)) {
+    if (!LJ_SOFTFP && irt_isnum(t))
+      emit_hsi(as, MIPSI_LDC1, dest, base, ofs);
+    else
+      emit_tsi(as, irt_isint(t) ? MIPSI_LW : MIPSI_LD, des
