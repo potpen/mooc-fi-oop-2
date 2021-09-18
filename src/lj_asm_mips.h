@@ -1532,4 +1532,50 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	ra_evictset(as, rset_exclude(RSET_SCRATCH, dest));
 	ra_destreg(as, ir, RID_RET);
 	emit_call(as, (void *)lj_ir_callinfo[IRCALL_softfp_d2i].func, 0);
-	i
+	if (tmp != REGARG_FIRSTGPR)
+	  emit_move(as, REGARG_FIRSTGPR, tmp);
+#else
+	emit_tg(as, MIPSI_MFC1, dest, tmp);
+	emit_fg(as, MIPSI_TRUNC_W_D, tmp, tmp);
+#endif
+	dest = tmp;
+	t.irt = IRT_NUM;  /* Check for original type. */
+      } else {
+	Reg tmp = ra_scratch(as, RSET_GPR);
+#if LJ_SOFTFP
+	ra_evictset(as, rset_exclude(RSET_SCRATCH, dest));
+	ra_destreg(as, ir, RID_RET);
+	emit_call(as, (void *)lj_ir_callinfo[IRCALL_softfp_i2d].func, 0);
+	emit_dta(as, MIPSI_SLL, REGARG_FIRSTGPR, tmp, 0);
+#else
+	emit_fg(as, MIPSI_CVT_D_W, dest, dest);
+	emit_tg(as, MIPSI_MTC1, tmp, dest);
+#endif
+	dest = tmp;
+	t.irt = IRT_INT;  /* Check for original type. */
+      }
+    }
+#if LJ_64
+    else if (irt_isaddr(t)) {
+      /* Clear type from pointers. */
+      emit_tsml(as, MIPSI_DEXTM, dest, dest, 14, 0);
+    } else if (irt_isint(t) && (ir->op2 & IRSLOAD_TYPECHECK)) {
+      /* Sign-extend integers. */
+      emit_dta(as, MIPSI_SLL, dest, dest, 0);
+    }
+#endif
+    goto dotypecheck;
+  }
+  base = ra_alloc1(as, REF_BASE, allow);
+  rset_clear(allow, base);
+dotypecheck:
+#if LJ_32
+  if ((ir->op2 & IRSLOAD_TYPECHECK)) {
+    if (ra_noreg(type))
+      type = RID_TMP;
+    if (irt_isnum(t)) {
+      asm_guard(as, MIPSI_BEQ, RID_TMP, RID_ZERO);
+      emit_tsi(as, MIPSI_SLTIU, RID_TMP, type, (int32_t)LJ_TISNUM);
+    } else {
+      Reg ktype = ra_allock(as, (ir->op2 & IRSLOAD_KEYINDEX) ? LJ_KEYINDEX : irt_toitype(t), allow);
+      asm_guard(
