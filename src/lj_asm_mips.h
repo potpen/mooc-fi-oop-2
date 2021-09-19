@@ -1731,4 +1731,53 @@ static void asm_obar(ASMState *as, IRIns *ir)
   val = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, obj));
   emit_tsi(as, MIPSI_LBU, tmp, obj,
 	   (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
-  emit_tsi(as, MIPSI_LBU, RID_TMP,
+  emit_tsi(as, MIPSI_LBU, RID_TMP, val, (int32_t)offsetof(GChead, marked));
+}
+
+/* -- Arithmetic and logic operations ------------------------------------- */
+
+#if !LJ_SOFTFP
+static void asm_fparith(ASMState *as, IRIns *ir, MIPSIns mi)
+{
+  Reg dest = ra_dest(as, ir, RSET_FPR);
+  Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+  right = (left >> 8); left &= 255;
+  emit_fgh(as, mi, dest, left, right);
+}
+
+static void asm_fpunary(ASMState *as, IRIns *ir, MIPSIns mi)
+{
+  Reg dest = ra_dest(as, ir, RSET_FPR);
+  Reg left = ra_hintalloc(as, ir->op1, dest, RSET_FPR);
+  emit_fg(as, mi, dest, left);
+}
+#endif
+
+#if !LJ_SOFTFP32
+static void asm_fpmath(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (ir->op2 <= IRFPM_TRUNC)
+    asm_callround(as, ir, IRCALL_lj_vm_floor + ir->op2);
+  else if (ir->op2 == IRFPM_SQRT)
+    asm_fpunary(as, ir, MIPSI_SQRT_D);
+  else
+#endif
+    asm_callid(as, ir, IRCALL_lj_vm_floor + ir->op2);
+}
+#endif
+
+#if !LJ_SOFTFP
+#define asm_fpadd(as, ir)	asm_fparith(as, ir, MIPSI_ADD_D)
+#define asm_fpsub(as, ir)	asm_fparith(as, ir, MIPSI_SUB_D)
+#define asm_fpmul(as, ir)	asm_fparith(as, ir, MIPSI_MUL_D)
+#elif LJ_64  /* && LJ_SOFTFP */
+#define asm_fpadd(as, ir)	asm_callid(as, ir, IRCALL_softfp_add)
+#define asm_fpsub(as, ir)	asm_callid(as, ir, IRCALL_softfp_sub)
+#define asm_fpmul(as, ir)	asm_callid(as, ir, IRCALL_softfp_mul)
+#endif
+
+static void asm_add(ASMState *as, IRIns *ir)
+{
+  IRType1 t = ir->t;
+#if !LJ_SOFTFP32
