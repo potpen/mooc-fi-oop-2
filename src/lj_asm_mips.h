@@ -1665,4 +1665,38 @@ static void asm_cnew(ASMState *as, IRIns *ir)
     emit_tsi(as, sz == 8 ? MIPSI_SD : MIPSI_SW, ra_alloc1(as, ir->op2, allow),
 	     RID_RET, sizeof(GCcdata));
 #endif
-    lj_asse
+    lj_assertA(sz == 4 || sz == 8, "bad CNEWI size %d", sz);
+  } else if (ir->op2 != REF_NIL) {  /* Create VLA/VLS/aligned cdata. */
+    ci = &lj_ir_callinfo[IRCALL_lj_cdata_newv];
+    args[0] = ASMREF_L;     /* lua_State *L */
+    args[1] = ir->op1;      /* CTypeID id   */
+    args[2] = ir->op2;      /* CTSize sz    */
+    args[3] = ASMREF_TMP1;  /* CTSize align */
+    asm_gencall(as, ci, args);
+    emit_loadi(as, ra_releasetmp(as, ASMREF_TMP1), (int32_t)ctype_align(info));
+    return;
+  }
+
+  /* Initialize gct and ctypeid. lj_mem_newgco() already sets marked. */
+  emit_tsi(as, MIPSI_SB, RID_RET+1, RID_RET, offsetof(GCcdata, gct));
+  emit_tsi(as, MIPSI_SH, RID_TMP, RID_RET, offsetof(GCcdata, ctypeid));
+  emit_ti(as, MIPSI_LI, RID_RET+1, ~LJ_TCDATA);
+  emit_ti(as, MIPSI_LI, RID_TMP, id); /* Lower 16 bit used. Sign-ext ok. */
+  args[0] = ASMREF_L;     /* lua_State *L */
+  args[1] = ASMREF_TMP1;  /* MSize size   */
+  asm_gencall(as, ci, args);
+  ra_allockreg(as, (int32_t)(sz+sizeof(GCcdata)),
+	       ra_releasetmp(as, ASMREF_TMP1));
+}
+#endif
+
+/* -- Write barriers ------------------------------------------------------ */
+
+static void asm_tbar(ASMState *as, IRIns *ir)
+{
+  Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
+  Reg mark = ra_scratch(as, rset_exclude(RSET_GPR, tab));
+  Reg link = RID_TMP;
+  MCLabel l_end = emit_label(as);
+  emit_tsi(as, MIPSI_AS, link, tab, (int32_t)offsetof(GCtab, gclist));
+  emit_tsi(as, MIP
