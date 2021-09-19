@@ -1616,4 +1616,53 @@ dotypecheck:
     if (!LJ_SOFTFP && irt_isnum(t))
       emit_hsi(as, MIPSI_LDC1, dest, base, ofs);
     else
-      emit_tsi(as, irt_isint(t) ? MIPSI_LW : MIPSI_LD, des
+      emit_tsi(as, irt_isint(t) ? MIPSI_LW : MIPSI_LD, dest, base,
+	       ofs ^ ((LJ_BE && irt_isint(t)) ? 4 : 0));
+  }
+#endif
+}
+
+/* -- Allocations --------------------------------------------------------- */
+
+#if LJ_HASFFI
+static void asm_cnew(ASMState *as, IRIns *ir)
+{
+  CTState *cts = ctype_ctsG(J2G(as->J));
+  CTypeID id = (CTypeID)IR(ir->op1)->i;
+  CTSize sz;
+  CTInfo info = lj_ctype_info(cts, id, &sz);
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newgco];
+  IRRef args[4];
+  RegSet drop = RSET_SCRATCH;
+  lj_assertA(sz != CTSIZE_INVALID || (ir->o == IR_CNEW && ir->op2 != REF_NIL),
+	     "bad CNEW/CNEWI operands");
+
+  as->gcsteps++;
+  if (ra_hasreg(ir->r))
+    rset_clear(drop, ir->r);  /* Dest reg handled below. */
+  ra_evictset(as, drop);
+  if (ra_used(ir))
+    ra_destreg(as, ir, RID_RET);  /* GCcdata * */
+
+  /* Initialize immutable cdata object. */
+  if (ir->o == IR_CNEWI) {
+    RegSet allow = (RSET_GPR & ~RSET_SCRATCH);
+#if LJ_32
+    int32_t ofs = sizeof(GCcdata);
+    if (sz == 8) {
+      ofs += 4;
+      lj_assertA((ir+1)->o == IR_HIOP, "expected HIOP for CNEWI");
+      if (LJ_LE) ir++;
+    }
+    for (;;) {
+      Reg r = ra_alloc1z(as, ir->op2, allow);
+      emit_tsi(as, MIPSI_SW, r, RID_RET, ofs);
+      rset_clear(allow, r);
+      if (ofs == sizeof(GCcdata)) break;
+      ofs -= 4; if (LJ_BE) ir++; else ir--;
+    }
+#else
+    emit_tsi(as, sz == 8 ? MIPSI_SD : MIPSI_SW, ra_alloc1(as, ir->op2, allow),
+	     RID_RET, sizeof(GCcdata));
+#endif
+    lj_asse
