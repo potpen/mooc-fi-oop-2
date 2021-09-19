@@ -1699,4 +1699,36 @@ static void asm_tbar(ASMState *as, IRIns *ir)
   Reg link = RID_TMP;
   MCLabel l_end = emit_label(as);
   emit_tsi(as, MIPSI_AS, link, tab, (int32_t)offsetof(GCtab, gclist));
-  emit_tsi(as, MIP
+  emit_tsi(as, MIPSI_SB, mark, tab, (int32_t)offsetof(GCtab, marked));
+  emit_setgl(as, tab, gc.grayagain);
+  emit_getgl(as, link, gc.grayagain);
+  emit_dst(as, MIPSI_XOR, mark, mark, RID_TMP);  /* Clear black bit. */
+  emit_branch(as, MIPSI_BEQ, RID_TMP, RID_ZERO, l_end);
+  emit_tsi(as, MIPSI_ANDI, RID_TMP, mark, LJ_GC_BLACK);
+  emit_tsi(as, MIPSI_LBU, mark, tab, (int32_t)offsetof(GCtab, marked));
+}
+
+static void asm_obar(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_barrieruv];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg obj, val, tmp;
+  /* No need for other object barriers (yet). */
+  lj_assertA(IR(ir->op1)->o == IR_UREFC, "bad OBAR type");
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ir->op1;      /* TValue *tv      */
+  asm_gencall(as, ci, args);
+  emit_tsi(as, MIPSI_AADDIU, ra_releasetmp(as, ASMREF_TMP1), RID_JGL, -32768);
+  obj = IR(ir->op1)->r;
+  tmp = ra_scratch(as, rset_exclude(RSET_GPR, obj));
+  emit_branch(as, MIPSI_BEQ, RID_TMP, RID_ZERO, l_end);
+  emit_tsi(as, MIPSI_ANDI, tmp, tmp, LJ_GC_BLACK);
+  emit_branch(as, MIPSI_BEQ, RID_TMP, RID_ZERO, l_end);
+  emit_tsi(as, MIPSI_ANDI, RID_TMP, RID_TMP, LJ_GC_WHITES);
+  val = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, obj));
+  emit_tsi(as, MIPSI_LBU, tmp, obj,
+	   (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
+  emit_tsi(as, MIPSI_LBU, RID_TMP,
