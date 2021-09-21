@@ -1781,3 +1781,56 @@ static void asm_add(ASMState *as, IRIns *ir)
 {
   IRType1 t = ir->t;
 #if !LJ_SOFTFP32
+  if (irt_isnum(t)) {
+    asm_fpadd(as, ir);
+  } else
+#endif
+  {
+    /* TODO MIPSR6: Fuse ADD(BSHL(a,1-4),b) or ADD(ADD(a,a),b) to MIPSI_ALSA. */
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg right, left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+    if (irref_isk(ir->op2)) {
+      intptr_t k = get_kval(as, ir->op2);
+      if (checki16(k)) {
+	emit_tsi(as, (LJ_64 && irt_is64(t)) ? MIPSI_DADDIU : MIPSI_ADDIU, dest,
+		 left, k);
+	return;
+      }
+    }
+    right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+    emit_dst(as, (LJ_64 && irt_is64(t)) ? MIPSI_DADDU : MIPSI_ADDU, dest,
+	     left, right);
+  }
+}
+
+static void asm_sub(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP32
+  if (irt_isnum(ir->t)) {
+    asm_fpsub(as, ir);
+  } else
+#endif
+  {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+    right = (left >> 8); left &= 255;
+    emit_dst(as, (LJ_64 && irt_is64(ir->t)) ? MIPSI_DSUBU : MIPSI_SUBU, dest,
+	     left, right);
+  }
+}
+
+static void asm_mul(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP32
+  if (irt_isnum(ir->t)) {
+    asm_fpmul(as, ir);
+  } else
+#endif
+  {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+    right = (left >> 8); left &= 255;
+    if (LJ_64 && irt_is64(ir->t)) {
+#if !LJ_TARGET_MIPSR6
+      emit_dst(as, MIPSI_MFLO, dest, 0, 0);
+      emit_dst(as, MI
