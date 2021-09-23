@@ -1833,4 +1833,60 @@ static void asm_mul(ASMState *as, IRIns *ir)
     if (LJ_64 && irt_is64(ir->t)) {
 #if !LJ_TARGET_MIPSR6
       emit_dst(as, MIPSI_MFLO, dest, 0, 0);
-      emit_dst(as, MI
+      emit_dst(as, MIPSI_DMULT, 0, left, right);
+#else
+      emit_dst(as, MIPSI_DMUL, dest, left, right);
+#endif
+    } else {
+      emit_dst(as, MIPSI_MUL, dest, left, right);
+    }
+  }
+}
+
+#if !LJ_SOFTFP32
+static void asm_fpdiv(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+    asm_fparith(as, ir, MIPSI_DIV_D);
+#else
+    asm_callid(as, ir, IRCALL_softfp_div);
+#endif
+}
+#endif
+
+static void asm_neg(ASMState *as, IRIns *ir)
+{
+#if !LJ_SOFTFP
+  if (irt_isnum(ir->t)) {
+    asm_fpunary(as, ir, MIPSI_NEG_D);
+  } else
+#elif LJ_64  /* && LJ_SOFTFP */
+  if (irt_isnum(ir->t)) {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+    emit_dst(as, MIPSI_XOR, dest, left,
+	    ra_allock(as, 0x8000000000000000ll, rset_exclude(RSET_GPR, dest)));
+  } else
+#endif
+  {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+    emit_dst(as, (LJ_64 && irt_is64(ir->t)) ? MIPSI_DSUBU : MIPSI_SUBU, dest,
+	     RID_ZERO, left);
+  }
+}
+
+#if !LJ_SOFTFP
+#define asm_abs(as, ir)		asm_fpunary(as, ir, MIPSI_ABS_D)
+#elif LJ_64   /* && LJ_SOFTFP */
+static void asm_abs(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+  emit_tsml(as, MIPSI_DEXTM, dest, left, 30, 0);
+}
+#endif
+
+static void asm_arithov(ASMState *as, IRIns *ir)
+{
+  /* 
