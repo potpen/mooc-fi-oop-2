@@ -2004,4 +2004,51 @@ static void asm_sub64(ASMState *as, IRIns *ir)
   ir--;
   dest = ra_dest(as, ir, RSET_GPR);
   left = ra_alloc2(as, ir, RSET_GPR);
-  right = (left >> 8); l
+  right = (left >> 8); left &= 255;
+  if (dest == left) {
+    Reg tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_GPR, left), right));
+    emit_move(as, dest, tmp);
+    dest = tmp;
+  }
+  emit_dst(as, MIPSI_SLTU, RID_TMP, left, dest);
+  emit_dst(as, MIPSI_SUBU, dest, left, right);
+}
+
+static void asm_neg64(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+  emit_dst(as, MIPSI_SUBU, dest, dest, RID_TMP);
+  emit_dst(as, MIPSI_SUBU, dest, RID_ZERO, left);
+  ir--;
+  dest = ra_dest(as, ir, RSET_GPR);
+  left = ra_alloc1(as, ir->op1, RSET_GPR);
+  emit_dst(as, MIPSI_SLTU, RID_TMP, RID_ZERO, dest);
+  emit_dst(as, MIPSI_SUBU, dest, RID_ZERO, left);
+}
+#endif
+
+static void asm_bnot(ASMState *as, IRIns *ir)
+{
+  Reg left, right, dest = ra_dest(as, ir, RSET_GPR);
+  IRIns *irl = IR(ir->op1);
+  if (mayfuse(as, ir->op1) && irl->o == IR_BOR) {
+    left = ra_alloc2(as, irl, RSET_GPR);
+    right = (left >> 8); left &= 255;
+  } else {
+    left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+    right = RID_ZERO;
+  }
+  emit_dst(as, MIPSI_NOR, dest, left, right);
+}
+
+static void asm_bswap(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg left = ra_alloc1(as, ir->op1, RSET_GPR);
+#if LJ_32
+  if ((as->flags & JIT_F_MIPSXXR2)) {
+    emit_dta(as, MIPSI_ROTR, dest, RID_TMP, 16);
+    emit_dst(as, MIPSI_WSBH, RID_TMP, 0, left);
+  } else {
+    Reg tmp = ra_scratch(as, rset_exclude(rset_exclu
