@@ -1889,4 +1889,32 @@ static void asm_abs(ASMState *as, IRIns *ir)
 
 static void asm_arithov(ASMState *as, IRIns *ir)
 {
-  /* 
+  /* TODO MIPSR6: bovc/bnvc. Caveat: no delay slot to load RID_TMP. */
+  Reg right, left, tmp, dest = ra_dest(as, ir, RSET_GPR);
+  lj_assertA(!irt_is64(ir->t), "bad usage");
+  if (irref_isk(ir->op2)) {
+    int k = IR(ir->op2)->i;
+    if (ir->o == IR_SUBOV) k = (int)(~(unsigned int)k+1u);
+    if (checki16(k)) {  /* (dest < left) == (k >= 0 ? 1 : 0) */
+      left = ra_alloc1(as, ir->op1, RSET_GPR);
+      asm_guard(as, k >= 0 ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
+      emit_dst(as, MIPSI_SLT, RID_TMP, dest, dest == left ? RID_TMP : left);
+      emit_tsi(as, MIPSI_ADDIU, dest, left, k);
+      if (dest == left) emit_move(as, RID_TMP, left);
+      return;
+    }
+  }
+  left = ra_alloc2(as, ir, RSET_GPR);
+  right = (left >> 8); left &= 255;
+  tmp = ra_scratch(as, rset_exclude(rset_exclude(rset_exclude(RSET_GPR, left),
+						 right), dest));
+  asm_guard(as, MIPSI_BLTZ, RID_TMP, 0);
+  emit_dst(as, MIPSI_AND, RID_TMP, RID_TMP, tmp);
+  if (ir->o == IR_ADDOV) {  /* ((dest^left) & (dest^right)) < 0 */
+    emit_dst(as, MIPSI_XOR, RID_TMP, dest, dest == right ? RID_TMP : right);
+  } else {  /* ((dest^left) & (dest^~right)) < 0 */
+    emit_dst(as, MIPSI_XOR, RID_TMP, RID_TMP, dest);
+    emit_dst(as, MIPSI_NOR, RID_TMP, dest == right ? RID_TMP : right, RID_ZERO);
+  }
+  emit_dst(as, MIPSI_XOR, tmp, dest, dest == left ? RID_TMP : left);
+  emit_dst(as, ir->o == IR_ADDOV ? MIPSI_ADD
