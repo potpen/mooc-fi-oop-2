@@ -1961,4 +1961,47 @@ static void asm_add64(ASMState *as, IRIns *ir)
     }
   }
   emit_dst(as, MIPSI_ADDU, dest, dest, RID_TMP);
-  right = 
+  right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  emit_dst(as, MIPSI_ADDU, dest, left, right);
+loarith:
+  ir--;
+  dest = ra_dest(as, ir, RSET_GPR);
+  left = ra_alloc1(as, ir->op1, RSET_GPR);
+  if (irref_isk(ir->op2)) {
+    int32_t k = IR(ir->op2)->i;
+    if (k == 0) {
+      if (dest != left)
+	emit_move(as, dest, left);
+      return;
+    } else if (checki16(k)) {
+      if (dest == left) {
+	Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, left));
+	emit_move(as, dest, tmp);
+	dest = tmp;
+      }
+      emit_dst(as, MIPSI_SLTU, RID_TMP, dest, left);
+      emit_tsi(as, MIPSI_ADDIU, dest, left, k);
+      return;
+    }
+  }
+  right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  if (dest == left && dest == right) {
+    Reg tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_GPR, left), right));
+    emit_move(as, dest, tmp);
+    dest = tmp;
+  }
+  emit_dst(as, MIPSI_SLTU, RID_TMP, dest, dest == left ? right : left);
+  emit_dst(as, MIPSI_ADDU, dest, left, right);
+}
+
+static void asm_sub64(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+  right = (left >> 8); left &= 255;
+  emit_dst(as, MIPSI_SUBU, dest, dest, RID_TMP);
+  emit_dst(as, MIPSI_SUBU, dest, left, right);
+  ir--;
+  dest = ra_dest(as, ir, RSET_GPR);
+  left = ra_alloc2(as, ir, RSET_GPR);
+  right = (left >> 8); l
