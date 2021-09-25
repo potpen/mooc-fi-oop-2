@@ -1917,4 +1917,48 @@ static void asm_arithov(ASMState *as, IRIns *ir)
     emit_dst(as, MIPSI_NOR, RID_TMP, dest == right ? RID_TMP : right, RID_ZERO);
   }
   emit_dst(as, MIPSI_XOR, tmp, dest, dest == left ? RID_TMP : left);
-  emit_dst(as, ir->o == IR_ADDOV ? MIPSI_ADD
+  emit_dst(as, ir->o == IR_ADDOV ? MIPSI_ADDU : MIPSI_SUBU, dest, left, right);
+  if (dest == left || dest == right)
+    emit_move(as, RID_TMP, dest == left ? left : right);
+}
+
+#define asm_addov(as, ir)	asm_arithov(as, ir)
+#define asm_subov(as, ir)	asm_arithov(as, ir)
+
+static void asm_mulov(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg tmp, right, left = ra_alloc2(as, ir, RSET_GPR);
+  right = (left >> 8); left &= 255;
+  tmp = ra_scratch(as, rset_exclude(rset_exclude(rset_exclude(RSET_GPR, left),
+						 right), dest));
+  asm_guard(as, MIPSI_BNE, RID_TMP, tmp);
+  emit_dta(as, MIPSI_SRA, RID_TMP, dest, 31);
+#if !LJ_TARGET_MIPSR6
+  emit_dst(as, MIPSI_MFHI, tmp, 0, 0);
+  emit_dst(as, MIPSI_MFLO, dest, 0, 0);
+  emit_dst(as, MIPSI_MULT, 0, left, right);
+#else
+  emit_dst(as, MIPSI_MUL, dest, left, right);
+  emit_dst(as, MIPSI_MUH, tmp, left, right);
+#endif
+}
+
+#if LJ_32 && LJ_HASFFI
+static void asm_add64(ASMState *as, IRIns *ir)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg right, left = ra_alloc1(as, ir->op1, RSET_GPR);
+  if (irref_isk(ir->op2)) {
+    int32_t k = IR(ir->op2)->i;
+    if (k == 0) {
+      emit_dst(as, MIPSI_ADDU, dest, left, RID_TMP);
+      goto loarith;
+    } else if (checki16(k)) {
+      emit_dst(as, MIPSI_ADDU, dest, dest, RID_TMP);
+      emit_tsi(as, MIPSI_ADDIU, dest, left, k);
+      goto loarith;
+    }
+  }
+  emit_dst(as, MIPSI_ADDU, dest, dest, RID_TMP);
+  right = 
