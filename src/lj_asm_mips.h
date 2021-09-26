@@ -2051,4 +2051,45 @@ static void asm_bswap(ASMState *as, IRIns *ir)
     emit_dta(as, MIPSI_ROTR, dest, RID_TMP, 16);
     emit_dst(as, MIPSI_WSBH, RID_TMP, 0, left);
   } else {
-    Reg tmp = ra_scratch(as, rset_exclude(rset_exclu
+    Reg tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_GPR, left), dest));
+    emit_dst(as, MIPSI_OR, dest, dest, tmp);
+    emit_dst(as, MIPSI_OR, dest, dest, RID_TMP);
+    emit_tsi(as, MIPSI_ANDI, dest, dest, 0xff00);
+    emit_dta(as, MIPSI_SLL, RID_TMP, RID_TMP, 8);
+    emit_dta(as, MIPSI_SRL, dest, left, 8);
+    emit_tsi(as, MIPSI_ANDI, RID_TMP, left, 0xff00);
+    emit_dst(as, MIPSI_OR, tmp, tmp, RID_TMP);
+    emit_dta(as, MIPSI_SRL, tmp, left, 24);
+    emit_dta(as, MIPSI_SLL, RID_TMP, left, 24);
+  }
+#else
+  if (irt_is64(ir->t)) {
+    emit_dst(as, MIPSI_DSHD, dest, 0, RID_TMP);
+    emit_dst(as, MIPSI_DSBH, RID_TMP, 0, left);
+  } else {
+    emit_dta(as, MIPSI_ROTR, dest, RID_TMP, 16);
+    emit_dst(as, MIPSI_WSBH, RID_TMP, 0, left);
+  }
+#endif
+}
+
+static void asm_bitop(ASMState *as, IRIns *ir, MIPSIns mi, MIPSIns mik)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  Reg right, left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+  if (irref_isk(ir->op2)) {
+    intptr_t k = get_kval(as, ir->op2);
+    if (checku16(k)) {
+      emit_tsi(as, mik, dest, left, k);
+      return;
+    }
+  }
+  right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+  emit_dst(as, mi, dest, left, right);
+}
+
+#define asm_band(as, ir)	asm_bitop(as, ir, MIPSI_AND, MIPSI_ANDI)
+#define asm_bor(as, ir)		asm_bitop(as, ir, MIPSI_OR, MIPSI_ORI)
+#define asm_bxor(as, ir)	asm_bitop(as, ir, MIPSI_XOR, MIPSI_XORI)
+
+static void asm_bitshift(ASMState *as, IRIns *ir, MIPSIns m
