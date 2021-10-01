@@ -2092,4 +2092,38 @@ static void asm_bitop(ASMState *as, IRIns *ir, MIPSIns mi, MIPSIns mik)
 #define asm_bor(as, ir)		asm_bitop(as, ir, MIPSI_OR, MIPSI_ORI)
 #define asm_bxor(as, ir)	asm_bitop(as, ir, MIPSI_XOR, MIPSI_XORI)
 
-static void asm_bitshift(ASMState *as, IRIns *ir, MIPSIns m
+static void asm_bitshift(ASMState *as, IRIns *ir, MIPSIns mi, MIPSIns mik)
+{
+  Reg dest = ra_dest(as, ir, RSET_GPR);
+  if (irref_isk(ir->op2)) {  /* Constant shifts. */
+    uint32_t shift = (uint32_t)IR(ir->op2)->i;
+    if (LJ_64 && irt_is64(ir->t)) mik |= (shift & 32) ? MIPSI_D32 : MIPSI_D;
+    emit_dta(as, mik, dest, ra_hintalloc(as, ir->op1, dest, RSET_GPR),
+	     (shift & 31));
+  } else {
+    Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+    right = (left >> 8); left &= 255;
+    if (LJ_64 && irt_is64(ir->t)) mi |= MIPSI_DV;
+    emit_dst(as, mi, dest, right, left);  /* Shift amount is in rs. */
+  }
+}
+
+#define asm_bshl(as, ir)	asm_bitshift(as, ir, MIPSI_SLLV, MIPSI_SLL)
+#define asm_bshr(as, ir)	asm_bitshift(as, ir, MIPSI_SRLV, MIPSI_SRL)
+#define asm_bsar(as, ir)	asm_bitshift(as, ir, MIPSI_SRAV, MIPSI_SRA)
+#define asm_brol(as, ir)	lj_assertA(0, "unexpected BROL")
+
+static void asm_bror(ASMState *as, IRIns *ir)
+{
+  if (LJ_64 || (as->flags & JIT_F_MIPSXXR2)) {
+    asm_bitshift(as, ir, MIPSI_ROTRV, MIPSI_ROTR);
+  } else {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    if (irref_isk(ir->op2)) {  /* Constant shifts. */
+      uint32_t shift = (uint32_t)(IR(ir->op2)->i & 31);
+      Reg left = ra_hintalloc(as, ir->op1, dest, RSET_GPR);
+      emit_rotr(as, dest, left, RID_TMP, shift);
+    } else {
+      Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+      right = (left >> 8); left &= 255;
+      emit_dst(as, MIPSI_OR, dest, dest
