@@ -2126,4 +2126,56 @@ static void asm_bror(ASMState *as, IRIns *ir)
     } else {
       Reg right, left = ra_alloc2(as, ir, RSET_GPR);
       right = (left >> 8); left &= 255;
-      emit_dst(as, MIPSI_OR, dest, dest
+      emit_dst(as, MIPSI_OR, dest, dest, RID_TMP);
+      emit_dst(as, MIPSI_SRLV, dest, right, left);
+      emit_dst(as, MIPSI_SLLV, RID_TMP, RID_TMP, left);
+      emit_dst(as, MIPSI_SUBU, RID_TMP, ra_allock(as, 32, RSET_GPR), right);
+    }
+  }
+}
+
+#if LJ_SOFTFP
+static void asm_sfpmin_max(ASMState *as, IRIns *ir)
+{
+  CCallInfo ci = lj_ir_callinfo[(IROp)ir->o == IR_MIN ? IRCALL_lj_vm_sfmin : IRCALL_lj_vm_sfmax];
+#if LJ_64
+  IRRef args[2];
+  args[0] = ir->op1;
+  args[1] = ir->op2;
+#else
+  IRRef args[4];
+  args[0^LJ_BE] = ir->op1;
+  args[1^LJ_BE] = (ir+1)->op1;
+  args[2^LJ_BE] = ir->op2;
+  args[3^LJ_BE] = (ir+1)->op2;
+#endif
+  asm_setupresult(as, ir, &ci);
+  emit_call(as, (void *)ci.func, 0);
+  ci.func = NULL;
+  asm_gencall(as, &ci, args);
+}
+#endif
+
+static void asm_min_max(ASMState *as, IRIns *ir, int ismax)
+{
+  if (!LJ_SOFTFP32 && irt_isnum(ir->t)) {
+#if LJ_SOFTFP
+    asm_sfpmin_max(as, ir);
+#else
+    Reg dest = ra_dest(as, ir, RSET_FPR);
+    Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+    right = (left >> 8); left &= 255;
+#if !LJ_TARGET_MIPSR6
+    if (dest == left) {
+      emit_fg(as, MIPSI_MOVF_D, dest, right);
+    } else {
+      emit_fg(as, MIPSI_MOVT_D, dest, left);
+      if (dest != right) emit_fg(as, MIPSI_MOV_D, dest, right);
+    }
+    emit_fgh(as, MIPSI_C_OLT_D, 0, ismax ? right : left, ismax ? left : right);
+#else
+    emit_fgh(as, ismax ? MIPSI_MAX_D : MIPSI_MIN_D, dest, left, right);
+#endif
+#endif
+  } else {
+    Reg dest = ra_dest(as, i
