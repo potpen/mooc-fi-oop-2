@@ -2227,4 +2227,60 @@ static void asm_sfpcomp(ASMState *as, IRIns *ir)
   IRRef args[4];
   args[LJ_LE ? 0 : 1] = ir->op1; args[LJ_LE ? 1 : 0] = (ir+1)->op1;
   args[LJ_LE ? 2 : 3] = ir->op2; args[LJ_LE ? 3 : 2] = (ir+1)->op2;
-#e
+#endif
+
+  for (r = REGARG_FIRSTGPR; r <= REGARG_FIRSTGPR+(LJ_64?1:3); r++) {
+    if (!rset_test(as->freeset, r) &&
+	regcost_ref(as->cost[r]) == args[r-REGARG_FIRSTGPR])
+      rset_clear(drop, r);
+  }
+  ra_evictset(as, drop);
+
+  asm_setupresult(as, ir, ci);
+
+  switch ((IROp)ir->o) {
+  case IR_LT:
+    asm_guard(as, MIPSI_BGEZ, RID_RET, 0);
+    break;
+  case IR_ULT:
+    asm_guard(as, MIPSI_BEQ, RID_RET, RID_TMP);
+    emit_loadi(as, RID_TMP, 1);
+    asm_guard(as, MIPSI_BEQ, RID_RET, RID_ZERO);
+    break;
+  case IR_GE:
+    asm_guard(as, MIPSI_BEQ, RID_RET, RID_TMP);
+    emit_loadi(as, RID_TMP, 2);
+    asm_guard(as, MIPSI_BLTZ, RID_RET, 0);
+    break;
+  case IR_LE:
+    asm_guard(as, MIPSI_BGTZ, RID_RET, 0);
+    break;
+  case IR_GT:
+    asm_guard(as, MIPSI_BEQ, RID_RET, RID_TMP);
+    emit_loadi(as, RID_TMP, 2);
+    asm_guard(as, MIPSI_BLEZ, RID_RET, 0);
+    break;
+  case IR_UGE:
+    asm_guard(as, MIPSI_BLTZ, RID_RET, 0);
+    break;
+  case IR_ULE:
+    asm_guard(as, MIPSI_BEQ, RID_RET, RID_TMP);
+    emit_loadi(as, RID_TMP, 1);
+    break;
+  case IR_UGT: case IR_ABC:
+    asm_guard(as, MIPSI_BLEZ, RID_RET, 0);
+    break;
+  case IR_EQ: case IR_NE:
+    asm_guard(as, (ir->o & 1) ? MIPSI_BEQ : MIPSI_BNE, RID_RET, RID_ZERO);
+  default:
+    break;
+  }
+  asm_gencall(as, ci, args);
+}
+#endif
+
+static void asm_comp(ASMState *as, IRIns *ir)
+{
+  /* ORDER IR: LT GE LE GT  ULT UGE ULE UGT. */
+  IROp op = ir->o;
+  if (!LJ_SOF
