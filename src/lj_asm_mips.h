@@ -2178,4 +2178,53 @@ static void asm_min_max(ASMState *as, IRIns *ir, int ismax)
 #endif
 #endif
   } else {
-    Reg dest = ra_dest(as, i
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    Reg right, left = ra_alloc2(as, ir, RSET_GPR);
+    right = (left >> 8); left &= 255;
+    if (left == right) {
+      if (dest != left) emit_move(as, dest, left);
+    } else {
+#if !LJ_TARGET_MIPSR6
+      if (dest == left) {
+	emit_dst(as, MIPSI_MOVN, dest, right, RID_TMP);
+      } else {
+	emit_dst(as, MIPSI_MOVZ, dest, left, RID_TMP);
+	if (dest != right) emit_move(as, dest, right);
+      }
+#else
+      emit_dst(as, MIPSI_OR, dest, dest, RID_TMP);
+      if (dest != right) {
+	emit_dst(as, MIPSI_SELNEZ, RID_TMP, right, RID_TMP);
+	emit_dst(as, MIPSI_SELEQZ, dest, left, RID_TMP);
+      } else {
+	emit_dst(as, MIPSI_SELEQZ, RID_TMP, left, RID_TMP);
+	emit_dst(as, MIPSI_SELNEZ, dest, right, RID_TMP);
+      }
+#endif
+      emit_dst(as, MIPSI_SLT, RID_TMP,
+	       ismax ? left : right, ismax ? right : left);
+    }
+  }
+}
+
+#define asm_min(as, ir)		asm_min_max(as, ir, 0)
+#define asm_max(as, ir)		asm_min_max(as, ir, 1)
+
+/* -- Comparisons --------------------------------------------------------- */
+
+#if LJ_SOFTFP
+/* SFP comparisons. */
+static void asm_sfpcomp(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_softfp_cmp];
+  RegSet drop = RSET_SCRATCH;
+  Reg r;
+#if LJ_64
+  IRRef args[2];
+  args[0] = ir->op1;
+  args[1] = ir->op2;
+#else
+  IRRef args[4];
+  args[LJ_LE ? 0 : 1] = ir->op1; args[LJ_LE ? 1 : 0] = (ir+1)->op1;
+  args[LJ_LE ? 2 : 3] = ir->op2; args[LJ_LE ? 3 : 2] = (ir+1)->op2;
+#e
