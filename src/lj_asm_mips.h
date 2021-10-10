@@ -2394,4 +2394,55 @@ static void asm_hiop(ASMState *as, IRIns *ir)
   if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
 #if LJ_32 && (LJ_HASFFI || LJ_SOFTFP)
   if ((ir-1)->o == IR_CONV) {  /* Conversions to/from 64 bit. */
-    as->curins--;  /* Always skip th
+    as->curins--;  /* Always skip the CONV. */
+#if LJ_HASFFI && !LJ_SOFTFP
+    if (usehi || uselo)
+      asm_conv64(as, ir);
+    return;
+#endif
+  } else if ((ir-1)->o < IR_EQ) {  /* 64 bit integer comparisons. ORDER IR. */
+    as->curins--;  /* Always skip the loword comparison. */
+#if LJ_SOFTFP
+    if (!irt_isint(ir->t)) {
+      asm_sfpcomp(as, ir-1);
+      return;
+    }
+#endif
+#if LJ_HASFFI
+    asm_comp64(as, ir);
+#endif
+    return;
+  } else if ((ir-1)->o <= IR_NE) {  /* 64 bit integer comparisons. ORDER IR. */
+    as->curins--;  /* Always skip the loword comparison. */
+#if LJ_SOFTFP
+    if (!irt_isint(ir->t)) {
+      asm_sfpcomp(as, ir-1);
+      return;
+    }
+#endif
+#if LJ_HASFFI
+    asm_comp64eq(as, ir);
+#endif
+    return;
+#if LJ_SOFTFP
+  } else if ((ir-1)->o == IR_MIN || (ir-1)->o == IR_MAX) {
+      as->curins--;  /* Always skip the loword min/max. */
+    if (uselo || usehi)
+      asm_sfpmin_max(as, ir-1);
+    return;
+#endif
+  } else if ((ir-1)->o == IR_XSTORE) {
+    as->curins--;  /* Handle both stores here. */
+    if ((ir-1)->r != RID_SINK) {
+      asm_xstore_(as, ir, LJ_LE ? 4 : 0);
+      asm_xstore_(as, ir-1, LJ_LE ? 0 : 4);
+    }
+    return;
+  }
+#endif
+  if (!usehi) return;  /* Skip unused hiword op for all remaining ops. */
+  switch ((ir-1)->o) {
+#if LJ_32 && LJ_HASFFI
+  case IR_ADD: as->curins--; asm_add64(as, ir); break;
+  case IR_SUB: as->curins--; asm_sub64(as, ir); break;
+  case IR_NEG: as->curins--; asm_neg64(as, ir); bre
