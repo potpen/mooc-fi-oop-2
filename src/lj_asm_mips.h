@@ -2283,4 +2283,41 @@ static void asm_comp(ASMState *as, IRIns *ir)
 {
   /* ORDER IR: LT GE LE GT  ULT UGE ULE UGT. */
   IROp op = ir->o;
-  if (!LJ_SOF
+  if (!LJ_SOFTFP32 && irt_isnum(ir->t)) {
+#if LJ_SOFTFP
+    asm_sfpcomp(as, ir);
+#else
+#if !LJ_TARGET_MIPSR6
+    Reg right, left = ra_alloc2(as, ir, RSET_FPR);
+    right = (left >> 8); left &= 255;
+    asm_guard(as, (op&1) ? MIPSI_BC1T : MIPSI_BC1F, 0, 0);
+    emit_fgh(as, MIPSI_C_OLT_D + ((op&3) ^ ((op>>2)&1)), 0, left, right);
+#else
+    Reg tmp, right, left = ra_alloc2(as, ir, RSET_FPR);
+    right = (left >> 8); left &= 255;
+    tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_FPR, left), right));
+    asm_guard(as, (op&1) ? MIPSI_BC1NEZ : MIPSI_BC1EQZ, 0, (tmp&31));
+    emit_fgh(as, MIPSI_CMP_LT_D + ((op&3) ^ ((op>>2)&1)), tmp, left, right);
+#endif
+#endif
+  } else {
+    Reg right, left = ra_alloc1(as, ir->op1, RSET_GPR);
+    if (op == IR_ABC) op = IR_UGT;
+    if ((op&4) == 0 && irref_isk(ir->op2) && get_kval(as, ir->op2) == 0) {
+      MIPSIns mi = (op&2) ? ((op&1) ? MIPSI_BLEZ : MIPSI_BGTZ) :
+			    ((op&1) ? MIPSI_BLTZ : MIPSI_BGEZ);
+      asm_guard(as, mi, left, 0);
+    } else {
+      if (irref_isk(ir->op2)) {
+	intptr_t k = get_kval(as, ir->op2);
+	if ((op&2)) k++;
+	if (checki16(k)) {
+	  asm_guard(as, (op&1) ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
+	  emit_tsi(as, (op&4) ? MIPSI_SLTIU : MIPSI_SLTI,
+		   RID_TMP, left, k);
+	  return;
+	}
+      }
+      right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
+      asm_guard(as, ((op^(op>>1))&1) ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
+      emi
