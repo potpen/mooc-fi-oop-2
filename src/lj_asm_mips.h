@@ -2361,4 +2361,37 @@ static void asm_comp64(ASMState *as, IRIns *ir)
   rightlo = (leftlo >> 8); leftlo &= 255;
   asm_guard(as, ((op^(op>>1))&1) ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
   l_end = emit_label(as);
-  i
+  if (lefthi != righthi)
+    emit_dst(as, (op&4) ? MIPSI_SLTU : MIPSI_SLT, RID_TMP,
+	     (op&2) ? righthi : lefthi, (op&2) ? lefthi : righthi);
+  emit_dst(as, MIPSI_SLTU, RID_TMP,
+	   (op&2) ? rightlo : leftlo, (op&2) ? leftlo : rightlo);
+  if (lefthi != righthi)
+    emit_branch(as, MIPSI_BEQ, lefthi, righthi, l_end);
+}
+
+static void asm_comp64eq(ASMState *as, IRIns *ir)
+{
+  Reg tmp, right, left = ra_alloc2(as, ir, RSET_GPR);
+  right = (left >> 8); left &= 255;
+  asm_guard(as, ((ir-1)->o & 1) ? MIPSI_BEQ : MIPSI_BNE, RID_TMP, RID_ZERO);
+  tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_GPR, left), right));
+  emit_dst(as, MIPSI_OR, RID_TMP, RID_TMP, tmp);
+  emit_dst(as, MIPSI_XOR, tmp, left, right);
+  left = ra_alloc2(as, ir-1, RSET_GPR);
+  right = (left >> 8); left &= 255;
+  emit_dst(as, MIPSI_XOR, RID_TMP, left, right);
+}
+#endif
+
+/* -- Split register ops -------------------------------------------------- */
+
+/* Hiword op of a split 32/32 or 64/64 bit op. Previous op is the loword op. */
+static void asm_hiop(ASMState *as, IRIns *ir)
+{
+  /* HIOP is marked as a store because it needs its own DCE logic. */
+  int uselo = ra_used(ir-1), usehi = ra_used(ir);  /* Loword/hiword used? */
+  if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
+#if LJ_32 && (LJ_HASFFI || LJ_SOFTFP)
+  if ((ir-1)->o == IR_CONV) {  /* Conversions to/from 64 bit. */
+    as->curins--;  /* Always skip th
