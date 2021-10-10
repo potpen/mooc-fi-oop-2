@@ -2320,4 +2320,45 @@ static void asm_comp(ASMState *as, IRIns *ir)
       }
       right = ra_alloc1(as, ir->op2, rset_exclude(RSET_GPR, left));
       asm_guard(as, ((op^(op>>1))&1) ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
-      emi
+      emit_dst(as, (op&4) ? MIPSI_SLTU : MIPSI_SLT,
+	       RID_TMP, (op&2) ? right : left, (op&2) ? left : right);
+    }
+  }
+}
+
+static void asm_equal(ASMState *as, IRIns *ir)
+{
+  Reg right, left = ra_alloc2(as, ir, (!LJ_SOFTFP && irt_isnum(ir->t)) ?
+				       RSET_FPR : RSET_GPR);
+  right = (left >> 8); left &= 255;
+  if (!LJ_SOFTFP32 && irt_isnum(ir->t)) {
+#if LJ_SOFTFP
+    asm_sfpcomp(as, ir);
+#elif !LJ_TARGET_MIPSR6
+    asm_guard(as, (ir->o & 1) ? MIPSI_BC1T : MIPSI_BC1F, 0, 0);
+    emit_fgh(as, MIPSI_C_EQ_D, 0, left, right);
+#else
+    Reg tmp = ra_scratch(as, rset_exclude(rset_exclude(RSET_FPR, left), right));
+    asm_guard(as, (ir->o & 1) ? MIPSI_BC1NEZ : MIPSI_BC1EQZ, 0, (tmp&31));
+    emit_fgh(as, MIPSI_CMP_EQ_D, tmp, left, right);
+#endif
+  } else {
+    asm_guard(as, (ir->o & 1) ? MIPSI_BEQ : MIPSI_BNE, left, right);
+  }
+}
+
+#if LJ_32 && LJ_HASFFI
+/* 64 bit integer comparisons. */
+static void asm_comp64(ASMState *as, IRIns *ir)
+{
+  /* ORDER IR: LT GE LE GT  ULT UGE ULE UGT. */
+  IROp op = (ir-1)->o;
+  MCLabel l_end;
+  Reg rightlo, leftlo, righthi, lefthi = ra_alloc2(as, ir, RSET_GPR);
+  righthi = (lefthi >> 8); lefthi &= 255;
+  leftlo = ra_alloc2(as, ir-1,
+		     rset_exclude(rset_exclude(RSET_GPR, lefthi), righthi));
+  rightlo = (leftlo >> 8); leftlo &= 255;
+  asm_guard(as, ((op^(op>>1))&1) ? MIPSI_BNE : MIPSI_BEQ, RID_TMP, RID_ZERO);
+  l_end = emit_label(as);
+  i
