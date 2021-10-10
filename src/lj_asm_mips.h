@@ -2445,4 +2445,45 @@ static void asm_hiop(ASMState *as, IRIns *ir)
 #if LJ_32 && LJ_HASFFI
   case IR_ADD: as->curins--; asm_add64(as, ir); break;
   case IR_SUB: as->curins--; asm_sub64(as, ir); break;
-  case IR_NEG: as->curins--; asm_neg64(as, ir); bre
+  case IR_NEG: as->curins--; asm_neg64(as, ir); break;
+  case IR_CNEWI:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+#if LJ_32 && LJ_SOFTFP
+  case IR_SLOAD: case IR_ALOAD: case IR_HLOAD: case IR_ULOAD: case IR_VLOAD:
+  case IR_STRTO:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RSET_GPR);  /* Mark lo op as used. */
+    break;
+  case IR_ASTORE: case IR_HSTORE: case IR_USTORE: case IR_TOSTR: case IR_TMPREF:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+  case IR_CALLN: case IR_CALLL: case IR_CALLS: case IR_CALLXS:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RID2RSET(RID_RETLO));  /* Mark lo op as used. */
+    break;
+  default: lj_assertA(0, "bad HIOP for op %d", (ir-1)->o); break;
+  }
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+static void asm_prof(ASMState *as, IRIns *ir)
+{
+  UNUSED(ir);
+  asm_guard(as, MIPSI_BNE, RID_TMP, RID_ZERO);
+  emit_tsi(as, MIPSI_ANDI, RID_TMP, RID_TMP, HOOK_PROFILE);
+  emit_lsglptr(as, MIPSI_LBU, RID_TMP,
+	       (int32_t)offsetof(global_State, hookmask));
+}
+
+/* -- Stack handling ------------------------------------------------------ */
+
+/* Check Lua stack size for overflow. Use exit handler as fallback. */
+static void asm_stack_check(ASMState *as, BCReg topslot,
+			    IRIns *irp, RegSet allow, ExitNo exitno)
+{
+  /* Try to get an unused temp. register, otherwise spill/restore RID_RET*. */
+  R
