@@ -2486,4 +2486,44 @@ static void asm_stack_check(ASMState *as, BCReg topslot,
 			    IRIns *irp, RegSet allow, ExitNo exitno)
 {
   /* Try to get an unused temp. register, otherwise spill/restore RID_RET*. */
-  R
+  Reg tmp, pbase = irp ? (ra_hasreg(irp->r) ? irp->r : RID_TMP) : RID_BASE;
+  ExitNo oldsnap = as->snapno;
+  rset_clear(allow, pbase);
+#if LJ_32
+  tmp = allow ? rset_pickbot(allow) :
+		(pbase == RID_RETHI ? RID_RETLO : RID_RETHI);
+#else
+  tmp = allow ? rset_pickbot(allow) : RID_RET;
+#endif
+  as->snapno = exitno;
+  asm_guard(as, MIPSI_BNE, RID_TMP, RID_ZERO);
+  as->snapno = oldsnap;
+  if (allow == RSET_EMPTY)  /* Restore temp. register. */
+    emit_tsi(as, MIPSI_AL, tmp, RID_SP, 0);
+  else
+    ra_modified(as, tmp);
+  emit_tsi(as, MIPSI_SLTIU, RID_TMP, RID_TMP, (int32_t)(8*topslot));
+  emit_dst(as, MIPSI_ASUBU, RID_TMP, tmp, pbase);
+  emit_tsi(as, MIPSI_AL, tmp, tmp, offsetof(lua_State, maxstack));
+  if (pbase == RID_TMP)
+    emit_getgl(as, RID_TMP, jit_base);
+  emit_getgl(as, tmp, cur_L);
+  if (allow == RSET_EMPTY)  /* Spill temp. register. */
+    emit_tsi(as, MIPSI_AS, tmp, RID_SP, 0);
+}
+
+/* Restore Lua stack from on-trace state. */
+static void asm_stack_restore(ASMState *as, SnapShot *snap)
+{
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+#if LJ_32 || defined(LUA_USE_ASSERT)
+  SnapEntry *flinks = &as->T->snapmap[snap_nextofs(as->T, snap)-1-LJ_FR2];
+#endif
+  MSize n, nent = snap->nent;
+  /* Store the value of all modified slots to the Lua stack. */
+  for (n = 0; n < nent; n++) {
+    SnapEntry sn = map[n];
+    BCReg s = snap_slot(sn);
+    int32_t ofs = 8*((int32_t)s-1-LJ_FR2);
+    IRRef ref = snap_ref(sn);
+   
