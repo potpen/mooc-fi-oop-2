@@ -2607,4 +2607,42 @@ static void asm_gc_check(ASMState *as)
   IRRef args[2];
   MCLabel l_end;
   Reg tmp;
-  ra_evictset(as, RSET
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
+  /* Assumes asm_snap_prep() already done. */
+  asm_guard(as, MIPSI_BNE, RID_RET, RID_ZERO);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  asm_gencall(as, ci, args);
+  l_end[-3] = MIPS_NOPATCH_GC_CHECK;  /* Replace the nop after the call. */
+  emit_tsi(as, MIPSI_AADDIU, ra_releasetmp(as, ASMREF_TMP1), RID_JGL, -32768);
+  tmp = ra_releasetmp(as, ASMREF_TMP2);
+  emit_loadi(as, tmp, as->gcsteps);
+  /* Jump around GC step if GC total < GC threshold. */
+  emit_branch(as, MIPSI_BNE, RID_TMP, RID_ZERO, l_end);
+  emit_dst(as, MIPSI_SLTU, RID_TMP, RID_TMP, tmp);
+  emit_getgl(as, tmp, gc.threshold);
+  emit_getgl(as, RID_TMP, gc.total);
+  as->gcsteps = 0;
+  checkmclim(as);
+}
+
+/* -- Loop handling ------------------------------------------------------- */
+
+/* Fixup the loop branch. */
+static void asm_loop_fixup(ASMState *as)
+{
+  MCode *p = as->mctop;
+  MCode *target = as->mcp;
+  p[-1] = MIPSI_NOP;
+  if (as->loopinv) {  /* Inverted loop branch? */
+    /* asm_guard already inverted the cond branch. Only patch the target. */
+    p[-3] |= ((target-p+2) & 0x0000ffffu);
+  } else {
+    p[-2] = MIPSI_J|(((uintptr_t)target>>2)&0x03ffffffu);
+  }
+}
+
+/* Fixup the tail of the loop. */
+static void asm_loop_tai
