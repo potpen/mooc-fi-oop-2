@@ -2562,4 +2562,49 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 	if (s == 0) continue;  /* Do not overwrite link to previous frame. */
 	type = ra_allock(as, (int32_t)(*flinks--), allow);
 #if LJ_SOFTFP
-      } e
+      } else if ((sn & SNAP_SOFTFPNUM)) {
+	type = ra_alloc1(as, ref+1, rset_exclude(RSET_GPR, RID_BASE));
+#endif
+      } else if ((sn & SNAP_KEYINDEX)) {
+	type = ra_allock(as, (int32_t)LJ_KEYINDEX, allow);
+      } else {
+	type = ra_allock(as, (int32_t)irt_toitype(ir->t), allow);
+      }
+      emit_tsi(as, MIPSI_SW, type, RID_BASE, ofs+(LJ_BE?0:4));
+#else
+      if ((sn & SNAP_KEYINDEX)) {
+	RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+	int64_t kki = (int64_t)LJ_KEYINDEX << 32;
+	if (irref_isk(ref)) {
+	  emit_tsi(as, MIPSI_SD,
+		   ra_allock(as, kki | (int64_t)(uint32_t)ir->i, allow),
+		   RID_BASE, ofs);
+	} else {
+	  Reg src = ra_alloc1(as, ref, allow);
+	  Reg rki = ra_allock(as, kki, rset_exclude(allow, src));
+	  emit_tsi(as, MIPSI_SD, RID_TMP, RID_BASE, ofs);
+	  emit_dst(as, MIPSI_DADDU, RID_TMP, src, rki);
+	}
+      } else {
+	asm_tvstore64(as, RID_BASE, ofs, ref);
+      }
+#endif
+    }
+    checkmclim(as);
+  }
+  lj_assertA(map + nent == flinks, "inconsistent frames in snapshot");
+}
+
+/* -- GC handling --------------------------------------------------------- */
+
+/* Marker to prevent patching the GC check exit. */
+#define MIPS_NOPATCH_GC_CHECK	MIPSI_OR
+
+/* Check GC threshold and do one or more GC steps. */
+static void asm_gc_check(ASMState *as)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg tmp;
+  ra_evictset(as, RSET
