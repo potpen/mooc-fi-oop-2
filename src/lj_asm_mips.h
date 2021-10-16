@@ -2526,4 +2526,40 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
     BCReg s = snap_slot(sn);
     int32_t ofs = 8*((int32_t)s-1-LJ_FR2);
     IRRef ref = snap_ref(sn);
-   
+    IRIns *ir = IR(ref);
+    if ((sn & SNAP_NORESTORE))
+      continue;
+    if (irt_isnum(ir->t)) {
+#if LJ_SOFTFP32
+      Reg tmp;
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      /* LJ_SOFTFP: must be a number constant. */
+      lj_assertA(irref_isk(ref), "unsplit FP op");
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.lo, allow);
+      emit_tsi(as, MIPSI_SW, tmp, RID_BASE, ofs+(LJ_BE?4:0));
+      if (rset_test(as->freeset, tmp+1)) allow = RID2RSET(tmp+1);
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.hi, allow);
+      emit_tsi(as, MIPSI_SW, tmp, RID_BASE, ofs+(LJ_BE?0:4));
+#elif LJ_SOFTFP  /* && LJ_64 */
+      Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPR, RID_BASE));
+      emit_tsi(as, MIPSI_SD, src, RID_BASE, ofs);
+#else
+      Reg src = ra_alloc1(as, ref, RSET_FPR);
+      emit_hsi(as, MIPSI_SDC1, src, RID_BASE, ofs);
+#endif
+    } else {
+#if LJ_32
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      Reg type;
+      lj_assertA(irt_ispri(ir->t) || irt_isaddr(ir->t) || irt_isinteger(ir->t),
+		 "restore of IR type %d", irt_type(ir->t));
+      if (!irt_ispri(ir->t)) {
+	Reg src = ra_alloc1(as, ref, allow);
+	rset_clear(allow, src);
+	emit_tsi(as, MIPSI_SW, src, RID_BASE, ofs+(LJ_BE?4:0));
+      }
+      if ((sn & (SNAP_CONT|SNAP_FRAME))) {
+	if (s == 0) continue;  /* Do not overwrite link to previous frame. */
+	type = ra_allock(as, (int32_t)(*flinks--), allow);
+#if LJ_SOFTFP
+      } e
