@@ -2645,4 +2645,51 @@ static void asm_loop_fixup(ASMState *as)
 }
 
 /* Fixup the tail of the loop. */
-static void asm_loop_tai
+static void asm_loop_tail_fixup(ASMState *as)
+{
+  if (as->loopinv) as->mctop--;
+}
+
+/* -- Head of trace ------------------------------------------------------- */
+
+/* Coalesce BASE register for a root trace. */
+static void asm_head_root_base(ASMState *as)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (r != RID_BASE)
+      emit_move(as, r, RID_BASE);
+  }
+}
+
+/* Coalesce BASE register for a side trace. */
+static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (irp->r == r) {
+      rset_clear(allow, r);  /* Mark same BASE register as coalesced. */
+    } else if (ra_hasreg(irp->r) && rset_test(as->freeset, irp->r)) {
+      rset_clear(allow, irp->r);
+      emit_move(as, r, irp->r);  /* Move from coalesced parent reg. */
+    } else {
+      emit_getgl(as, r, jit_base);  /* Otherwise reload BASE. */
+    }
+  }
+  return allow;
+}
+
+/* -- Tail of trace ------------------------------------------------------- */
+
+/* Fixup the tail code. */
+static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+{
+  MCode 
