@@ -2692,4 +2692,49 @@ static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
 /* Fixup the tail code. */
 static void asm_tail_fixup(ASMState *as, TraceNo lnk)
 {
-  MCode 
+  MCode *target = lnk ? traceref(as->J,lnk)->mcode : (MCode *)lj_vm_exit_interp;
+  int32_t spadj = as->T->spadjust;
+  MCode *p = as->mctop-1;
+  *p = spadj ? (MIPSI_AADDIU|MIPSF_T(RID_SP)|MIPSF_S(RID_SP)|spadj) : MIPSI_NOP;
+  p[-1] = MIPSI_J|(((uintptr_t)target>>2)&0x03ffffffu);
+}
+
+/* Prepare tail of code. */
+static void asm_tail_prep(ASMState *as)
+{
+  as->mcp = as->mctop-2;  /* Leave room for branch plus nop or stack adj. */
+  as->invmcp = as->loopref ? as->mcp : NULL;
+}
+
+/* -- Trace setup --------------------------------------------------------- */
+
+/* Ensure there are enough stack slots for call arguments. */
+static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  uint32_t i, nargs = CCI_XNARGS(ci);
+#if LJ_32
+  int nslots = 4, ngpr = REGARG_NUMGPR, nfpr = REGARG_NUMFPR;
+#else
+  int nslots = 0, ngpr = REGARG_NUMGPR;
+#endif
+  asm_collectargs(as, ir, ci, args);
+  for (i = 0; i < nargs; i++) {
+#if LJ_32
+    if (!LJ_SOFTFP && args[i] && irt_isfp(IR(args[i])->t) &&
+	nfpr > 0 && !(ci->flags & CCI_VARARG)) {
+      nfpr--;
+      ngpr -= irt_isnum(IR(args[i])->t) ? 2 : 1;
+    } else if (!LJ_SOFTFP && args[i] && irt_isnum(IR(args[i])->t)) {
+      nfpr = 0;
+      ngpr = ngpr & ~1;
+      if (ngpr > 0) ngpr -= 2; else nslots = (nslots+3) & ~1;
+    } else {
+      nfpr = 0;
+      if (ngpr > 0) ngpr--; else nslots++;
+    }
+#else
+    if (ngpr > 0) ngpr--; else nslots += 2;
+#endif
+  }
+  if (nslo
