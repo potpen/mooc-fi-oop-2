@@ -2737,4 +2737,42 @@ static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
     if (ngpr > 0) ngpr--; else nslots += 2;
 #endif
   }
-  if (nslo
+  if (nslots > as->evenspill)  /* Leave room for args in stack slots. */
+    as->evenspill = nslots;
+  return irt_isfp(ir->t) ? REGSP_HINT(RID_FPRET) : REGSP_HINT(RID_RET);
+}
+
+static void asm_setup_target(ASMState *as)
+{
+  asm_sparejump_setup(as);
+  asm_exitstub_setup(as);
+}
+
+/* -- Trace patching ------------------------------------------------------ */
+
+/* Patch exit jumps of existing machine code to a new target. */
+void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+{
+  MCode *p = T->mcode;
+  MCode *pe = (MCode *)((char *)p + T->szmcode);
+  MCode *px = exitstub_trace_addr(T, exitno);
+  MCode *cstart = NULL, *cstop = NULL;
+  MCode *mcarea = lj_mcode_patch(J, p, 0);
+  MCode exitload = MIPSI_LI | MIPSF_T(RID_TMP) | exitno;
+  MCode tjump = MIPSI_J|(((uintptr_t)target>>2)&0x03ffffffu);
+  for (p++; p < pe; p++) {
+    if (*p == exitload) {  /* Look for load of exit number. */
+      /* Look for exitstub branch. Yes, this covers all used branch variants. */
+      if (((p[-1] ^ (px-p)) & 0xffffu) == 0 &&
+	  ((p[-1] & 0xf0000000u) == MIPSI_BEQ ||
+	   (p[-1] & 0xfc1e0000u) == MIPSI_BLTZ ||
+#if !LJ_TARGET_MIPSR6
+	   (p[-1] & 0xffe00000u) == MIPSI_BC1F
+#else
+	   (p[-1] & 0xff600000u) == MIPSI_BC1EQZ
+#endif
+	  ) && p[-2] != MIPS_NOPATCH_GC_CHECK) {
+	ptrdiff_t delta = target - p;
+	if (((delta + 0x8000) >> 16) == 0) {  /* Patch in-range branch. */
+	patchbranch:
+	  p[-1] = (p[-1] & 0x
