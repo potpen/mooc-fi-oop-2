@@ -2775,4 +2775,34 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
 	ptrdiff_t delta = target - p;
 	if (((delta + 0x8000) >> 16) == 0) {  /* Patch in-range branch. */
 	patchbranch:
-	  p[-1] = (p[-1] & 0x
+	  p[-1] = (p[-1] & 0xffff0000u) | (delta & 0xffffu);
+	  *p = MIPSI_NOP;  /* Replace the load of the exit number. */
+	  cstop = p+1;
+	  if (!cstart) cstart = p-1;
+	} else {  /* Branch out of range. Use spare jump slot in mcarea. */
+	  MCode *mcjump = asm_sparejump_use(mcarea, tjump);
+	  if (mcjump) {
+	    lj_mcode_sync(mcjump, mcjump+1);
+	    delta = mcjump - p;
+	    if (((delta + 0x8000) >> 16) == 0) {
+	      goto patchbranch;
+	    } else {
+	      lj_assertJ(0, "spare jump out of range: -Osizemcode too big");
+	    }
+	  }
+	  /* Ignore jump slot overflow. Child trace is simply not attached. */
+	}
+      } else if (p+1 == pe) {
+	/* Patch NOP after code for inverted loop branch. Use of J is ok. */
+	lj_assertJ(p[1] == MIPSI_NOP, "expected NOP");
+	p[1] = tjump;
+	*p = MIPSI_NOP;  /* Replace the load of the exit number. */
+	cstop = p+2;
+	if (!cstart) cstart = p+1;
+      }
+    }
+  }
+  if (cstart) lj_mcode_sync(cstart, cstop);
+  lj_mcode_patch(J, mcarea, 1);
+}
+
