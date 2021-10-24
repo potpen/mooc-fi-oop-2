@@ -2496,3 +2496,630 @@ static void asm_comp(ASMState *as, IRIns *ir)
 	  if (irt_isu8(ir->t)) {
 	    lj_assertA(ir->o == IR_EQ || ir->o == IR_NE, "bad usage");
 	    xo = XO_TESTb;
+	    if (!rset_test(RSET_RANGE(RID_EAX, RID_EBX+1), left)) {
+	      if (LJ_64) {
+		left |= FORCE_REX;
+	      } else {
+		emit_i32(as, 0xff);
+		emit_mrm(as, XO_GROUP3, XOg_TEST, left);
+		return;
+	      }
+	    }
+	  }
+	  emit_rr(as, xo, r64 + left, left);
+	  if (irl+1 == ir)  /* Referencing previous ins? */
+	    as->flagmcp = as->mcp;  /* Set flag to drop test r,r if possible. */
+	} else {
+	  emit_gmrmi(as, XG_ARITHi(XOg_CMP), r64 + left, imm);
+	}
+      }
+    } else {
+      Reg left = ra_alloc1(as, lref, RSET_GPR);
+      Reg right = asm_fuseloadm(as, rref, rset_exclude(RSET_GPR, left), r64);
+      asm_guardcc(as, cc);
+      emit_mrm(as, XO_CMP, r64 + left, right);
+    }
+  }
+}
+
+#define asm_equal(as, ir)	asm_comp(as, ir)
+
+#if LJ_32 && LJ_HASFFI
+/* 64 bit integer comparisons in 32 bit mode. */
+static void asm_comp_int64(ASMState *as, IRIns *ir)
+{
+  uint32_t cc = asm_compmap[(ir-1)->o];
+  RegSet allow = RSET_GPR;
+  Reg lefthi = RID_NONE, leftlo = RID_NONE;
+  Reg righthi = RID_NONE, rightlo = RID_NONE;
+  MCLabel l_around;
+  x86ModRM mrm;
+
+  as->curins--;  /* Skip loword ins. Avoids failing in noconflict(), too. */
+
+  /* Allocate/fuse hiword operands. */
+  if (irref_isk(ir->op2)) {
+    lefthi = asm_fuseload(as, ir->op1, allow);
+  } else {
+    lefthi = ra_alloc1(as, ir->op1, allow);
+    rset_clear(allow, lefthi);
+    righthi = asm_fuseload(as, ir->op2, allow);
+    if (righthi == RID_MRM) {
+      if (as->mrm.base != RID_NONE) rset_clear(allow, as->mrm.base);
+      if (as->mrm.idx != RID_NONE) rset_clear(allow, as->mrm.idx);
+    } else {
+      rset_clear(allow, righthi);
+    }
+  }
+  mrm = as->mrm;  /* Save state for hiword instruction. */
+
+  /* Allocate/fuse loword operands. */
+  if (irref_isk((ir-1)->op2)) {
+    leftlo = asm_fuseload(as, (ir-1)->op1, allow);
+  } else {
+    leftlo = ra_alloc1(as, (ir-1)->op1, allow);
+    rset_clear(allow, leftlo);
+    rightlo = asm_fuseload(as, (ir-1)->op2, allow);
+  }
+
+  /* All register allocations must be performed _before_ this point. */
+  l_around = emit_label(as);
+  as->invmcp = as->flagmcp = NULL;  /* Cannot use these optimizations. */
+
+  /* Loword comparison and branch. */
+  asm_guardcc(as, cc >> 4);  /* Always use unsigned compare for loword. */
+  if (ra_noreg(rightlo)) {
+    int32_t imm = IR((ir-1)->op2)->i;
+    if (imm == 0 && ((cc >> 4) & 0xa) != 0x2 && leftlo != RID_MRM)
+      emit_rr(as, XO_TEST, leftlo, leftlo);
+    else
+      emit_gmrmi(as, XG_ARITHi(XOg_CMP), leftlo, imm);
+  } else {
+    emit_mrm(as, XO_CMP, leftlo, rightlo);
+  }
+
+  /* Hiword comparison and branches. */
+  if ((cc & 15) != CC_NE)
+    emit_sjcc(as, CC_NE, l_around);  /* Hiword unequal: skip loword compare. */
+  if ((cc & 15) != CC_E)
+    asm_guardcc(as, cc >> 8);  /* Hiword compare without equality check. */
+  as->mrm = mrm;  /* Restore state. */
+  if (ra_noreg(righthi)) {
+    int32_t imm = IR(ir->op2)->i;
+    if (imm == 0 && (cc & 0xa) != 0x2 && lefthi != RID_MRM)
+      emit_rr(as, XO_TEST, lefthi, lefthi);
+    else
+      emit_gmrmi(as, XG_ARITHi(XOg_CMP), lefthi, imm);
+  } else {
+    emit_mrm(as, XO_CMP, lefthi, righthi);
+  }
+}
+#endif
+
+/* -- Split register ops -------------------------------------------------- */
+
+/* Hiword op of a split 32/32 or 64/64 bit op. Previous op is the loword op. */
+static void asm_hiop(ASMState *as, IRIns *ir)
+{
+  /* HIOP is marked as a store because it needs its own DCE logic. */
+  int uselo = ra_used(ir-1), usehi = ra_used(ir);  /* Loword/hiword used? */
+  if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
+#if LJ_32 && LJ_HASFFI
+  if ((ir-1)->o == IR_CONV) {  /* Conversions to/from 64 bit. */
+    as->curins--;  /* Always skip the CONV. */
+    if (usehi || uselo)
+      asm_conv64(as, ir);
+    return;
+  } else if ((ir-1)->o <= IR_NE) {  /* 64 bit integer comparisons. ORDER IR. */
+    asm_comp_int64(as, ir);
+    return;
+  } else if ((ir-1)->o == IR_XSTORE) {
+    if ((ir-1)->r != RID_SINK)
+      asm_fxstore(as, ir);
+    return;
+  }
+#endif
+  if (!usehi) return;  /* Skip unused hiword op for all remaining ops. */
+  switch ((ir-1)->o) {
+#if LJ_32 && LJ_HASFFI
+  case IR_ADD:
+    as->flagmcp = NULL;
+    as->curins--;
+    asm_intarith(as, ir, XOg_ADC);
+    asm_intarith(as, ir-1, XOg_ADD);
+    break;
+  case IR_SUB:
+    as->flagmcp = NULL;
+    as->curins--;
+    asm_intarith(as, ir, XOg_SBB);
+    asm_intarith(as, ir-1, XOg_SUB);
+    break;
+  case IR_NEG: {
+    Reg dest = ra_dest(as, ir, RSET_GPR);
+    emit_rr(as, XO_GROUP3, XOg_NEG, dest);
+    emit_i8(as, 0);
+    emit_rr(as, XO_ARITHi8, XOg_ADC, dest);
+    ra_left(as, dest, ir->op1);
+    as->curins--;
+    asm_neg_not(as, ir-1, XOg_NEG);
+    break;
+    }
+  case IR_CNEWI:
+    /* Nothing to do here. Handled by CNEWI itself. */
+    break;
+#endif
+  case IR_CALLN: case IR_CALLL: case IR_CALLS: case IR_CALLXS:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RID2RSET(RID_RETLO));  /* Mark lo op as used. */
+    break;
+  default: lj_assertA(0, "bad HIOP for op %d", (ir-1)->o); break;
+  }
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+static void asm_prof(ASMState *as, IRIns *ir)
+{
+  UNUSED(ir);
+  asm_guardcc(as, CC_NE);
+  emit_i8(as, HOOK_PROFILE);
+  emit_rma(as, XO_GROUP3b, XOg_TEST, &J2G(as->J)->hookmask);
+}
+
+/* -- Stack handling ------------------------------------------------------ */
+
+/* Check Lua stack size for overflow. Use exit handler as fallback. */
+static void asm_stack_check(ASMState *as, BCReg topslot,
+			    IRIns *irp, RegSet allow, ExitNo exitno)
+{
+  /* Try to get an unused temp. register, otherwise spill/restore eax. */
+  Reg pbase = irp ? irp->r : RID_BASE;
+  Reg r = allow ? rset_pickbot(allow) : RID_EAX;
+  emit_jcc(as, CC_B, exitstub_addr(as->J, exitno));
+  if (allow == RSET_EMPTY)  /* Restore temp. register. */
+    emit_rmro(as, XO_MOV, r|REX_64, RID_ESP, 0);
+  else
+    ra_modified(as, r);
+  emit_gri(as, XG_ARITHi(XOg_CMP), r|REX_GC64, (int32_t)(8*topslot));
+  if (ra_hasreg(pbase) && pbase != r)
+    emit_rr(as, XO_ARITH(XOg_SUB), r|REX_GC64, pbase);
+  else
+#if LJ_GC64
+    emit_rmro(as, XO_ARITH(XOg_SUB), r|REX_64, RID_DISPATCH,
+	      (int32_t)dispofs(as, &J2G(as->J)->jit_base));
+#else
+    emit_rmro(as, XO_ARITH(XOg_SUB), r, RID_NONE,
+	      ptr2addr(&J2G(as->J)->jit_base));
+#endif
+  emit_rmro(as, XO_MOV, r|REX_GC64, r, offsetof(lua_State, maxstack));
+  emit_getgl(as, r, cur_L);
+  if (allow == RSET_EMPTY)  /* Spill temp. register. */
+    emit_rmro(as, XO_MOVto, r|REX_64, RID_ESP, 0);
+}
+
+/* Restore Lua stack from on-trace state. */
+static void asm_stack_restore(ASMState *as, SnapShot *snap)
+{
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+#if !LJ_FR2 || defined(LUA_USE_ASSERT)
+  SnapEntry *flinks = &as->T->snapmap[snap_nextofs(as->T, snap)-1-LJ_FR2];
+#endif
+  MSize n, nent = snap->nent;
+  /* Store the value of all modified slots to the Lua stack. */
+  for (n = 0; n < nent; n++) {
+    SnapEntry sn = map[n];
+    BCReg s = snap_slot(sn);
+    int32_t ofs = 8*((int32_t)s-1-LJ_FR2);
+    IRRef ref = snap_ref(sn);
+    IRIns *ir = IR(ref);
+    if ((sn & SNAP_NORESTORE))
+      continue;
+    if ((sn & SNAP_KEYINDEX)) {
+      emit_movmroi(as, RID_BASE, ofs+4, LJ_KEYINDEX);
+      if (irref_isk(ref)) {
+	emit_movmroi(as, RID_BASE, ofs, ir->i);
+      } else {
+	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPR, RID_BASE));
+	emit_movtomro(as, src, RID_BASE, ofs);
+      }
+    } else if (irt_isnum(ir->t)) {
+      Reg src = ra_alloc1(as, ref, RSET_FPR);
+      emit_rmro(as, XO_MOVSDto, src, RID_BASE, ofs);
+    } else {
+      lj_assertA(irt_ispri(ir->t) || irt_isaddr(ir->t) ||
+		 (LJ_DUALNUM && irt_isinteger(ir->t)),
+		 "restore of IR type %d", irt_type(ir->t));
+      if (!irref_isk(ref)) {
+	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPR, RID_BASE));
+#if LJ_GC64
+	if (irt_is64(ir->t)) {
+	  /* TODO: 64 bit store + 32 bit load-modify-store is suboptimal. */
+	  emit_u32(as, irt_toitype(ir->t) << 15);
+	  emit_rmro(as, XO_ARITHi, XOg_OR, RID_BASE, ofs+4);
+	} else if (LJ_DUALNUM && irt_isinteger(ir->t)) {
+	  emit_movmroi(as, RID_BASE, ofs+4, LJ_TISNUM << 15);
+	} else {
+	  emit_movmroi(as, RID_BASE, ofs+4, (irt_toitype(ir->t)<<15)|0x7fff);
+	}
+#endif
+	emit_movtomro(as, REX_64IR(ir, src), RID_BASE, ofs);
+#if LJ_GC64
+      } else {
+	TValue k;
+	lj_ir_kvalue(as->J->L, &k, ir);
+	if (tvisnil(&k)) {
+	  emit_i32(as, -1);
+	  emit_rmro(as, XO_MOVmi, REX_64, RID_BASE, ofs);
+	} else {
+	  emit_movmroi(as, RID_BASE, ofs+4, k.u32.hi);
+	  emit_movmroi(as, RID_BASE, ofs, k.u32.lo);
+	}
+#else
+      } else if (!irt_ispri(ir->t)) {
+	emit_movmroi(as, RID_BASE, ofs, ir->i);
+#endif
+      }
+      if ((sn & (SNAP_CONT|SNAP_FRAME))) {
+#if !LJ_FR2
+	if (s != 0)  /* Do not overwrite link to previous frame. */
+	  emit_movmroi(as, RID_BASE, ofs+4, (int32_t)(*flinks--));
+#endif
+#if !LJ_GC64
+      } else {
+	if (!(LJ_64 && irt_islightud(ir->t)))
+	  emit_movmroi(as, RID_BASE, ofs+4, irt_toitype(ir->t));
+#endif
+      }
+    }
+    checkmclim(as);
+  }
+  lj_assertA(map + nent == flinks, "inconsistent frames in snapshot");
+}
+
+/* -- GC handling --------------------------------------------------------- */
+
+/* Check GC threshold and do one or more GC steps. */
+static void asm_gc_check(ASMState *as)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg tmp;
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
+  asm_guardcc(as, CC_NE);  /* Assumes asm_snap_prep() already done. */
+  emit_rr(as, XO_TEST, RID_RET, RID_RET);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  asm_gencall(as, ci, args);
+  tmp = ra_releasetmp(as, ASMREF_TMP1);
+#if LJ_GC64
+  emit_rmro(as, XO_LEA, tmp|REX_64, RID_DISPATCH, GG_DISP2G);
+#else
+  emit_loada(as, tmp, J2G(as->J));
+#endif
+  emit_loadi(as, ra_releasetmp(as, ASMREF_TMP2), as->gcsteps);
+  /* Jump around GC step if GC total < GC threshold. */
+  emit_sjcc(as, CC_B, l_end);
+  emit_opgl(as, XO_ARITH(XOg_CMP), tmp|REX_GC64, gc.threshold);
+  emit_getgl(as, tmp, gc.total);
+  as->gcsteps = 0;
+  checkmclim(as);
+}
+
+/* -- Loop handling ------------------------------------------------------- */
+
+/* Fixup the loop branch. */
+static void asm_loop_fixup(ASMState *as)
+{
+  MCode *p = as->mctop;
+  MCode *target = as->mcp;
+  if (as->realign) {  /* Realigned loops use short jumps. */
+    as->realign = NULL;  /* Stop another retry. */
+    lj_assertA(((intptr_t)target & 15) == 0, "loop realign failed");
+    if (as->loopinv) {  /* Inverted loop branch? */
+      p -= 5;
+      p[0] = XI_JMP;
+      lj_assertA(target - p >= -128, "loop realign failed");
+      p[-1] = (MCode)(target - p);  /* Patch sjcc. */
+      if (as->loopinv == 2)
+	p[-3] = (MCode)(target - p + 2);  /* Patch opt. short jp. */
+    } else {
+      lj_assertA(target - p >= -128, "loop realign failed");
+      p[-1] = (MCode)(int8_t)(target - p);  /* Patch short jmp. */
+      p[-2] = XI_JMPs;
+    }
+  } else {
+    MCode *newloop;
+    p[-5] = XI_JMP;
+    if (as->loopinv) {  /* Inverted loop branch? */
+      /* asm_guardcc already inverted the jcc and patched the jmp. */
+      p -= 5;
+      newloop = target+4;
+      *(int32_t *)(p-4) = (int32_t)(target - p);  /* Patch jcc. */
+      if (as->loopinv == 2) {
+	*(int32_t *)(p-10) = (int32_t)(target - p + 6);  /* Patch opt. jp. */
+	newloop = target+8;
+      }
+    } else {  /* Otherwise just patch jmp. */
+      *(int32_t *)(p-4) = (int32_t)(target - p);
+      newloop = target+3;
+    }
+    /* Realign small loops and shorten the loop branch. */
+    if (newloop >= p - 128) {
+      as->realign = newloop;  /* Force a retry and remember alignment. */
+      as->curins = as->stopins;  /* Abort asm_trace now. */
+      as->T->nins = as->orignins;  /* Remove any added renames. */
+    }
+  }
+}
+
+/* Fixup the tail of the loop. */
+static void asm_loop_tail_fixup(ASMState *as)
+{
+  UNUSED(as);  /* Nothing to do. */
+}
+
+/* -- Head of trace ------------------------------------------------------- */
+
+/* Coalesce BASE register for a root trace. */
+static void asm_head_root_base(ASMState *as)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (r != RID_BASE)
+      emit_rr(as, XO_MOV, r|REX_GC64, RID_BASE);
+  }
+}
+
+/* Coalesce or reload BASE register for a side trace. */
+static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (irp->r == r) {
+      rset_clear(allow, r);  /* Mark same BASE register as coalesced. */
+    } else if (ra_hasreg(irp->r) && rset_test(as->freeset, irp->r)) {
+      /* Move from coalesced parent reg. */
+      rset_clear(allow, irp->r);
+      emit_rr(as, XO_MOV, r|REX_GC64, irp->r);
+    } else {
+      emit_getgl(as, r, jit_base);  /* Otherwise reload BASE. */
+    }
+  }
+  return allow;
+}
+
+/* -- Tail of trace ------------------------------------------------------- */
+
+/* Fixup the tail code. */
+static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+{
+  /* Note: don't use as->mcp swap + emit_*: emit_op overwrites more bytes. */
+  MCode *p = as->mctop;
+  MCode *target, *q;
+  int32_t spadj = as->T->spadjust;
+  if (spadj == 0) {
+    p -= LJ_64 ? 7 : 6;
+  } else {
+    MCode *p1;
+    /* Patch stack adjustment. */
+    if (checki8(spadj)) {
+      p -= 3;
+      p1 = p-6;
+      *p1 = (MCode)spadj;
+    } else {
+      p1 = p-9;
+      *(int32_t *)p1 = spadj;
+    }
+#if LJ_64
+    p1[-3] = 0x48;
+#endif
+    p1[-2] = (MCode)(checki8(spadj) ? XI_ARITHi8 : XI_ARITHi);
+    p1[-1] = MODRM(XM_REG, XOg_ADD, RID_ESP);
+  }
+  /* Patch exit branch. */
+  target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
+  *(int32_t *)(p-4) = jmprel(as->J, p, target);
+  p[-5] = XI_JMP;
+  /* Drop unused mcode tail. Fill with NOPs to make the prefetcher happy. */
+  for (q = as->mctop-1; q >= p; q--)
+    *q = XI_NOP;
+  as->mctop = p;
+}
+
+/* Prepare tail of code. */
+static void asm_tail_prep(ASMState *as)
+{
+  MCode *p = as->mctop;
+  /* Realign and leave room for backwards loop branch or exit branch. */
+  if (as->realign) {
+    int i = ((int)(intptr_t)as->realign) & 15;
+    /* Fill unused mcode tail with NOPs to make the prefetcher happy. */
+    while (i-- > 0)
+      *--p = XI_NOP;
+    as->mctop = p;
+    p -= (as->loopinv ? 5 : 2);  /* Space for short/near jmp. */
+  } else {
+    p -= 5;  /* Space for exit branch (near jmp). */
+  }
+  if (as->loopref) {
+    as->invmcp = as->mcp = p;
+  } else {
+    /* Leave room for ESP adjustment: add esp, imm or lea esp, [esp+imm] */
+    as->mcp = p - (LJ_64 ? 7 : 6);
+    as->invmcp = NULL;
+  }
+}
+
+/* -- Trace setup --------------------------------------------------------- */
+
+/* Ensure there are enough stack slots for call arguments. */
+static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  int nslots;
+  asm_collectargs(as, ir, ci, args);
+  nslots = asm_count_call_slots(as, ci, args);
+  if (nslots > as->evenspill)  /* Leave room for args in stack slots. */
+    as->evenspill = nslots;
+#if LJ_64
+  return irt_isfp(ir->t) ? REGSP_HINT(RID_FPRET) : REGSP_HINT(RID_RET);
+#else
+  return irt_isfp(ir->t) ? REGSP_INIT : REGSP_HINT(RID_RET);
+#endif
+}
+
+/* Target-specific setup. */
+static void asm_setup_target(ASMState *as)
+{
+  asm_exitstub_setup(as, as->T->nsnap);
+  as->mrm.base = 0;
+}
+
+/* -- Trace patching ------------------------------------------------------ */
+
+static const uint8_t map_op1[256] = {
+0x92,0x92,0x92,0x92,0x52,0x45,0x51,0x51,0x92,0x92,0x92,0x92,0x52,0x45,0x51,0x20,
+0x92,0x92,0x92,0x92,0x52,0x45,0x51,0x51,0x92,0x92,0x92,0x92,0x52,0x45,0x51,0x51,
+0x92,0x92,0x92,0x92,0x52,0x45,0x10,0x51,0x92,0x92,0x92,0x92,0x52,0x45,0x10,0x51,
+0x92,0x92,0x92,0x92,0x52,0x45,0x10,0x51,0x92,0x92,0x92,0x92,0x52,0x45,0x10,0x51,
+#if LJ_64
+0x10,0x10,0x10,0x10,0x10,0x10,0x10,0x10,0x14,0x14,0x14,0x14,0x14,0x14,0x14,0x14,
+#else
+0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,
+#endif
+0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,
+0x51,0x51,0x92,0x92,0x10,0x10,0x12,0x11,0x45,0x86,0x52,0x93,0x51,0x51,0x51,0x51,
+0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,
+0x93,0x86,0x93,0x93,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,
+0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x51,0x47,0x51,0x51,0x51,0x51,0x51,
+#if LJ_64
+0x59,0x59,0x59,0x59,0x51,0x51,0x51,0x51,0x52,0x45,0x51,0x51,0x51,0x51,0x51,0x51,
+#else
+0x55,0x55,0x55,0x55,0x51,0x51,0x51,0x51,0x52,0x45,0x51,0x51,0x51,0x51,0x51,0x51,
+#endif
+0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x05,0x05,0x05,0x05,0x05,0x05,0x05,0x05,
+0x93,0x93,0x53,0x51,0x70,0x71,0x93,0x86,0x54,0x51,0x53,0x51,0x51,0x52,0x51,0x51,
+0x92,0x92,0x92,0x92,0x52,0x52,0x51,0x51,0x92,0x92,0x92,0x92,0x92,0x92,0x92,0x92,
+0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x45,0x45,0x47,0x52,0x51,0x51,0x51,0x51,
+0x10,0x51,0x10,0x10,0x51,0x51,0x63,0x66,0x51,0x51,0x51,0x51,0x51,0x51,0x92,0x92
+};
+
+static const uint8_t map_op2[256] = {
+0x93,0x93,0x93,0x93,0x52,0x52,0x52,0x52,0x52,0x52,0x51,0x52,0x51,0x93,0x52,0x94,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x53,0x53,0x53,0x53,0x53,0x53,0x53,0x53,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x34,0x51,0x35,0x51,0x51,0x51,0x51,0x51,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x53,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x94,0x54,0x54,0x54,0x93,0x93,0x93,0x52,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,0x46,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x52,0x52,0x52,0x93,0x94,0x93,0x51,0x51,0x52,0x52,0x52,0x93,0x94,0x93,0x93,0x93,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x94,0x93,0x93,0x93,0x93,0x93,
+0x93,0x93,0x94,0x93,0x94,0x94,0x94,0x93,0x52,0x52,0x52,0x52,0x52,0x52,0x52,0x52,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,
+0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x93,0x52
+};
+
+static uint32_t asm_x86_inslen(const uint8_t* p)
+{
+  uint32_t result = 0;
+  uint32_t prefixes = 0;
+  uint32_t x = map_op1[*p];
+  for (;;) {
+    switch (x >> 4) {
+    case 0: return result + x + (prefixes & 4);
+    case 1: prefixes |= x; x = map_op1[*++p]; result++; break;
+    case 2: x = map_op2[*++p]; break;
+    case 3: p++; goto mrm;
+    case 4: result -= (prefixes & 2);  /* fallthrough */
+    case 5: return result + (x & 15);
+    case 6:  /* Group 3. */
+      if (p[1] & 0x38) x = 2;
+      else if ((prefixes & 2) && (x == 0x66)) x = 4;
+      goto mrm;
+    case 7: /* VEX c4/c5. */
+      if (LJ_32 && p[1] < 0xc0) {
+	x = 2;
+	goto mrm;
+      }
+      if (x == 0x70) {
+	x = *++p & 0x1f;
+	result++;
+	if (x >= 2) {
+	  p += 2;
+	  result += 2;
+	  goto mrm;
+	}
+      }
+      p++;
+      result++;
+      x = map_op2[*++p];
+      break;
+    case 8: result -= (prefixes & 2);  /* fallthrough */
+    case 9: mrm:  /* ModR/M and possibly SIB. */
+      result += (x & 15);
+      x = *++p;
+      switch (x >> 6) {
+      case 0: if ((x & 7) == 5) return result + 4; break;
+      case 1: result++; break;
+      case 2: result += 4; break;
+      case 3: return result;
+      }
+      if ((x & 7) == 4) {
+	result++;
+	if (x < 0x40 && (p[1] & 7) == 5) result += 4;
+      }
+      return result;
+    }
+  }
+}
+
+/* Patch exit jumps of existing machine code to a new target. */
+void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+{
+  MCode *p = T->mcode;
+  MCode *mcarea = lj_mcode_patch(J, p, 0);
+  MSize len = T->szmcode;
+  MCode *px = exitstub_addr(J, exitno) - 6;
+  MCode *pe = p+len-6;
+  MCode *pgc = NULL;
+#if LJ_GC64
+  uint32_t statei = (uint32_t)(GG_OFS(g.vmstate) - GG_OFS(dispatch));
+#else
+  uint32_t statei = u32ptr(&J2G(J)->vmstate);
+#endif
+  if (len > 5 && p[len-5] == XI_JMP && p+len-6 + *(int32_t *)(p+len-4) == px)
+    *(int32_t *)(p+len-4) = jmprel(J, p+len, target);
+  /* Do not patch parent exit for a stack check. Skip beyond vmstate update. */
+  for (; p < pe; p += asm_x86_inslen(p)) {
+    intptr_t ofs = LJ_GC64 ? (p[0] & 0xf0) == 0x40 : LJ_64;
+    if (*(uint32_t *)(p+2+ofs) == statei && p[ofs+LJ_GC64-LJ_64] == XI_MOVmi)
+      break;
+  }
+  lj_assertJ(p < pe, "instruction length decoder failed");
+  for (; p < pe; p += asm_x86_inslen(p)) {
+    if ((*(uint16_t *)p & 0xf0ff) == 0x800f && p + *(int32_t *)(p+2) == px &&
+	p != pgc) {
+      *(int32_t *)(p+2) = jmprel(J, p+6, target);
+    } else if (*p == XI_CALL &&
+	      (void *)(p+5+*(int32_t *)(p+1)) == (void *)lj_gc_step_jit) {
+      pgc = p+7;  /* Do not patch GC check exit. */
+    }
+  }
+  lj_mcode_sync(T->mcode, T->mcode + T->szmcode);
+  lj_mcode_patch(J, mcarea, 1);
+}
