@@ -1925,3 +1925,402 @@ static void asm_sfpcomp(ASMState *as, IRIns *ir)
 #endif
 
 #if LJ_HASFFI
+/* 64 bit integer comparisons. */
+static void asm_comp64(ASMState *as, IRIns *ir)
+{
+  PPCCC cc = asm_compmap[(ir-1)->o];
+  if ((cc&3) == (CC_EQ&3)) {
+    asm_guardcc(as, cc);
+    emit_tab(as, (cc&4) ? PPCI_CRAND : PPCI_CROR,
+	     (CC_EQ&3), (CC_EQ&3), 4+(CC_EQ&3));
+  } else {
+    asm_guardcc(as, CC_EQ);
+    emit_tab(as, PPCI_CROR, (CC_EQ&3), (CC_EQ&3), ((cc^~(cc>>2))&1));
+    emit_tab(as, (cc&4) ? PPCI_CRAND : PPCI_CRANDC,
+	     (CC_EQ&3), (CC_EQ&3), 4+(cc&3));
+  }
+  /* Loword comparison sets cr1 and is unsigned, except for equality. */
+  asm_intcomp_(as, (ir-1)->op1, (ir-1)->op2, 4,
+	       cc | ((cc&3) == (CC_EQ&3) ? 0 : CC_UNSIGNED));
+  /* Hiword comparison sets cr0. */
+  asm_intcomp_(as, ir->op1, ir->op2, 0, cc);
+  as->flagmcp = NULL;  /* Doesn't work here. */
+}
+#endif
+
+/* -- Split register ops -------------------------------------------------- */
+
+/* Hiword op of a split 32/32 bit op. Previous op is be the loword op. */
+static void asm_hiop(ASMState *as, IRIns *ir)
+{
+  /* HIOP is marked as a store because it needs its own DCE logic. */
+  int uselo = ra_used(ir-1), usehi = ra_used(ir);  /* Loword/hiword used? */
+  if (LJ_UNLIKELY(!(as->flags & JIT_F_OPT_DCE))) uselo = usehi = 1;
+#if LJ_HASFFI || LJ_SOFTFP
+  if ((ir-1)->o == IR_CONV) {  /* Conversions to/from 64 bit. */
+    as->curins--;  /* Always skip the CONV. */
+#if LJ_HASFFI && !LJ_SOFTFP
+    if (usehi || uselo)
+      asm_conv64(as, ir);
+    return;
+#endif
+  } else if ((ir-1)->o <= IR_NE) {  /* 64 bit integer comparisons. ORDER IR. */
+    as->curins--;  /* Always skip the loword comparison. */
+#if LJ_SOFTFP
+    if (!irt_isint(ir->t)) {
+      asm_sfpcomp(as, ir-1);
+      return;
+    }
+#endif
+#if LJ_HASFFI
+    asm_comp64(as, ir);
+#endif
+    return;
+#if LJ_SOFTFP
+  } else if ((ir-1)->o == IR_MIN || (ir-1)->o == IR_MAX) {
+      as->curins--;  /* Always skip the loword min/max. */
+    if (uselo || usehi)
+      asm_sfpmin_max(as, ir-1);
+    return;
+#endif
+  } else if ((ir-1)->o == IR_XSTORE) {
+    as->curins--;  /* Handle both stores here. */
+    if ((ir-1)->r != RID_SINK) {
+      asm_xstore_(as, ir, 0);
+      asm_xstore_(as, ir-1, 4);
+    }
+    return;
+  }
+#endif
+  if (!usehi) return;  /* Skip unused hiword op for all remaining ops. */
+  switch ((ir-1)->o) {
+#if LJ_HASFFI
+  case IR_ADD: as->curins--; asm_add64(as, ir); break;
+  case IR_SUB: as->curins--; asm_sub64(as, ir); break;
+  case IR_NEG: as->curins--; asm_neg64(as, ir); break;
+  case IR_CNEWI:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+#if LJ_SOFTFP
+  case IR_SLOAD: case IR_ALOAD: case IR_HLOAD: case IR_ULOAD: case IR_VLOAD:
+  case IR_STRTO:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RSET_GPR);  /* Mark lo op as used. */
+    break;
+  case IR_ASTORE: case IR_HSTORE: case IR_USTORE: case IR_TOSTR: case IR_TMPREF:
+    /* Nothing to do here. Handled by lo op itself. */
+    break;
+#endif
+  case IR_CALLN: case IR_CALLL: case IR_CALLS: case IR_CALLXS:
+    if (!uselo)
+      ra_allocref(as, ir->op1, RID2RSET(RID_RETLO));  /* Mark lo op as used. */
+    break;
+  default: lj_assertA(0, "bad HIOP for op %d", (ir-1)->o); break;
+  }
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+static void asm_prof(ASMState *as, IRIns *ir)
+{
+  UNUSED(ir);
+  asm_guardcc(as, CC_NE);
+  emit_asi(as, PPCI_ANDIDOT, RID_TMP, RID_TMP, HOOK_PROFILE);
+  emit_lsglptr(as, PPCI_LBZ, RID_TMP,
+	       (int32_t)offsetof(global_State, hookmask));
+}
+
+/* -- Stack handling ------------------------------------------------------ */
+
+/* Check Lua stack size for overflow. Use exit handler as fallback. */
+static void asm_stack_check(ASMState *as, BCReg topslot,
+			    IRIns *irp, RegSet allow, ExitNo exitno)
+{
+  /* Try to get an unused temp. register, otherwise spill/restore RID_RET*. */
+  Reg tmp, pbase = irp ? (ra_hasreg(irp->r) ? irp->r : RID_TMP) : RID_BASE;
+  rset_clear(allow, pbase);
+  tmp = allow ? rset_pickbot(allow) :
+		(pbase == RID_RETHI ? RID_RETLO : RID_RETHI);
+  emit_condbranch(as, PPCI_BC, CC_LT, asm_exitstub_addr(as, exitno));
+  if (allow == RSET_EMPTY)  /* Restore temp. register. */
+    emit_tai(as, PPCI_LWZ, tmp, RID_SP, SPOFS_TMPW);
+  else
+    ra_modified(as, tmp);
+  emit_ai(as, PPCI_CMPLWI, RID_TMP, (int32_t)(8*topslot));
+  emit_tab(as, PPCI_SUBF, RID_TMP, pbase, tmp);
+  emit_tai(as, PPCI_LWZ, tmp, tmp, offsetof(lua_State, maxstack));
+  if (pbase == RID_TMP)
+    emit_getgl(as, RID_TMP, jit_base);
+  emit_getgl(as, tmp, cur_L);
+  if (allow == RSET_EMPTY)  /* Spill temp. register. */
+    emit_tai(as, PPCI_STW, tmp, RID_SP, SPOFS_TMPW);
+}
+
+/* Restore Lua stack from on-trace state. */
+static void asm_stack_restore(ASMState *as, SnapShot *snap)
+{
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+  SnapEntry *flinks = &as->T->snapmap[snap_nextofs(as->T, snap)-1];
+  MSize n, nent = snap->nent;
+  /* Store the value of all modified slots to the Lua stack. */
+  for (n = 0; n < nent; n++) {
+    SnapEntry sn = map[n];
+    BCReg s = snap_slot(sn);
+    int32_t ofs = 8*((int32_t)s-1);
+    IRRef ref = snap_ref(sn);
+    IRIns *ir = IR(ref);
+    if ((sn & SNAP_NORESTORE))
+      continue;
+    if (irt_isnum(ir->t)) {
+#if LJ_SOFTFP
+      Reg tmp;
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      /* LJ_SOFTFP: must be a number constant. */
+      lj_assertA(irref_isk(ref), "unsplit FP op");
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.lo, allow);
+      emit_tai(as, PPCI_STW, tmp, RID_BASE, ofs+(LJ_BE?4:0));
+      if (rset_test(as->freeset, tmp+1)) allow = RID2RSET(tmp+1);
+      tmp = ra_allock(as, (int32_t)ir_knum(ir)->u32.hi, allow);
+      emit_tai(as, PPCI_STW, tmp, RID_BASE, ofs+(LJ_BE?0:4));
+#else
+      Reg src = ra_alloc1(as, ref, RSET_FPR);
+      emit_fai(as, PPCI_STFD, src, RID_BASE, ofs);
+#endif
+    } else {
+      Reg type;
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      lj_assertA(irt_ispri(ir->t) || irt_isaddr(ir->t) || irt_isinteger(ir->t),
+		 "restore of IR type %d", irt_type(ir->t));
+      if (!irt_ispri(ir->t)) {
+	Reg src = ra_alloc1(as, ref, allow);
+	rset_clear(allow, src);
+	emit_tai(as, PPCI_STW, src, RID_BASE, ofs+4);
+      }
+      if ((sn & (SNAP_CONT|SNAP_FRAME))) {
+	if (s == 0) continue;  /* Do not overwrite link to previous frame. */
+	type = ra_allock(as, (int32_t)(*flinks--), allow);
+#if LJ_SOFTFP
+      } else if ((sn & SNAP_SOFTFPNUM)) {
+	type = ra_alloc1(as, ref+1, rset_exclude(RSET_GPR, RID_BASE));
+#endif
+      } else if ((sn & SNAP_KEYINDEX)) {
+	type = ra_allock(as, (int32_t)LJ_KEYINDEX, allow);
+      } else {
+	type = ra_allock(as, (int32_t)irt_toitype(ir->t), allow);
+      }
+      emit_tai(as, PPCI_STW, type, RID_BASE, ofs);
+    }
+    checkmclim(as);
+  }
+  lj_assertA(map + nent == flinks, "inconsistent frames in snapshot");
+}
+
+/* -- GC handling --------------------------------------------------------- */
+
+/* Marker to prevent patching the GC check exit. */
+#define PPC_NOPATCH_GC_CHECK	PPCI_ORIS
+
+/* Check GC threshold and do one or more GC steps. */
+static void asm_gc_check(ASMState *as)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
+  IRRef args[2];
+  MCLabel l_end;
+  Reg tmp;
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
+  asm_guardcc(as, CC_NE);  /* Assumes asm_snap_prep() already done. */
+  *--as->mcp = PPC_NOPATCH_GC_CHECK;
+  emit_ai(as, PPCI_CMPWI, RID_RET, 0);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  asm_gencall(as, ci, args);
+  emit_tai(as, PPCI_ADDI, ra_releasetmp(as, ASMREF_TMP1), RID_JGL, -32768);
+  tmp = ra_releasetmp(as, ASMREF_TMP2);
+  emit_loadi(as, tmp, as->gcsteps);
+  /* Jump around GC step if GC total < GC threshold. */
+  emit_condbranch(as, PPCI_BC|PPCF_Y, CC_LT, l_end);
+  emit_ab(as, PPCI_CMPLW, RID_TMP, tmp);
+  emit_getgl(as, tmp, gc.threshold);
+  emit_getgl(as, RID_TMP, gc.total);
+  as->gcsteps = 0;
+  checkmclim(as);
+}
+
+/* -- Loop handling ------------------------------------------------------- */
+
+/* Fixup the loop branch. */
+static void asm_loop_fixup(ASMState *as)
+{
+  MCode *p = as->mctop;
+  MCode *target = as->mcp;
+  if (as->loopinv) {  /* Inverted loop branch? */
+    /* asm_guardcc already inverted the cond branch and patched the final b. */
+    p[-2] = (p[-2] & (0xffff0000u & ~PPCF_Y)) | (((target-p+2) & 0x3fffu) << 2);
+  } else {
+    p[-1] = PPCI_B|(((target-p+1)&0x00ffffffu)<<2);
+  }
+}
+
+/* Fixup the tail of the loop. */
+static void asm_loop_tail_fixup(ASMState *as)
+{
+  UNUSED(as);  /* Nothing to do. */
+}
+
+/* -- Head of trace ------------------------------------------------------- */
+
+/* Coalesce BASE register for a root trace. */
+static void asm_head_root_base(ASMState *as)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (r != RID_BASE)
+      emit_mr(as, r, RID_BASE);
+  }
+}
+
+/* Coalesce BASE register for a side trace. */
+static RegSet asm_head_side_base(ASMState *as, IRIns *irp, RegSet allow)
+{
+  IRIns *ir = IR(REF_BASE);
+  Reg r = ir->r;
+  if (ra_hasreg(r)) {
+    ra_free(as, r);
+    if (rset_test(as->modset, r) || irt_ismarked(ir->t))
+      ir->r = RID_INIT;  /* No inheritance for modified BASE register. */
+    if (irp->r == r) {
+      rset_clear(allow, r);  /* Mark same BASE register as coalesced. */
+    } else if (ra_hasreg(irp->r) && rset_test(as->freeset, irp->r)) {
+      rset_clear(allow, irp->r);
+      emit_mr(as, r, irp->r);  /* Move from coalesced parent reg. */
+    } else {
+      emit_getgl(as, r, jit_base);  /* Otherwise reload BASE. */
+    }
+  }
+  return allow;
+}
+
+/* -- Tail of trace ------------------------------------------------------- */
+
+/* Fixup the tail code. */
+static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+{
+  MCode *p = as->mctop;
+  MCode *target;
+  int32_t spadj = as->T->spadjust;
+  if (spadj == 0) {
+    *--p = PPCI_NOP;
+    *--p = PPCI_NOP;
+    as->mctop = p;
+  } else {
+    /* Patch stack adjustment. */
+    lj_assertA(checki16(CFRAME_SIZE+spadj), "stack adjustment out of range");
+    p[-3] = PPCI_ADDI | PPCF_T(RID_TMP) | PPCF_A(RID_SP) | (CFRAME_SIZE+spadj);
+    p[-2] = PPCI_STWU | PPCF_T(RID_TMP) | PPCF_A(RID_SP) | spadj;
+  }
+  /* Patch exit branch. */
+  target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
+  p[-1] = PPCI_B|(((target-p+1)&0x00ffffffu)<<2);
+}
+
+/* Prepare tail of code. */
+static void asm_tail_prep(ASMState *as)
+{
+  MCode *p = as->mctop - 1;  /* Leave room for exit branch. */
+  if (as->loopref) {
+    as->invmcp = as->mcp = p;
+  } else {
+    as->mcp = p-2;  /* Leave room for stack pointer adjustment. */
+    as->invmcp = NULL;
+  }
+}
+
+/* -- Trace setup --------------------------------------------------------- */
+
+/* Ensure there are enough stack slots for call arguments. */
+static Reg asm_setup_call_slots(ASMState *as, IRIns *ir, const CCallInfo *ci)
+{
+  IRRef args[CCI_NARGS_MAX*2];
+  uint32_t i, nargs = CCI_XNARGS(ci);
+  int nslots = 2, ngpr = REGARG_NUMGPR, nfpr = REGARG_NUMFPR;
+  asm_collectargs(as, ir, ci, args);
+  for (i = 0; i < nargs; i++)
+    if (!LJ_SOFTFP && args[i] && irt_isfp(IR(args[i])->t)) {
+      if (nfpr > 0) nfpr--; else nslots = (nslots+3) & ~1;
+    } else {
+      if (ngpr > 0) ngpr--; else nslots++;
+    }
+  if (nslots > as->evenspill)  /* Leave room for args in stack slots. */
+    as->evenspill = nslots;
+  return (!LJ_SOFTFP && irt_isfp(ir->t)) ? REGSP_HINT(RID_FPRET) :
+					   REGSP_HINT(RID_RET);
+}
+
+static void asm_setup_target(ASMState *as)
+{
+  asm_exitstub_setup(as, as->T->nsnap + (as->parent ? 1 : 0));
+}
+
+/* -- Trace patching ------------------------------------------------------ */
+
+/* Patch exit jumps of existing machine code to a new target. */
+void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+{
+  MCode *p = T->mcode;
+  MCode *pe = (MCode *)((char *)p + T->szmcode);
+  MCode *px = exitstub_trace_addr(T, exitno);
+  MCode *cstart = NULL;
+  MCode *mcarea = lj_mcode_patch(J, p, 0);
+  int clearso = 0, patchlong = 1;
+  for (; p < pe; p++) {
+    /* Look for exitstub branch, try to replace with branch to target. */
+    uint32_t ins = *p;
+    if ((ins & 0xfc000000u) == 0x40000000u &&
+	((ins ^ ((char *)px-(char *)p)) & 0xffffu) == 0) {
+      ptrdiff_t delta = (char *)target - (char *)p;
+      if (((ins >> 16) & 3) == (CC_SO&3)) {
+	clearso = sizeof(MCode);
+	delta -= sizeof(MCode);
+      }
+      /* Many, but not all short-range branches can be patched directly. */
+      if (p[-1] == PPC_NOPATCH_GC_CHECK) {
+	patchlong = 0;
+      } else if (((delta + 0x8000) >> 16) == 0) {
+	*p = (ins & 0xffdf0000u) | ((uint32_t)delta & 0xffffu) |
+	     ((delta & 0x8000) * (PPCF_Y/0x8000));
+	if (!cstart) cstart = p;
+      }
+    } else if ((ins & 0xfc000000u) == PPCI_B &&
+	       ((ins ^ ((char *)px-(char *)p)) & 0x03ffffffu) == 0) {
+      ptrdiff_t delta = (char *)target - (char *)p;
+      lj_assertJ(((delta + 0x02000000) >> 26) == 0,
+		 "branch target out of range");
+      *p = PPCI_B | ((uint32_t)delta & 0x03ffffffu);
+      if (!cstart) cstart = p;
+    }
+  }
+  /* Always patch long-range branch in exit stub itself. Except, if we can't. */
+  if (patchlong) {
+    ptrdiff_t delta = (char *)target - (char *)px - clearso;
+    lj_assertJ(((delta + 0x02000000) >> 26) == 0,
+	       "branch target out of range");
+    *px = PPCI_B | ((uint32_t)delta & 0x03ffffffu);
+  }
+  if (!cstart) cstart = px;
+  lj_mcode_sync(cstart, px+1);
+  if (clearso) {  /* Extend the current trace. Ugly workaround. */
+    MCode *pp = J->cur.mcode;
+    J->cur.szmcode += sizeof(MCode);
+    *--pp = PPCI_MCRXR;  /* Clear SO flag. */
+    J->cur.mcode = pp;
+    lj_mcode_sync(pp, pp+1);
+  }
+  lj_mcode_patch(J, mcarea, 1);
+}
