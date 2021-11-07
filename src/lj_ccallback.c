@@ -652,3 +652,146 @@ static void callback_conv_result(CTState *cts, lua_State *L, TValue *o)
 #endif
     lj_cconv_ct_tv(cts, ctr, dp, o, 0);
 #ifdef CALLBACK_HANDLE_RET
+    CALLBACK_HANDLE_RET
+#endif
+    /* Extend returned integers to (at least) 32 bits. */
+    if (ctype_isinteger_or_bool(ctr->info) && ctr->size < 4) {
+      if (ctr->info & CTF_UNSIGNED)
+	*(uint32_t *)dp = ctr->size == 1 ? (uint32_t)*(uint8_t *)dp :
+					   (uint32_t)*(uint16_t *)dp;
+      else
+	*(int32_t *)dp = ctr->size == 1 ? (int32_t)*(int8_t *)dp :
+					  (int32_t)*(int16_t *)dp;
+    }
+#if LJ_TARGET_MIPS64 || (LJ_TARGET_ARM64 && LJ_BE)
+    /* Always sign-extend results to 64 bits. Even a soft-fp 'float'. */
+    if (ctr->size <= 4 &&
+	(LJ_ABI_SOFTFP || ctype_isinteger_or_bool(ctr->info)))
+      *(int64_t *)dp = (int64_t)*(int32_t *)dp;
+#endif
+#if LJ_TARGET_X86
+    if (ctype_isfp(ctr->info))
+      cts->cb.gpr[2] = ctr->size == sizeof(float) ? 1 : 2;
+#endif
+  }
+}
+
+/* Enter callback. */
+lua_State * LJ_FASTCALL lj_ccallback_enter(CTState *cts, void *cf)
+{
+  lua_State *L = cts->L;
+  global_State *g = cts->g;
+  lj_assertG(L != NULL, "uninitialized cts->L in callback");
+  if (tvref(g->jit_base)) {
+    setstrV(L, L->top++, lj_err_str(L, LJ_ERR_FFI_BADCBACK));
+    if (g->panic) g->panic(L);
+    exit(EXIT_FAILURE);
+  }
+  lj_trace_abort(g);  /* Never record across callback. */
+  /* Setup C frame. */
+  cframe_prev(cf) = L->cframe;
+  setcframe_L(cf, L);
+  cframe_errfunc(cf) = -1;
+  cframe_nres(cf) = 0;
+  L->cframe = cf;
+  callback_conv_args(cts, L);
+  return L;  /* Now call the function on this stack. */
+}
+
+/* Leave callback. */
+void LJ_FASTCALL lj_ccallback_leave(CTState *cts, TValue *o)
+{
+  lua_State *L = cts->L;
+  GCfunc *fn;
+  TValue *obase = L->base;
+  L->base = L->top;  /* Keep continuation frame for throwing errors. */
+  if (o >= L->base) {
+    /* PC of RET* is lost. Point to last line for result conv. errors. */
+    fn = curr_func(L);
+    if (isluafunc(fn)) {
+      GCproto *pt = funcproto(fn);
+      setcframe_pc(L->cframe, proto_bc(pt)+pt->sizebc+1);
+    }
+  }
+  callback_conv_result(cts, L, o);
+  /* Finally drop C frame and continuation frame. */
+  L->top -= 2+2*LJ_FR2;
+  L->base = obase;
+  L->cframe = cframe_prev(L->cframe);
+  cts->cb.slot = 0;  /* Blacklist C function that called the callback. */
+}
+
+/* -- C callback management ----------------------------------------------- */
+
+/* Get an unused slot in the callback slot table. */
+static MSize callback_slot_new(CTState *cts, CType *ct)
+{
+  CTypeID id = ctype_typeid(cts, ct);
+  CTypeID1 *cbid = cts->cb.cbid;
+  MSize top;
+  for (top = cts->cb.topid; top < cts->cb.sizeid; top++)
+    if (LJ_LIKELY(cbid[top] == 0))
+      goto found;
+#if CALLBACK_MAX_SLOT
+  if (top >= CALLBACK_MAX_SLOT)
+#endif
+    lj_err_caller(cts->L, LJ_ERR_FFI_CBACKOV);
+  if (!cts->cb.mcode)
+    callback_mcode_new(cts);
+  lj_mem_growvec(cts->L, cbid, cts->cb.sizeid, CALLBACK_MAX_SLOT, CTypeID1);
+  cts->cb.cbid = cbid;
+  memset(cbid+top, 0, (cts->cb.sizeid-top)*sizeof(CTypeID1));
+found:
+  cbid[top] = id;
+  cts->cb.topid = top+1;
+  return top;
+}
+
+/* Check for function pointer and supported argument/result types. */
+static CType *callback_checkfunc(CTState *cts, CType *ct)
+{
+  int narg = 0;
+  if (!ctype_isptr(ct->info) || (LJ_64 && ct->size != CTSIZE_PTR))
+    return NULL;
+  ct = ctype_rawchild(cts, ct);
+  if (ctype_isfunc(ct->info)) {
+    CType *ctr = ctype_rawchild(cts, ct);
+    CTypeID fid = ct->sib;
+    if (!(ctype_isvoid(ctr->info) || ctype_isenum(ctr->info) ||
+	  ctype_isptr(ctr->info) || (ctype_isnum(ctr->info) && ctr->size <= 8)))
+      return NULL;
+    if ((ct->info & CTF_VARARG))
+      return NULL;
+    while (fid) {
+      CType *ctf = ctype_get(cts, fid);
+      if (!ctype_isattrib(ctf->info)) {
+	CType *cta;
+	lj_assertCTS(ctype_isfield(ctf->info), "field expected");
+	cta = ctype_rawchild(cts, ctf);
+	if (!(ctype_isenum(cta->info) || ctype_isptr(cta->info) ||
+	      (ctype_isnum(cta->info) && cta->size <= 8)) ||
+	    ++narg >= LUA_MINSTACK-3)
+	  return NULL;
+      }
+      fid = ctf->sib;
+    }
+    return ct;
+  }
+  return NULL;
+}
+
+/* Create a new callback and return the callback function pointer. */
+void *lj_ccallback_new(CTState *cts, CType *ct, GCfunc *fn)
+{
+  ct = callback_checkfunc(cts, ct);
+  if (ct) {
+    MSize slot = callback_slot_new(cts, ct);
+    GCtab *t = cts->miscmap;
+    setfuncV(cts->L, lj_tab_setint(cts->L, t, (int32_t)slot), fn);
+    lj_gc_anybarriert(cts->L, t);
+    return callback_slot2ptr(cts, slot);
+  }
+  return NULL;  /* Bad conversion. */
+}
+
+#endif
