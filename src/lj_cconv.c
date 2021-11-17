@@ -61,4 +61,45 @@ static CType *cconv_childqual(CTState *cts, CType *ct, CTInfo *qual)
   ct = ctype_child(cts, ct);
   for (;;) {
     if (ctype_isattrib(ct->info)) {
-      if (ctype_attrib(ct->info) == CTA_QUAL) *qual |= ct-
+      if (ctype_attrib(ct->info) == CTA_QUAL) *qual |= ct->size;
+    } else if (!ctype_isenum(ct->info)) {
+      break;
+    }
+    ct = ctype_child(cts, ct);
+  }
+  *qual |= (ct->info & CTF_QUAL);
+  return ct;
+}
+
+/* Check for compatible types when converting to a pointer.
+** Note: these checks are more relaxed than what C99 mandates.
+*/
+int lj_cconv_compatptr(CTState *cts, CType *d, CType *s, CTInfo flags)
+{
+  if (!((flags & CCF_CAST) || d == s)) {
+    CTInfo dqual = 0, squal = 0;
+    d = cconv_childqual(cts, d, &dqual);
+    if (!ctype_isstruct(s->info))
+      s = cconv_childqual(cts, s, &squal);
+    if ((flags & CCF_SAME)) {
+      if (dqual != squal)
+	return 0;  /* Different qualifiers. */
+    } else if (!(flags & CCF_IGNQUAL)) {
+      if ((dqual & squal) != squal)
+	return 0;  /* Discarded qualifiers. */
+      if (ctype_isvoid(d->info) || ctype_isvoid(s->info))
+	return 1;  /* Converting to/from void * is always ok. */
+    }
+    if (ctype_type(d->info) != ctype_type(s->info) ||
+	d->size != s->size)
+      return 0;  /* Different type or different size. */
+    if (ctype_isnum(d->info)) {
+      if (((d->info ^ s->info) & (CTF_BOOL|CTF_FP)))
+	return 0;  /* Different numeric types. */
+    } else if (ctype_ispointer(d->info)) {
+      /* Check child types for compatibility. */
+      return lj_cconv_compatptr(cts, d, s, flags|CCF_SAME);
+    } else if (ctype_isstruct(d->info)) {
+      if (d != s)
+	return 0;  /* Must be exact same type for struct/union. */
+    } else if (cty
