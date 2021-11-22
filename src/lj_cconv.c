@@ -139,4 +139,53 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
   lj_assertCTS(!ctype_isbool(sinfo) || ssize == 1 || ssize == 4,
 	       "bad size for bool type");
   lj_assertCTS(!ctype_isinteger(dinfo) || (1u<<lj_fls(dsize)) == dsize,
-	       "bad size fo
+	       "bad size for integer type");
+  lj_assertCTS(!ctype_isinteger(sinfo) || (1u<<lj_fls(ssize)) == ssize,
+	       "bad size for integer type");
+
+  switch (cconv_idx2(dinfo, sinfo)) {
+  /* Destination is a bool. */
+  case CCX(B, B):
+    /* Source operand is already normalized. */
+    if (dsize == 1) *dp = *sp; else *(int *)dp = *sp;
+    break;
+  case CCX(B, I): {
+    MSize i;
+    uint8_t b = 0;
+    for (i = 0; i < ssize; i++) b |= sp[i];
+    b = (b != 0);
+    if (dsize == 1) *dp = b; else *(int *)dp = b;
+    break;
+    }
+  case CCX(B, F): {
+    uint8_t b;
+    if (ssize == sizeof(double)) b = (*(double *)sp != 0);
+    else if (ssize == sizeof(float)) b = (*(float *)sp != 0);
+    else goto err_conv;  /* NYI: long double. */
+    if (dsize == 1) *dp = b; else *(int *)dp = b;
+    break;
+    }
+
+  /* Destination is an integer. */
+  case CCX(I, B):
+  case CCX(I, I):
+  conv_I_I:
+    if (dsize > ssize) {  /* Zero-extend or sign-extend LSB. */
+#if LJ_LE
+      uint8_t fill = (!(sinfo & CTF_UNSIGNED) && (sp[ssize-1]&0x80)) ? 0xff : 0;
+      memcpy(dp, sp, ssize);
+      memset(dp + ssize, fill, dsize-ssize);
+#else
+      uint8_t fill = (!(sinfo & CTF_UNSIGNED) && (sp[0]&0x80)) ? 0xff : 0;
+      memset(dp, fill, dsize-ssize);
+      memcpy(dp + (dsize-ssize), sp, ssize);
+#endif
+    } else {  /* Copy LSB. */
+#if LJ_LE
+      memcpy(dp, sp, dsize);
+#else
+      memcpy(dp, sp + (ssize-dsize), dsize);
+#endif
+    }
+    break;
+  case CCX(I, F)
