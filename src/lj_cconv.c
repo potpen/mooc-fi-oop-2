@@ -102,4 +102,41 @@ int lj_cconv_compatptr(CTState *cts, CType *d, CType *s, CTInfo flags)
     } else if (ctype_isstruct(d->info)) {
       if (d != s)
 	return 0;  /* Must be exact same type for struct/union. */
-    } else if (cty
+    } else if (ctype_isfunc(d->info)) {
+      /* NYI: structural equality of functions. */
+    }
+  }
+  return 1;  /* Types are compatible. */
+}
+
+/* -- C type to C type conversion ----------------------------------------- */
+
+/* Convert C type to C type. Caveat: expects to get the raw CType!
+**
+** Note: This is only used by the interpreter and not optimized at all.
+** The JIT compiler will do a much better job specializing for each case.
+*/
+void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
+		    uint8_t *dp, uint8_t *sp, CTInfo flags)
+{
+  CTSize dsize = d->size, ssize = s->size;
+  CTInfo dinfo = d->info, sinfo = s->info;
+  void *tmpptr;
+
+  lj_assertCTS(!ctype_isenum(dinfo) && !ctype_isenum(sinfo),
+	       "unresolved enum");
+  lj_assertCTS(!ctype_isattrib(dinfo) && !ctype_isattrib(sinfo),
+	       "unstripped attribute");
+
+  if (ctype_type(dinfo) > CT_MAYCONVERT || ctype_type(sinfo) > CT_MAYCONVERT)
+    goto err_conv;
+
+  /* Some basic sanity checks. */
+  lj_assertCTS(!ctype_isnum(dinfo) || dsize > 0, "bad size for number type");
+  lj_assertCTS(!ctype_isnum(sinfo) || ssize > 0, "bad size for number type");
+  lj_assertCTS(!ctype_isbool(dinfo) || dsize == 1 || dsize == 4,
+	       "bad size for bool type");
+  lj_assertCTS(!ctype_isbool(sinfo) || ssize == 1 || ssize == 4,
+	       "bad size for bool type");
+  lj_assertCTS(!ctype_isinteger(dinfo) || (1u<<lj_fls(dsize)) == dsize,
+	       "bad size fo
