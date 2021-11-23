@@ -188,4 +188,48 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
 #endif
     }
     break;
-  case CCX(I, F)
+  case CCX(I, F): {
+    double n;  /* Always convert via double. */
+  conv_I_F:
+    /* Convert source to double. */
+    if (ssize == sizeof(double)) n = *(double *)sp;
+    else if (ssize == sizeof(float)) n = (double)*(float *)sp;
+    else goto err_conv;  /* NYI: long double. */
+    /* Then convert double to integer. */
+    /* The conversion must exactly match the semantics of JIT-compiled code! */
+    if (dsize < 4 || (dsize == 4 && !(dinfo & CTF_UNSIGNED))) {
+      int32_t i = (int32_t)n;
+      if (dsize == 4) *(int32_t *)dp = i;
+      else if (dsize == 2) *(int16_t *)dp = (int16_t)i;
+      else *(int8_t *)dp = (int8_t)i;
+    } else if (dsize == 4) {
+      *(uint32_t *)dp = (uint32_t)n;
+    } else if (dsize == 8) {
+      if (!(dinfo & CTF_UNSIGNED))
+	*(int64_t *)dp = (int64_t)n;
+      else
+	*(uint64_t *)dp = lj_num2u64(n);
+    } else {
+      goto err_conv;  /* NYI: conversion to >64 bit integers. */
+    }
+    break;
+    }
+  case CCX(I, C):
+    s = ctype_child(cts, s);
+    sinfo = s->info;
+    ssize = s->size;
+    goto conv_I_F;  /* Just convert re. */
+  case CCX(I, P):
+    if (!(flags & CCF_CAST)) goto err_conv;
+    sinfo = CTINFO(CT_NUM, CTF_UNSIGNED);
+    goto conv_I_I;
+  case CCX(I, A):
+    if (!(flags & CCF_CAST)) goto err_conv;
+    sinfo = CTINFO(CT_NUM, CTF_UNSIGNED);
+    ssize = CTSIZE_PTR;
+    tmpptr = sp;
+    sp = (uint8_t *)&tmpptr;
+    goto conv_I_I;
+
+  /* Destination is a floating-point number. */
+  case C
