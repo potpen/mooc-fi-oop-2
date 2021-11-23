@@ -273,4 +273,48 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     else if (ssize == sizeof(float)) n = (double)*(float *)sp;
     else goto err_conv;  /* NYI: long double. */
     /* Convert double to destination. */
-    if (dsize == sizeof(double)) *(dou
+    if (dsize == sizeof(double)) *(double *)dp = n;
+    else if (dsize == sizeof(float)) *(float *)dp = (float)n;
+    else goto err_conv;  /* NYI: long double. */
+    break;
+    }
+  case CCX(F, C):
+    s = ctype_child(cts, s);
+    sinfo = s->info;
+    ssize = s->size;
+    goto conv_F_F;  /* Ignore im, and convert from re. */
+
+  /* Destination is a complex number. */
+  case CCX(C, I):
+    d = ctype_child(cts, d);
+    dinfo = d->info;
+    dsize = d->size;
+    memset(dp + dsize, 0, dsize);  /* Clear im. */
+    goto conv_F_I;  /* Convert to re. */
+  case CCX(C, F):
+    d = ctype_child(cts, d);
+    dinfo = d->info;
+    dsize = d->size;
+    memset(dp + dsize, 0, dsize);  /* Clear im. */
+    goto conv_F_F;  /* Convert to re. */
+
+  case CCX(C, C):
+    if (dsize != ssize) {  /* Different types: convert re/im separately. */
+      CType *dc = ctype_child(cts, d);
+      CType *sc = ctype_child(cts, s);
+      lj_cconv_ct_ct(cts, dc, sc, dp, sp, flags);
+      lj_cconv_ct_ct(cts, dc, sc, dp + dc->size, sp + sc->size, flags);
+      return;
+    }
+    goto copyval;  /* Otherwise this is easy. */
+
+  /* Destination is a vector. */
+  case CCX(V, I):
+  case CCX(V, F):
+  case CCX(V, C): {
+    CType *dc = ctype_child(cts, d);
+    CTSize esize;
+    /* First convert the scalar to the first element. */
+    lj_cconv_ct_ct(cts, dc, s, dp, sp, flags);
+    /* Then replicate it to the other elements (splat). */
+    for (sp = dp, esize = dc->size; dsize > esize; dsize -= esize) {
