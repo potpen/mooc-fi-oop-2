@@ -232,4 +232,45 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     goto conv_I_I;
 
   /* Destination is a floating-point number. */
-  case C
+  case CCX(F, B):
+  case CCX(F, I): {
+    double n;  /* Always convert via double. */
+  conv_F_I:
+    /* First convert source to double. */
+    /* The conversion must exactly match the semantics of JIT-compiled code! */
+    if (ssize < 4 || (ssize == 4 && !(sinfo & CTF_UNSIGNED))) {
+      int32_t i;
+      if (ssize == 4) {
+	i = *(int32_t *)sp;
+      } else if (!(sinfo & CTF_UNSIGNED)) {
+	if (ssize == 2) i = *(int16_t *)sp;
+	else i = *(int8_t *)sp;
+      } else {
+	if (ssize == 2) i = *(uint16_t *)sp;
+	else i = *(uint8_t *)sp;
+      }
+      n = (double)i;
+    } else if (ssize == 4) {
+      n = (double)*(uint32_t *)sp;
+    } else if (ssize == 8) {
+      if (!(sinfo & CTF_UNSIGNED)) n = (double)*(int64_t *)sp;
+      else n = (double)*(uint64_t *)sp;
+    } else {
+      goto err_conv;  /* NYI: conversion from >64 bit integers. */
+    }
+    /* Convert double to destination. */
+    if (dsize == sizeof(double)) *(double *)dp = n;
+    else if (dsize == sizeof(float)) *(float *)dp = (float)n;
+    else goto err_conv;  /* NYI: long double. */
+    break;
+    }
+  case CCX(F, F): {
+    double n;  /* Always convert via double. */
+  conv_F_F:
+    if (ssize == dsize) goto copyval;
+    /* Convert source to double. */
+    if (ssize == sizeof(double)) n = *(double *)sp;
+    else if (ssize == sizeof(float)) n = (double)*(float *)sp;
+    else goto err_conv;  /* NYI: long double. */
+    /* Convert double to destination. */
+    if (dsize == sizeof(double)) *(dou
