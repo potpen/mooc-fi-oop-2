@@ -364,4 +364,47 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     if ((flags & CCF_CAST) || (d->info & CTF_VLA) || d != s)
       goto err_conv;  /* Must be exact same type. */
 copyval:  /* Copy value. */
-    lj_assertCTS(dsize == ssize, "value copy with different sizes"
+    lj_assertCTS(dsize == ssize, "value copy with different sizes");
+    memcpy(dp, sp, dsize);
+    break;
+
+  default:
+  err_conv:
+    cconv_err_conv(cts, d, s, flags);
+  }
+}
+
+/* -- C type to TValue conversion ----------------------------------------- */
+
+/* Convert C type to TValue. Caveat: expects to get the raw CType! */
+int lj_cconv_tv_ct(CTState *cts, CType *s, CTypeID sid,
+		   TValue *o, uint8_t *sp)
+{
+  CTInfo sinfo = s->info;
+  if (ctype_isnum(sinfo)) {
+    if (!ctype_isbool(sinfo)) {
+      if (ctype_isinteger(sinfo) && s->size > 4) goto copyval;
+      if (LJ_DUALNUM && ctype_isinteger(sinfo)) {
+	int32_t i;
+	lj_cconv_ct_ct(cts, ctype_get(cts, CTID_INT32), s,
+		       (uint8_t *)&i, sp, 0);
+	if ((sinfo & CTF_UNSIGNED) && i < 0)
+	  setnumV(o, (lua_Number)(uint32_t)i);
+	else
+	  setintV(o, i);
+      } else {
+	lj_cconv_ct_ct(cts, ctype_get(cts, CTID_DOUBLE), s,
+		       (uint8_t *)&o->n, sp, 0);
+	/* Numbers are NOT canonicalized here! Beware of uninitialized data. */
+	lj_assertCTS(tvisnum(o), "non-canonical NaN passed");
+      }
+    } else {
+      uint32_t b = s->size == 1 ? (*sp != 0) : (*(int *)sp != 0);
+      setboolV(o, b);
+      setboolV(&cts->g->tmptv2, b);  /* Remember for trace recorder. */
+    }
+    return 0;
+  } else if (ctype_isrefarray(sinfo) || ctype_isstruct(sinfo)) {
+    /* Create reference. */
+    setcdataV(cts->L, o, lj_cdata_newref(cts, sp, sid));
+    return 1;  /* Need GC step
