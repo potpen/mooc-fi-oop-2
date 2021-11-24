@@ -318,3 +318,50 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     lj_cconv_ct_ct(cts, dc, s, dp, sp, flags);
     /* Then replicate it to the other elements (splat). */
     for (sp = dp, esize = dc->size; dsize > esize; dsize -= esize) {
+      dp += esize;
+      memcpy(dp, sp, esize);
+    }
+    break;
+    }
+
+  case CCX(V, V):
+    /* Copy same-sized vectors, even for different lengths/element-types. */
+    if (dsize != ssize) goto err_conv;
+    goto copyval;
+
+  /* Destination is a pointer. */
+  case CCX(P, I):
+    if (!(flags & CCF_CAST)) goto err_conv;
+    dinfo = CTINFO(CT_NUM, CTF_UNSIGNED);
+    goto conv_I_I;
+
+  case CCX(P, F):
+    if (!(flags & CCF_CAST) || !(flags & CCF_FROMTV)) goto err_conv;
+    /* The signed conversion is cheaper. x64 really has 47 bit pointers. */
+    dinfo = CTINFO(CT_NUM, (LJ_64 && dsize == 8) ? 0 : CTF_UNSIGNED);
+    goto conv_I_F;
+
+  case CCX(P, P):
+    if (!lj_cconv_compatptr(cts, d, s, flags)) goto err_conv;
+    cdata_setptr(dp, dsize, cdata_getptr(sp, ssize));
+    break;
+
+  case CCX(P, A):
+  case CCX(P, S):
+    if (!lj_cconv_compatptr(cts, d, s, flags)) goto err_conv;
+    cdata_setptr(dp, dsize, sp);
+    break;
+
+  /* Destination is an array. */
+  case CCX(A, A):
+    if ((flags & CCF_CAST) || (d->info & CTF_VLA) || dsize != ssize ||
+	d->size == CTSIZE_INVALID || !lj_cconv_compatptr(cts, d, s, flags))
+      goto err_conv;
+    goto copyval;
+
+  /* Destination is a struct/union. */
+  case CCX(S, S):
+    if ((flags & CCF_CAST) || (d->info & CTF_VLA) || d != s)
+      goto err_conv;  /* Must be exact same type. */
+copyval:  /* Copy value. */
+    lj_assertCTS(dsize == ssize, "value copy with different sizes"
