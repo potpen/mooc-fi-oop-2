@@ -489,4 +489,49 @@ static void cconv_array_tab(CTState *cts, CType *d,
   if (size != CTSIZE_INVALID) {  /* Only fill up arrays with known size. */
     if (ofs == esize) {  /* Replicate a single element. */
       for (; ofs < size; ofs += esize) memcpy(dp + ofs, dp, esize);
-    } else {  /* Otherwise fill the
+    } else {  /* Otherwise fill the remainder with zero. */
+      memset(dp + ofs, 0, size - ofs);
+    }
+  }
+}
+
+/* Convert table to sub-struct/union. */
+static void cconv_substruct_tab(CTState *cts, CType *d, uint8_t *dp,
+				GCtab *t, int32_t *ip, CTInfo flags)
+{
+  CTypeID id = d->sib;
+  while (id) {
+    CType *df = ctype_get(cts, id);
+    id = df->sib;
+    if (ctype_isfield(df->info) || ctype_isbitfield(df->info)) {
+      TValue *tv;
+      int32_t i = *ip, iz = i;
+      if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+      if (i >= 0) {
+      retry:
+	tv = (TValue *)lj_tab_getint(t, i);
+	if (!tv || tvisnil(tv)) {
+	  if (i == 0) { i = 1; goto retry; }  /* 1-based tables. */
+	  if (iz == 0) { *ip = i = -1; goto tryname; }  /* Init named fields. */
+	  break;  /* Stop at first nil. */
+	}
+	*ip = i + 1;
+      } else {
+      tryname:
+	tv = (TValue *)lj_tab_getstr(t, gco2str(gcref(df->name)));
+	if (!tv || tvisnil(tv)) continue;
+      }
+      if (ctype_isfield(df->info))
+	lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, tv, flags);
+      else
+	lj_cconv_bf_tv(cts, df, dp+df->size, tv);
+      if ((d->info & CTF_UNION)) break;
+    } else if (ctype_isxattrib(df->info, CTA_SUBTYPE)) {
+      cconv_substruct_tab(cts, ctype_rawchild(cts, df),
+			  dp+df->size, t, ip, flags);
+    }  /* Ignore all other entries in the chain. */
+  }
+}
+
+/* Convert table to struct/union. */
+static void cconv_struct_tab(CTState *cts, CT
