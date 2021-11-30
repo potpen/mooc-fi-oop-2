@@ -449,4 +449,44 @@ int lj_cconv_tv_bf(CTState *cts, CType *s, TValue *o, uint8_t *sp)
   if (!(info & CTF_BOOL)) {
     CTSize shift = 32 - bsz;
     if (!(info & CTF_UNSIGNED)) {
-      setintV(o, (int3
+      setintV(o, (int32_t)(val << (shift-pos)) >> shift);
+    } else {
+      val = (val << (shift-pos)) >> shift;
+      if (!LJ_DUALNUM || (int32_t)val < 0)
+	setnumV(o, (lua_Number)(uint32_t)val);
+      else
+	setintV(o, (int32_t)val);
+    }
+  } else {
+    uint32_t b = (val >> pos) & 1;
+    lj_assertCTS(bsz == 1, "bad bool bitfield size");
+    setboolV(o, b);
+    setboolV(&cts->g->tmptv2, b);  /* Remember for trace recorder. */
+  }
+  return 0;  /* No GC step needed. */
+}
+
+/* -- TValue to C type conversion ----------------------------------------- */
+
+/* Convert table to array. */
+static void cconv_array_tab(CTState *cts, CType *d,
+			    uint8_t *dp, GCtab *t, CTInfo flags)
+{
+  int32_t i;
+  CType *dc = ctype_rawchild(cts, d);  /* Array element type. */
+  CTSize size = d->size, esize = dc->size, ofs = 0;
+  for (i = 0; ; i++) {
+    TValue *tv = (TValue *)lj_tab_getint(t, i);
+    if (!tv || tvisnil(tv)) {
+      if (i == 0) continue;  /* Try again for 1-based tables. */
+      break;  /* Stop at first nil. */
+    }
+    if (ofs >= size)
+      cconv_err_initov(cts, d);
+    lj_cconv_ct_tv(cts, dc, dp + ofs, tv, flags);
+    ofs += esize;
+  }
+  if (size != CTSIZE_INVALID) {  /* Only fill up arrays with known size. */
+    if (ofs == esize) {  /* Replicate a single element. */
+      for (; ofs < size; ofs += esize) memcpy(dp + ofs, dp, esize);
+    } else {  /* Otherwise fill the
