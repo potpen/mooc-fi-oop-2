@@ -407,4 +407,46 @@ int lj_cconv_tv_ct(CTState *cts, CType *s, CTypeID sid,
   } else if (ctype_isrefarray(sinfo) || ctype_isstruct(sinfo)) {
     /* Create reference. */
     setcdataV(cts->L, o, lj_cdata_newref(cts, sp, sid));
-    return 1;  /* Need GC step
+    return 1;  /* Need GC step. */
+  } else {
+    GCcdata *cd;
+    CTSize sz;
+  copyval:  /* Copy value. */
+    sz = s->size;
+    lj_assertCTS(sz != CTSIZE_INVALID, "value copy with invalid size");
+    /* Attributes are stripped, qualifiers are kept (but mostly ignored). */
+    cd = lj_cdata_new(cts, ctype_typeid(cts, s), sz);
+    setcdataV(cts->L, o, cd);
+    memcpy(cdataptr(cd), sp, sz);
+    return 1;  /* Need GC step. */
+  }
+}
+
+/* Convert bitfield to TValue. */
+int lj_cconv_tv_bf(CTState *cts, CType *s, TValue *o, uint8_t *sp)
+{
+  CTInfo info = s->info;
+  CTSize pos, bsz;
+  uint32_t val;
+  lj_assertCTS(ctype_isbitfield(info), "bitfield expected");
+  /* NYI: packed bitfields may cause misaligned reads. */
+  switch (ctype_bitcsz(info)) {
+  case 4: val = *(uint32_t *)sp; break;
+  case 2: val = *(uint16_t *)sp; break;
+  case 1: val = *(uint8_t *)sp; break;
+  default:
+    lj_assertCTS(0, "bad bitfield container size %d", ctype_bitcsz(info));
+    val = 0;
+    break;
+  }
+  /* Check if a packed bitfield crosses a container boundary. */
+  pos = ctype_bitpos(info);
+  bsz = ctype_bitbsz(info);
+  lj_assertCTS(pos < 8*ctype_bitcsz(info), "bad bitfield position");
+  lj_assertCTS(bsz > 0 && bsz <= 8*ctype_bitcsz(info), "bad bitfield size");
+  if (pos + bsz > 8*ctype_bitcsz(info))
+    lj_err_caller(cts->L, LJ_ERR_FFI_NYIPACKBIT);
+  if (!(info & CTF_BOOL)) {
+    CTSize shift = 32 - bsz;
+    if (!(info & CTF_UNSIGNED)) {
+      setintV(o, (int3
