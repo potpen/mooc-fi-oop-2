@@ -534,4 +534,47 @@ static void cconv_substruct_tab(CTState *cts, CType *d, uint8_t *dp,
 }
 
 /* Convert table to struct/union. */
-static void cconv_struct_tab(CTState *cts, CT
+static void cconv_struct_tab(CTState *cts, CType *d,
+			     uint8_t *dp, GCtab *t, CTInfo flags)
+{
+  int32_t i = 0;
+  memset(dp, 0, d->size);  /* Much simpler to clear the struct first. */
+  cconv_substruct_tab(cts, d, dp, t, &i, flags);
+}
+
+/* Convert TValue to C type. Caveat: expects to get the raw CType! */
+void lj_cconv_ct_tv(CTState *cts, CType *d,
+		    uint8_t *dp, TValue *o, CTInfo flags)
+{
+  CTypeID sid = CTID_P_VOID;
+  CType *s;
+  void *tmpptr;
+  uint8_t tmpbool, *sp = (uint8_t *)&tmpptr;
+  if (LJ_LIKELY(tvisint(o))) {
+    sp = (uint8_t *)&o->i;
+    sid = CTID_INT32;
+    flags |= CCF_FROMTV;
+  } else if (LJ_LIKELY(tvisnum(o))) {
+    sp = (uint8_t *)&o->n;
+    sid = CTID_DOUBLE;
+    flags |= CCF_FROMTV;
+  } else if (tviscdata(o)) {
+    sp = cdataptr(cdataV(o));
+    sid = cdataV(o)->ctypeid;
+    s = ctype_get(cts, sid);
+    if (ctype_isref(s->info)) {  /* Resolve reference for value. */
+      lj_assertCTS(s->size == CTSIZE_PTR, "ref is not pointer-sized");
+      sp = *(void **)sp;
+      sid = ctype_cid(s->info);
+    }
+    s = ctype_raw(cts, sid);
+    if (ctype_isfunc(s->info)) {
+      CTypeID did = ctype_typeid(cts, d);
+      sid = lj_ctype_intern(cts, CTINFO(CT_PTR, CTALIGN_PTR|sid), CTSIZE_PTR);
+      d = ctype_get(cts, did);  /* cts->tab may have been reallocated. */
+    } else {
+      if (ctype_isenum(s->info)) s = ctype_child(cts, s);
+      goto doconv;
+    }
+  } else if (tvisstr(o)) {
+    GCs
