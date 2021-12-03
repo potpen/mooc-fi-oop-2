@@ -577,4 +577,48 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
       goto doconv;
     }
   } else if (tvisstr(o)) {
-    GCs
+    GCstr *str = strV(o);
+    if (ctype_isenum(d->info)) {  /* Match string against enum constant. */
+      CTSize ofs;
+      CType *cct = lj_ctype_getfield(cts, d, str, &ofs);
+      if (!cct || !ctype_isconstval(cct->info))
+	goto err_conv;
+      lj_assertCTS(d->size == 4, "only 32 bit enum supported");  /* NYI */
+      sp = (uint8_t *)&cct->size;
+      sid = ctype_cid(cct->info);
+    } else if (ctype_isrefarray(d->info)) {  /* Copy string to array. */
+      CType *dc = ctype_rawchild(cts, d);
+      CTSize sz = str->len+1;
+      if (!ctype_isinteger(dc->info) || dc->size != 1)
+	goto err_conv;
+      if (d->size != 0 && d->size < sz)
+	sz = d->size;
+      memcpy(dp, strdata(str), sz);
+      return;
+    } else {  /* Otherwise pass it as a const char[]. */
+      sp = (uint8_t *)strdata(str);
+      sid = CTID_A_CCHAR;
+      flags |= CCF_FROMTV;
+    }
+  } else if (tvistab(o)) {
+    if (ctype_isarray(d->info)) {
+      cconv_array_tab(cts, d, dp, tabV(o), flags);
+      return;
+    } else if (ctype_isstruct(d->info)) {
+      cconv_struct_tab(cts, d, dp, tabV(o), flags);
+      return;
+    } else {
+      goto err_conv;
+    }
+  } else if (tvisbool(o)) {
+    tmpbool = boolV(o);
+    sp = &tmpbool;
+    sid = CTID_BOOL;
+  } else if (tvisnil(o)) {
+    tmpptr = (void *)0;
+    flags |= CCF_FROMTV;
+  } else if (tvisudata(o)) {
+    GCudata *ud = udataV(o);
+    tmpptr = uddata(ud);
+    if (ud->udtype == UDTYPE_IO_FILE)
+      tmpptr = *(vo
