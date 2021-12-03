@@ -665,4 +665,40 @@ void lj_cconv_bf_tv(CTState *cts, CType *d, uint8_t *dp, TValue *o)
   lj_assertCTS(bsz > 0 && bsz <= 8*ctype_bitcsz(info), "bad bitfield size");
   /* Check if a packed bitfield crosses a container boundary. */
   if (pos + bsz > 8*ctype_bitcsz(info))
-    l
+    lj_err_caller(cts->L, LJ_ERR_FFI_NYIPACKBIT);
+  mask = ((1u << bsz) - 1u) << pos;
+  val = (val << pos) & mask;
+  /* NYI: packed bitfields may cause misaligned reads/writes. */
+  switch (ctype_bitcsz(info)) {
+  case 4: *(uint32_t *)dp = (*(uint32_t *)dp & ~mask) | (uint32_t)val; break;
+  case 2: *(uint16_t *)dp = (*(uint16_t *)dp & ~mask) | (uint16_t)val; break;
+  case 1: *(uint8_t *)dp = (*(uint8_t *)dp & ~mask) | (uint8_t)val; break;
+  default:
+    lj_assertCTS(0, "bad bitfield container size %d", ctype_bitcsz(info));
+    break;
+  }
+}
+
+/* -- Initialize C type with TValues -------------------------------------- */
+
+/* Initialize an array with TValues. */
+static void cconv_array_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
+			     TValue *o, MSize len)
+{
+  CType *dc = ctype_rawchild(cts, d);  /* Array element type. */
+  CTSize ofs, esize = dc->size;
+  MSize i;
+  if (len*esize > sz)
+    cconv_err_initov(cts, d);
+  for (i = 0, ofs = 0; i < len; i++, ofs += esize)
+    lj_cconv_ct_tv(cts, dc, dp + ofs, o + i, 0);
+  if (ofs == esize) {  /* Replicate a single element. */
+    for (; ofs < sz; ofs += esize) memcpy(dp + ofs, dp, esize);
+  } else {  /* Otherwise fill the remainder with zero. */
+    memset(dp + ofs, 0, sz - ofs);
+  }
+}
+
+/* Initialize a sub-struct/union with TValues. */
+static void cconv_substruct_init(CTState *cts, CType *d, uint8_t *dp,
+				 TValu
