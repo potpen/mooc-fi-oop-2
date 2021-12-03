@@ -621,4 +621,48 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
     GCudata *ud = udataV(o);
     tmpptr = uddata(ud);
     if (ud->udtype == UDTYPE_IO_FILE)
-      tmpptr = *(vo
+      tmpptr = *(void **)tmpptr;
+    else if (ud->udtype == UDTYPE_BUFFER)
+      tmpptr = ((SBufExt *)tmpptr)->r;
+  } else if (tvislightud(o)) {
+    tmpptr = lightudV(cts->g, o);
+  } else if (tvisfunc(o)) {
+    void *p = lj_ccallback_new(cts, d, funcV(o));
+    if (p) {
+      *(void **)dp = p;
+      return;
+    }
+    goto err_conv;
+  } else {
+  err_conv:
+    cconv_err_convtv(cts, d, o, flags);
+  }
+  s = ctype_get(cts, sid);
+doconv:
+  if (ctype_isenum(d->info)) d = ctype_child(cts, d);
+  lj_cconv_ct_ct(cts, d, s, dp, sp, flags);
+}
+
+/* Convert TValue to bitfield. */
+void lj_cconv_bf_tv(CTState *cts, CType *d, uint8_t *dp, TValue *o)
+{
+  CTInfo info = d->info;
+  CTSize pos, bsz;
+  uint32_t val, mask;
+  lj_assertCTS(ctype_isbitfield(info), "bitfield expected");
+  if ((info & CTF_BOOL)) {
+    uint8_t tmpbool;
+    lj_assertCTS(ctype_bitbsz(info) == 1, "bad bool bitfield size");
+    lj_cconv_ct_tv(cts, ctype_get(cts, CTID_BOOL), &tmpbool, o, 0);
+    val = tmpbool;
+  } else {
+    CTypeID did = (info & CTF_UNSIGNED) ? CTID_UINT32 : CTID_INT32;
+    lj_cconv_ct_tv(cts, ctype_get(cts, did), (uint8_t *)&val, o, 0);
+  }
+  pos = ctype_bitpos(info);
+  bsz = ctype_bitbsz(info);
+  lj_assertCTS(pos < 8*ctype_bitcsz(info), "bad bitfield position");
+  lj_assertCTS(bsz > 0 && bsz <= 8*ctype_bitcsz(info), "bad bitfield size");
+  /* Check if a packed bitfield crosses a container boundary. */
+  if (pos + bsz > 8*ctype_bitcsz(info))
+    l
