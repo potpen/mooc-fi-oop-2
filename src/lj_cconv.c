@@ -701,4 +701,45 @@ static void cconv_array_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
 
 /* Initialize a sub-struct/union with TValues. */
 static void cconv_substruct_init(CTState *cts, CType *d, uint8_t *dp,
-				 TValu
+				 TValue *o, MSize len, MSize *ip)
+{
+  CTypeID id = d->sib;
+  while (id) {
+    CType *df = ctype_get(cts, id);
+    id = df->sib;
+    if (ctype_isfield(df->info) || ctype_isbitfield(df->info)) {
+      MSize i = *ip;
+      if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+      if (i >= len) break;
+      *ip = i + 1;
+      if (ctype_isfield(df->info))
+	lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, o + i, 0);
+      else
+	lj_cconv_bf_tv(cts, df, dp+df->size, o + i);
+      if ((d->info & CTF_UNION)) break;
+    } else if (ctype_isxattrib(df->info, CTA_SUBTYPE)) {
+      cconv_substruct_init(cts, ctype_rawchild(cts, df),
+			   dp+df->size, o, len, ip);
+      if ((d->info & CTF_UNION)) break;
+    }  /* Ignore all other entries in the chain. */
+  }
+}
+
+/* Initialize a struct/union with TValues. */
+static void cconv_struct_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
+			      TValue *o, MSize len)
+{
+  MSize i = 0;
+  memset(dp, 0, sz);  /* Much simpler to clear the struct first. */
+  cconv_substruct_init(cts, d, dp, o, len, &i);
+  if (i < len)
+    cconv_err_initov(cts, d);
+}
+
+/* Check whether to use a multi-value initializer.
+** This is true if an aggregate is to be initialized with a value.
+** Valarrays are treated as values here so ct_tv handles (V|C, I|F).
+*/
+int lj_cconv_multi_init(CTState *cts, CType *d, TValue *o)
+{
+  if (!(ctype_isrefarray(d->info) || ctype_isstruct(d
