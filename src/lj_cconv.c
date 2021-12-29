@@ -742,4 +742,29 @@ static void cconv_struct_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
 */
 int lj_cconv_multi_init(CTState *cts, CType *d, TValue *o)
 {
-  if (!(ctype_isrefarray(d->info) || ctype_isstruct(d
+  if (!(ctype_isrefarray(d->info) || ctype_isstruct(d->info)))
+    return 0;  /* Destination is not an aggregate. */
+  if (tvistab(o) || (tvisstr(o) && !ctype_isstruct(d->info)))
+    return 0;  /* Initializer is not a value. */
+  if (tviscdata(o) && lj_ctype_rawref(cts, cdataV(o)->ctypeid) == d)
+    return 0;  /* Source and destination are identical aggregates. */
+  return 1;  /* Otherwise the initializer is a value. */
+}
+
+/* Initialize C type with TValues. Caveat: expects to get the raw CType! */
+void lj_cconv_ct_init(CTState *cts, CType *d, CTSize sz,
+		      uint8_t *dp, TValue *o, MSize len)
+{
+  if (len == 0)
+    memset(dp, 0, sz);
+  else if (len == 1 && !lj_cconv_multi_init(cts, d, o))
+    lj_cconv_ct_tv(cts, d, dp, o, 0);
+  else if (ctype_isarray(d->info))  /* Also handles valarray init with len>1. */
+    cconv_array_init(cts, d, sz, dp, o, len);
+  else if (ctype_isstruct(d->info))
+    cconv_struct_init(cts, d, sz, dp, o, len);
+  else
+    cconv_err_initov(cts, d);
+}
+
+#endif
