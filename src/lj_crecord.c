@@ -110,4 +110,53 @@ static IRType crec_ct2irt(CTState *cts, CType *ct)
 	return IRT_I8 + 2*b + ((ct->info & CTF_UNSIGNED) ? 1 : 0);
     }
   } else if (ctype_isptr(ct->info)) {
-    return (LJ_64 && ct->size == 8) 
+    return (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
+  } else if (ctype_iscomplex(ct->info)) {
+    if (ct->size == 2*sizeof(double))
+      return IRT_NUM;
+    else if (ct->size == 2*sizeof(float))
+      return IRT_FLOAT;
+  }
+  return IRT_CDATA;
+}
+
+/* -- Optimized memory fill and copy -------------------------------------- */
+
+/* Maximum length and unroll of inlined copy/fill. */
+#define CREC_COPY_MAXUNROLL		16
+#define CREC_COPY_MAXLEN		128
+
+#define CREC_FILL_MAXUNROLL		16
+
+/* Number of windowed registers used for optimized memory copy. */
+#if LJ_TARGET_X86
+#define CREC_COPY_REGWIN		2
+#elif LJ_TARGET_PPC || LJ_TARGET_MIPS
+#define CREC_COPY_REGWIN		8
+#else
+#define CREC_COPY_REGWIN		4
+#endif
+
+/* List of memory offsets for copy/fill. */
+typedef struct CRecMemList {
+  CTSize ofs;		/* Offset in bytes. */
+  IRType tp;		/* Type of load/store. */
+  TRef trofs;		/* TRef of interned offset. */
+  TRef trval;		/* TRef of load value. */
+} CRecMemList;
+
+/* Generate copy list for element-wise struct copy. */
+static MSize crec_copy_struct(CRecMemList *ml, CTState *cts, CType *ct)
+{
+  CTypeID fid = ct->sib;
+  MSize mlp = 0;
+  while (fid) {
+    CType *df = ctype_get(cts, fid);
+    fid = df->sib;
+    if (ctype_isfield(df->info)) {
+      CType *cct;
+      IRType tp;
+      if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+      cct = ctype_rawchild(cts, df);  /* Field type. */
+      tp = crec_ct2irt(cts, cct);
+    
