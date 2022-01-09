@@ -211,4 +211,50 @@ static void crec_copy_emit(jit_State *J, CRecMemList *ml, MSize mlp,
     TRef trofs = lj_ir_kintp(J, ml[i].ofs);
     TRef trsptr = emitir(IRT(IR_ADD, IRT_PTR), trsrc, trofs);
     ml[i].trval = emitir(IRT(IR_XLOAD, ml[i].tp), trsptr, 0);
-    ml[i].trofs = 
+    ml[i].trofs = trofs;
+    i++;
+    rwin += (LJ_SOFTFP32 && ml[i].tp == IRT_NUM) ? 2 : 1;
+    if (rwin >= CREC_COPY_REGWIN || i >= mlp) {  /* Flush buffered stores. */
+      rwin = 0;
+      for ( ; j < i; j++) {
+	TRef trdptr = emitir(IRT(IR_ADD, IRT_PTR), trdst, ml[j].trofs);
+	emitir(IRT(IR_XSTORE, ml[j].tp), trdptr, ml[j].trval);
+      }
+    }
+  }
+}
+
+/* Optimized memory copy. */
+static void crec_copy(jit_State *J, TRef trdst, TRef trsrc, TRef trlen,
+		      CType *ct)
+{
+  if (tref_isk(trlen)) {  /* Length must be constant. */
+    CRecMemList ml[CREC_COPY_MAXUNROLL];
+    MSize mlp = 0;
+    CTSize step = 1, len = (CTSize)IR(tref_ref(trlen))->i;
+    IRType tp = IRT_CDATA;
+    int needxbar = 0;
+    if (len == 0) return;  /* Shortcut. */
+    if (len > CREC_COPY_MAXLEN) goto fallback;
+    if (ct) {
+      CTState *cts = ctype_ctsG(J2G(J));
+      lj_assertJ(ctype_isarray(ct->info) || ctype_isstruct(ct->info),
+		 "copy of non-aggregate");
+      if (ctype_isarray(ct->info)) {
+	CType *cct = ctype_rawchild(cts, ct);
+	tp = crec_ct2irt(cts, cct);
+	if (tp == IRT_CDATA) goto rawcopy;
+	step = lj_ir_type_size[tp];
+	lj_assertJ((len & (step-1)) == 0, "copy of fractional size");
+      } else if ((ct->info & CTF_UNION)) {
+	step = (1u << ctype_align(ct->info));
+	goto rawcopy;
+      } else {
+	mlp = crec_copy_struct(ml, cts, ct);
+	goto emitcopy;
+      }
+    } else {
+    rawcopy:
+      needxbar = 1;
+      if (LJ_TARGET_UNALIGNED || step >= CTSIZE_PTR)
+	step = CTSI
