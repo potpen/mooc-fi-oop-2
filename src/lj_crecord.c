@@ -64,4 +64,50 @@ static CTypeID crec_constructor(jit_State *J, GCcdata *cd, TRef tr)
   lj_assertJ(tref_iscdata(tr) && cd->ctypeid == CTID_CTYPEID,
 	     "expected CTypeID cdata");
   id = *(CTypeID *)cdataptr(cd);
-  tr = emitir(IRT(IR_FLOAD, IRT_INT), tr, IRFL
+  tr = emitir(IRT(IR_FLOAD, IRT_INT), tr, IRFL_CDATA_INT);
+  emitir(IRTG(IR_EQ, IRT_INT), tr, lj_ir_kint(J, (int32_t)id));
+  return id;
+}
+
+static CTypeID argv2ctype(jit_State *J, TRef tr, cTValue *o)
+{
+  if (tref_isstr(tr)) {
+    GCstr *s = strV(o);
+    CPState cp;
+    CTypeID oldtop;
+    /* Specialize to the string containing the C type declaration. */
+    emitir(IRTG(IR_EQ, IRT_STR), tr, lj_ir_kstr(J, s));
+    cp.L = J->L;
+    cp.cts = ctype_cts(J->L);
+    oldtop = cp.cts->top;
+    cp.srcname = strdata(s);
+    cp.p = strdata(s);
+    cp.param = NULL;
+    cp.mode = CPARSE_MODE_ABSTRACT|CPARSE_MODE_NOIMPLICIT;
+    if (lj_cparse(&cp) || cp.cts->top > oldtop)  /* Avoid new struct defs. */
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    return cp.val.id;
+  } else {
+    GCcdata *cd = argv2cdata(J, tr, o);
+    return cd->ctypeid == CTID_CTYPEID ? crec_constructor(J, cd, tr) :
+					cd->ctypeid;
+  }
+}
+
+/* Convert CType to IRType (if possible). */
+static IRType crec_ct2irt(CTState *cts, CType *ct)
+{
+  if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
+  if (LJ_LIKELY(ctype_isnum(ct->info))) {
+    if ((ct->info & CTF_FP)) {
+      if (ct->size == sizeof(double))
+	return IRT_NUM;
+      else if (ct->size == sizeof(float))
+	return IRT_FLOAT;
+    } else {
+      uint32_t b = lj_fls(ct->size);
+      if (b <= 3)
+	return IRT_I8 + 2*b + ((ct->info & CTF_UNSIGNED) ? 1 : 0);
+    }
+  } else if (ctype_isptr(ct->info)) {
+    return (LJ_64 && ct->size == 8) 
