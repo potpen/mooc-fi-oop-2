@@ -159,4 +159,56 @@ static MSize crec_copy_struct(CRecMemList *ml, CTState *cts, CType *ct)
       if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
       cct = ctype_rawchild(cts, df);  /* Field type. */
       tp = crec_ct2irt(cts, cct);
-    
+      if (tp == IRT_CDATA) return 0;  /* NYI: aggregates. */
+      if (mlp >= CREC_COPY_MAXUNROLL) return 0;
+      ml[mlp].ofs = df->size;
+      ml[mlp].tp = tp;
+      mlp++;
+      if (ctype_iscomplex(cct->info)) {
+	if (mlp >= CREC_COPY_MAXUNROLL) return 0;
+	ml[mlp].ofs = df->size + (cct->size >> 1);
+	ml[mlp].tp = tp;
+	mlp++;
+      }
+    } else if (!ctype_isconstval(df->info)) {
+      /* NYI: bitfields and sub-structures. */
+      return 0;
+    }
+  }
+  return mlp;
+}
+
+/* Generate unrolled copy list, from highest to lowest step size/alignment. */
+static MSize crec_copy_unroll(CRecMemList *ml, CTSize len, CTSize step,
+			      IRType tp)
+{
+  CTSize ofs = 0;
+  MSize mlp = 0;
+  if (tp == IRT_CDATA) tp = IRT_U8 + 2*lj_fls(step);
+  do {
+    while (ofs + step <= len) {
+      if (mlp >= CREC_COPY_MAXUNROLL) return 0;
+      ml[mlp].ofs = ofs;
+      ml[mlp].tp = tp;
+      mlp++;
+      ofs += step;
+    }
+    step >>= 1;
+    tp -= 2;
+  } while (ofs < len);
+  return mlp;
+}
+
+/*
+** Emit copy list with windowed loads/stores.
+** LJ_TARGET_UNALIGNED: may emit unaligned loads/stores (not marked as such).
+*/
+static void crec_copy_emit(jit_State *J, CRecMemList *ml, MSize mlp,
+			   TRef trdst, TRef trsrc)
+{
+  MSize i, j, rwin = 0;
+  for (i = 0, j = 0; i < mlp; ) {
+    TRef trofs = lj_ir_kintp(J, ml[i].ofs);
+    TRef trsptr = emitir(IRT(IR_ADD, IRT_PTR), trsrc, trofs);
+    ml[i].trval = emitir(IRT(IR_XLOAD, ml[i].tp), trsptr, 0);
+    ml[i].trofs = 
