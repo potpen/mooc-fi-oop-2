@@ -257,4 +257,60 @@ static void crec_copy(jit_State *J, TRef trdst, TRef trsrc, TRef trlen,
     rawcopy:
       needxbar = 1;
       if (LJ_TARGET_UNALIGNED || step >= CTSIZE_PTR)
-	step = CTSI
+	step = CTSIZE_PTR;
+    }
+    mlp = crec_copy_unroll(ml, len, step, tp);
+  emitcopy:
+    if (mlp) {
+      crec_copy_emit(J, ml, mlp, trdst, trsrc);
+      if (needxbar)
+	emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
+      return;
+    }
+  }
+fallback:
+  /* Call memcpy. Always needs a barrier to disable alias analysis. */
+  lj_ir_call(J, IRCALL_memcpy, trdst, trsrc, trlen);
+  emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
+}
+
+/* Generate unrolled fill list, from highest to lowest step size/alignment. */
+static MSize crec_fill_unroll(CRecMemList *ml, CTSize len, CTSize step)
+{
+  CTSize ofs = 0;
+  MSize mlp = 0;
+  IRType tp = IRT_U8 + 2*lj_fls(step);
+  do {
+    while (ofs + step <= len) {
+      if (mlp >= CREC_COPY_MAXUNROLL) return 0;
+      ml[mlp].ofs = ofs;
+      ml[mlp].tp = tp;
+      mlp++;
+      ofs += step;
+    }
+    step >>= 1;
+    tp -= 2;
+  } while (ofs < len);
+  return mlp;
+}
+
+/*
+** Emit stores for fill list.
+** LJ_TARGET_UNALIGNED: may emit unaligned stores (not marked as such).
+*/
+static void crec_fill_emit(jit_State *J, CRecMemList *ml, MSize mlp,
+			   TRef trdst, TRef trfill)
+{
+  MSize i;
+  for (i = 0; i < mlp; i++) {
+    TRef trofs = lj_ir_kintp(J, ml[i].ofs);
+    TRef trdptr = emitir(IRT(IR_ADD, IRT_PTR), trdst, trofs);
+    emitir(IRT(IR_XSTORE, ml[i].tp), trdptr, trfill);
+  }
+}
+
+/* Optimized memory fill. */
+static void crec_fill(jit_State *J, TRef trdst, TRef trlen, TRef trfill,
+		      CTSize step)
+{
+  if (tref_isk(trlen)) {  /*
