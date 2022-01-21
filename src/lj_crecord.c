@@ -351,4 +351,48 @@ fallback:
 ** This code mirrors the code in lj_cconv.c. It performs the same steps
 ** for the trace recorder that lj_cconv.c does for the interpreter.
 **
-** One major difference is that
+** One major difference is that we can get away with much fewer checks
+** here. E.g. checks for casts, constness or correct types can often be
+** omitted, even if they might fail. The interpreter subsequently throws
+** an error, which aborts the trace.
+**
+** All operations are specialized to their C types, so the on-trace
+** outcome must be the same as the outcome in the interpreter. If the
+** interpreter doesn't throw an error, then the trace is correct, too.
+** Care must be taken not to generate invalid (temporary) IR or to
+** trigger asserts.
+*/
+
+/* Determine whether a passed number or cdata number is non-zero. */
+static int crec_isnonzero(CType *s, void *p)
+{
+  if (p == (void *)0)
+    return 0;
+  if (p == (void *)1)
+    return 1;
+  if ((s->info & CTF_FP)) {
+    if (s->size == sizeof(float))
+      return (*(float *)p != 0);
+    else
+      return (*(double *)p != 0);
+  } else {
+    if (s->size == 1)
+      return (*(uint8_t *)p != 0);
+    else if (s->size == 2)
+      return (*(uint16_t *)p != 0);
+    else if (s->size == 4)
+      return (*(uint32_t *)p != 0);
+    else
+      return (*(uint64_t *)p != 0);
+  }
+}
+
+static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
+		       void *svisnz)
+{
+  IRType dt = crec_ct2irt(ctype_ctsG(J2G(J)), d);
+  IRType st = crec_ct2irt(ctype_ctsG(J2G(J)), s);
+  CTSize dsize = d->size, ssize = s->size;
+  CTInfo dinfo = d->info, sinfo = s->info;
+
+  if (ctype_type(dinfo) >
