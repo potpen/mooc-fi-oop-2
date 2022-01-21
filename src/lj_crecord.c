@@ -395,4 +395,44 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
   CTSize dsize = d->size, ssize = s->size;
   CTInfo dinfo = d->info, sinfo = s->info;
 
-  if (ctype_type(dinfo) >
+  if (ctype_type(dinfo) > CT_MAYCONVERT || ctype_type(sinfo) > CT_MAYCONVERT)
+    goto err_conv;
+
+  /*
+  ** Note: Unlike lj_cconv_ct_ct(), sp holds the _value_ of pointers and
+  ** numbers up to 8 bytes. Otherwise sp holds a pointer.
+  */
+
+  switch (cconv_idx2(dinfo, sinfo)) {
+  /* Destination is a bool. */
+  case CCX(B, B):
+    goto xstore;  /* Source operand is already normalized. */
+  case CCX(B, I):
+  case CCX(B, F):
+    if (st != IRT_CDATA) {
+      /* Specialize to the result of a comparison against 0. */
+      TRef zero = (st == IRT_NUM  || st == IRT_FLOAT) ? lj_ir_knum(J, 0) :
+		  (st == IRT_I64 || st == IRT_U64) ? lj_ir_kint64(J, 0) :
+		  lj_ir_kint(J, 0);
+      int isnz = crec_isnonzero(s, svisnz);
+      emitir(IRTG(isnz ? IR_NE : IR_EQ, st), sp, zero);
+      sp = lj_ir_kint(J, isnz);
+      goto xstore;
+    }
+    goto err_nyi;
+
+  /* Destination is an integer. */
+  case CCX(I, B):
+  case CCX(I, I):
+  conv_I_I:
+    if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
+    /* Extend 32 to 64 bit integer. */
+    if (dsize == 8 && ssize < 8 && !(LJ_64 && (sinfo & CTF_UNSIGNED)))
+      sp = emitconv(sp, dt, ssize < 4 ? IRT_INT : st,
+		    (sinfo & CTF_UNSIGNED) ? 0 : IRCONV_SEXT);
+    else if (dsize < 8 && ssize == 8)  /* Truncate from 64 bit integer. */
+      sp = emitconv(sp, dsize < 4 ? IRT_INT : dt, st, 0);
+    else if (st == IRT_INT)
+      sp = lj_opt_narrow_toint(J, sp);
+  xstore:
+    if (dt == IRT_I64 || dt == IRT_U64) lj_needsplit(J)
