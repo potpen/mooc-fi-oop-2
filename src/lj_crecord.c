@@ -480,4 +480,49 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
       TRef ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, (dsize >> 1)));
       emitir(IRT(IR_XSTORE, dt), ptr, lj_ir_knum(J, 0));
     }
-    /* Convert to
+    /* Convert to re. */
+    if ((sinfo & CTF_FP)) goto conv_F_F; else goto conv_F_I;
+
+  case CCX(C, C):
+    if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
+    {
+      TRef re, im, ptr;
+      re = emitir(IRT(IR_XLOAD, st), sp, 0);
+      ptr = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, (ssize >> 1)));
+      im = emitir(IRT(IR_XLOAD, st), ptr, 0);
+      if (dt != st) {
+	re = emitconv(re, dt, st, 0);
+	im = emitconv(im, dt, st, 0);
+      }
+      emitir(IRT(IR_XSTORE, dt), dp, re);
+      ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, (dsize >> 1)));
+      emitir(IRT(IR_XSTORE, dt), ptr, im);
+    }
+    break;
+
+  /* Destination is a vector. */
+  case CCX(V, I):
+  case CCX(V, F):
+  case CCX(V, C):
+  case CCX(V, V):
+    goto err_nyi;
+
+  /* Destination is a pointer. */
+  case CCX(P, P):
+  case CCX(P, A):
+  case CCX(P, S):
+    /* There are only 32 bit pointers/addresses on 32 bit machines.
+    ** Also ok on x64, since all 32 bit ops clear the upper part of the reg.
+    */
+    goto xstore;
+  case CCX(P, I):
+    if (st == IRT_CDATA) goto err_nyi;
+    if (!LJ_64 && ssize == 8)  /* Truncate from 64 bit integer. */
+      sp = emitconv(sp, IRT_U32, st, 0);
+    goto xstore;
+  case CCX(P, F):
+    if (st == IRT_CDATA) goto err_nyi;
+    /* The signed conversion is cheaper. x64 really has 47 bit pointers. */
+    sp = emitconv(sp, (LJ_64 && dsize == 8) ? IRT_I64 : IRT_U32,
+		  st, IRCONV_ANY);
+   
