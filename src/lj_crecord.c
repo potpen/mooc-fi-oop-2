@@ -435,4 +435,49 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
     else if (st == IRT_INT)
       sp = lj_opt_narrow_toint(J, sp);
   xstore:
-    if (dt == IRT_I64 || dt == IRT_U64) lj_needsplit(J)
+    if (dt == IRT_I64 || dt == IRT_U64) lj_needsplit(J);
+    if (dp == 0) return sp;
+    emitir(IRT(IR_XSTORE, dt), dp, sp);
+    break;
+  case CCX(I, C):
+    sp = emitir(IRT(IR_XLOAD, st), sp, 0);  /* Load re. */
+    /* fallthrough */
+  case CCX(I, F):
+    if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
+    sp = emitconv(sp, dsize < 4 ? IRT_INT : dt, st, IRCONV_ANY);
+    goto xstore;
+  case CCX(I, P):
+  case CCX(I, A):
+    sinfo = CTINFO(CT_NUM, CTF_UNSIGNED);
+    ssize = CTSIZE_PTR;
+    st = IRT_UINTP;
+    if (((dsize ^ ssize) & 8) == 0) {  /* Must insert no-op type conversion. */
+      sp = emitconv(sp, dsize < 4 ? IRT_INT : dt, IRT_PTR, 0);
+      goto xstore;
+    }
+    goto conv_I_I;
+
+  /* Destination is a floating-point number. */
+  case CCX(F, B):
+  case CCX(F, I):
+  conv_F_I:
+    if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
+    sp = emitconv(sp, dt, ssize < 4 ? IRT_INT : st, 0);
+    goto xstore;
+  case CCX(F, C):
+    sp = emitir(IRT(IR_XLOAD, st), sp, 0);  /* Load re. */
+    /* fallthrough */
+  case CCX(F, F):
+  conv_F_F:
+    if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
+    if (dt != st) sp = emitconv(sp, dt, st, 0);
+    goto xstore;
+
+  /* Destination is a complex number. */
+  case CCX(C, I):
+  case CCX(C, F):
+    {  /* Clear im. */
+      TRef ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, (dsize >> 1)));
+      emitir(IRT(IR_XSTORE, dt), ptr, lj_ir_knum(J, 0));
+    }
+    /* Convert to
