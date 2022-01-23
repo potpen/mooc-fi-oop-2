@@ -525,4 +525,52 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
     /* The signed conversion is cheaper. x64 really has 47 bit pointers. */
     sp = emitconv(sp, (LJ_64 && dsize == 8) ? IRT_I64 : IRT_U32,
 		  st, IRCONV_ANY);
-   
+    goto xstore;
+
+  /* Destination is an array. */
+  case CCX(A, A):
+  /* Destination is a struct/union. */
+  case CCX(S, S):
+    if (dp == 0) goto err_conv;
+    crec_copy(J, dp, sp, lj_ir_kint(J, dsize), d);
+    break;
+
+  default:
+  err_conv:
+  err_nyi:
+    lj_trace_err(J, LJ_TRERR_NYICONV);
+    break;
+  }
+  return 0;
+}
+
+/* -- Convert C type to TValue (load) ------------------------------------- */
+
+static TRef crec_tv_ct(jit_State *J, CType *s, CTypeID sid, TRef sp)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  IRType t = crec_ct2irt(cts, s);
+  CTInfo sinfo = s->info;
+  if (ctype_isnum(sinfo)) {
+    TRef tr;
+    if (t == IRT_CDATA)
+      goto err_nyi;  /* NYI: copyval of >64 bit integers. */
+    tr = emitir(IRT(IR_XLOAD, t), sp, 0);
+    if (t == IRT_FLOAT || t == IRT_U32) {  /* Keep uint32_t/float as numbers. */
+      return emitconv(tr, IRT_NUM, t, 0);
+    } else if (t == IRT_I64 || t == IRT_U64) {  /* Box 64 bit integer. */
+      sp = tr;
+      lj_needsplit(J);
+    } else if ((sinfo & CTF_BOOL)) {
+      /* Assume not equal to zero. Fixup and emit pending guard later. */
+      lj_ir_set(J, IRTGI(IR_NE), tr, lj_ir_kint(J, 0));
+      J->postproc = LJ_POST_FIXGUARD;
+      return TREF_TRUE;
+    } else {
+      return tr;
+    }
+  } else if (ctype_isptr(sinfo) || ctype_isenum(sinfo)) {
+    sp = emitir(IRT(IR_XLOAD, t), sp, 0);  /* Box pointers and enums. */
+  } else if (ctype_isrefarray(sinfo) || ctype_isstruct(sinfo)) {
+    cts->L = J->L;
+    sid =
