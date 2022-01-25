@@ -608,4 +608,36 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
     svisnz = (void *)(intptr_t)(tvisint(sval)?(intV(sval)!=0):!tviszero(sval));
   } else if (tref_isnum(sp)) {
     sid = CTID_DOUBLE;
-    svisnz = (void *)(intptr
+    svisnz = (void *)(intptr_t)(tvisint(sval)?(intV(sval)!=0):!tviszero(sval));
+  } else if (tref_isbool(sp)) {
+    sp = lj_ir_kint(J, tref_istrue(sp) ? 1 : 0);
+    sid = CTID_BOOL;
+  } else if (tref_isnil(sp)) {
+    sp = lj_ir_kptr(J, NULL);
+  } else if (tref_isudata(sp)) {
+    GCudata *ud = udataV(sval);
+    if (ud->udtype == UDTYPE_IO_FILE || ud->udtype == UDTYPE_BUFFER) {
+      TRef tr = emitir(IRT(IR_FLOAD, IRT_U8), sp, IRFL_UDATA_UDTYPE);
+      emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, ud->udtype));
+      sp = emitir(IRT(IR_FLOAD, IRT_PTR), sp,
+		  ud->udtype == UDTYPE_IO_FILE ? IRFL_UDATA_FILE :
+						 IRFL_SBUF_R);
+    } else {
+      sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCudata)));
+    }
+  } else if (tref_isstr(sp)) {
+    if (ctype_isenum(d->info)) {  /* Match string against enum constant. */
+      GCstr *str = strV(sval);
+      CTSize ofs;
+      CType *cct = lj_ctype_getfield(cts, d, str, &ofs);
+      /* Specialize to the name of the enum constant. */
+      emitir(IRTG(IR_EQ, IRT_STR), sp, lj_ir_kstr(J, str));
+      if (cct && ctype_isconstval(cct->info)) {
+	lj_assertJ(ctype_child(cts, cct)->size == 4,
+		   "only 32 bit const supported");  /* NYI */
+	svisnz = (void *)(intptr_t)(ofs != 0);
+	sp = lj_ir_kint(J, (int32_t)ofs);
+	sid = ctype_cid(cct->info);
+      }  /* else: interpreter will throw. */
+    } else if (ctype_isrefarray(d->info)) {  /* Copy string to array. */
+      lj_trac
