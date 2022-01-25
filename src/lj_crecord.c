@@ -573,4 +573,39 @@ static TRef crec_tv_ct(jit_State *J, CType *s, CTypeID sid, TRef sp)
     sp = emitir(IRT(IR_XLOAD, t), sp, 0);  /* Box pointers and enums. */
   } else if (ctype_isrefarray(sinfo) || ctype_isstruct(sinfo)) {
     cts->L = J->L;
-    sid =
+    sid = lj_ctype_intern(cts, CTINFO_REF(sid), CTSIZE_PTR);  /* Create ref. */
+  } else if (ctype_iscomplex(sinfo)) {  /* Unbox/box complex. */
+    ptrdiff_t esz = (ptrdiff_t)(s->size >> 1);
+    TRef ptr, tr1, tr2, dp;
+    dp = emitir(IRTG(IR_CNEW, IRT_CDATA), lj_ir_kint(J, sid), TREF_NIL);
+    tr1 = emitir(IRT(IR_XLOAD, t), sp, 0);
+    ptr = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, esz));
+    tr2 = emitir(IRT(IR_XLOAD, t), ptr, 0);
+    ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)));
+    emitir(IRT(IR_XSTORE, t), ptr, tr1);
+    ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)+esz));
+    emitir(IRT(IR_XSTORE, t), ptr, tr2);
+    return dp;
+  } else {
+    /* NYI: copyval of vectors. */
+  err_nyi:
+    lj_trace_err(J, LJ_TRERR_NYICONV);
+  }
+  /* Box pointer, ref, enum or 64 bit integer. */
+  return emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, sid), sp);
+}
+
+/* -- Convert TValue to C type (store) ------------------------------------ */
+
+static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CTypeID sid = CTID_P_VOID;
+  void *svisnz = 0;
+  CType *s;
+  if (LJ_LIKELY(tref_isinteger(sp))) {
+    sid = CTID_INT32;
+    svisnz = (void *)(intptr_t)(tvisint(sval)?(intV(sval)!=0):!tviszero(sval));
+  } else if (tref_isnum(sp)) {
+    sid = CTID_DOUBLE;
+    svisnz = (void *)(intptr
