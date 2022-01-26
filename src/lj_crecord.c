@@ -640,4 +640,45 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
 	sid = ctype_cid(cct->info);
       }  /* else: interpreter will throw. */
     } else if (ctype_isrefarray(d->info)) {  /* Copy string to array. */
-      lj_trac
+      lj_trace_err(J, LJ_TRERR_BADTYPE);  /* NYI */
+    } else {  /* Otherwise pass the string data as a const char[]. */
+      /* Don't use STRREF. It folds with SNEW, which loses the trailing NUL. */
+      sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCstr)));
+      sid = CTID_A_CCHAR;
+    }
+  } else if (tref_islightud(sp)) {
+#if LJ_64
+    lj_trace_err(J, LJ_TRERR_NYICONV);
+#endif
+  } else {  /* NYI: tref_istab(sp). */
+    IRType t;
+    sid = argv2cdata(J, sp, sval)->ctypeid;
+    s = ctype_raw(cts, sid);
+    svisnz = cdataptr(cdataV(sval));
+    if (ctype_isfunc(s->info)) {
+      sid = lj_ctype_intern(cts, CTINFO(CT_PTR, CTALIGN_PTR|sid), CTSIZE_PTR);
+      s = ctype_get(cts, sid);
+      t = IRT_PTR;
+    } else {
+      t = crec_ct2irt(cts, s);
+    }
+    if (ctype_isptr(s->info)) {
+      sp = emitir(IRT(IR_FLOAD, t), sp, IRFL_CDATA_PTR);
+      if (ctype_isref(s->info)) {
+	svisnz = *(void **)svisnz;
+	s = ctype_rawchild(cts, s);
+	if (ctype_isenum(s->info)) s = ctype_child(cts, s);
+	t = crec_ct2irt(cts, s);
+      } else {
+	goto doconv;
+      }
+    } else if (t == IRT_I64 || t == IRT_U64) {
+      sp = emitir(IRT(IR_FLOAD, t), sp, IRFL_CDATA_INT64);
+      lj_needsplit(J);
+      goto doconv;
+    } else if (t == IRT_INT || t == IRT_U32) {
+      if (ctype_isenum(s->info)) s = ctype_child(cts, s);
+      sp = emitir(IRT(IR_FLOAD, t), sp, IRFL_CDATA_INT);
+      goto doconv;
+    } else {
+      sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(
