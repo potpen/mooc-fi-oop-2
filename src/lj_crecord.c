@@ -681,4 +681,49 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
       sp = emitir(IRT(IR_FLOAD, t), sp, IRFL_CDATA_INT);
       goto doconv;
     } else {
-      sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(
+      sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCcdata)));
+    }
+    if (ctype_isnum(s->info) && t != IRT_CDATA)
+      sp = emitir(IRT(IR_XLOAD, t), sp, 0);  /* Load number value. */
+    goto doconv;
+  }
+  s = ctype_get(cts, sid);
+doconv:
+  if (ctype_isenum(d->info)) d = ctype_child(cts, d);
+  return crec_ct_ct(J, d, s, dp, sp, svisnz);
+}
+
+/* -- C data metamethods -------------------------------------------------- */
+
+/* This would be rather difficult in FOLD, so do it here:
+** (base+k)+(idx*sz)+ofs ==> (base+idx*sz)+(ofs+k)
+** (base+(idx+k)*sz)+ofs ==> (base+idx*sz)+(ofs+k*sz)
+*/
+static TRef crec_reassoc_ofs(jit_State *J, TRef tr, ptrdiff_t *ofsp, MSize sz)
+{
+  IRIns *ir = IR(tref_ref(tr));
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && irref_isk(ir->op2) &&
+      (ir->o == IR_ADD || ir->o == IR_ADDOV || ir->o == IR_SUBOV)) {
+    IRIns *irk = IR(ir->op2);
+    ptrdiff_t k;
+    if (LJ_64 && irk->o == IR_KINT64)
+      k = (ptrdiff_t)ir_kint64(irk)->u64 * sz;
+    else
+      k = (ptrdiff_t)irk->i * sz;
+    if (ir->o == IR_SUBOV) *ofsp -= k; else *ofsp += k;
+    tr = ir->op1;  /* Not a TRef, but the caller doesn't care. */
+  }
+  return tr;
+}
+
+/* Tailcall to function. */
+static void crec_tailcall(jit_State *J, RecordFFData *rd, cTValue *tv)
+{
+  TRef kfunc = lj_ir_kfunc(J, funcV(tv));
+#if LJ_FR2
+  J->base[-2] = kfunc;
+  J->base[-1] = TREF_FRAME;
+#else
+  J->base[-1] = kfunc | TREF_FRAME;
+#endif
+  rd->nres = -1;  /
