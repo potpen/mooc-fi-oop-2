@@ -763,4 +763,32 @@ static void crec_index_bf(jit_State *J, RecordFFData *rd, TRef ptr, CTInfo info)
   CTSize pos = ctype_bitpos(info), bsz = ctype_bitbsz(info), shift = 32 - bsz;
   lj_assertJ(t <= IRT_U32, "only 32 bit bitfields supported");  /* NYI */
   if (rd->data == 0) {  /* __index metamethod. */
-    if ((
+    if ((info & CTF_BOOL)) {
+      tr = emitir(IRTI(IR_BAND), tr, lj_ir_kint(J, (int32_t)((1u << pos))));
+      /* Assume not equal to zero. Fixup and emit pending guard later. */
+      lj_ir_set(J, IRTGI(IR_NE), tr, lj_ir_kint(J, 0));
+      J->postproc = LJ_POST_FIXGUARD;
+      tr = TREF_TRUE;
+    } else if (!(info & CTF_UNSIGNED)) {
+      tr = emitir(IRTI(IR_BSHL), tr, lj_ir_kint(J, shift - pos));
+      tr = emitir(IRTI(IR_BSAR), tr, lj_ir_kint(J, shift));
+    } else {
+      lj_assertJ(bsz < 32, "unexpected full bitfield index");
+      tr = emitir(IRTI(IR_BSHR), tr, lj_ir_kint(J, pos));
+      tr = emitir(IRTI(IR_BAND), tr, lj_ir_kint(J, (int32_t)((1u << bsz)-1)));
+      /* We can omit the U32 to NUM conversion, since bsz < 32. */
+    }
+    J->base[0] = tr;
+  } else {  /* __newindex metamethod. */
+    CTState *cts = ctype_ctsG(J2G(J));
+    CType *ct = ctype_get(cts,
+			  (info & CTF_BOOL) ? CTID_BOOL :
+			  (info & CTF_UNSIGNED) ? CTID_UINT32 : CTID_INT32);
+    int32_t mask = (int32_t)(((1u << bsz)-1) << pos);
+    TRef sp = crec_ct_tv(J, ct, 0, J->base[2], &rd->argv[2]);
+    sp = emitir(IRTI(IR_BSHL), sp, lj_ir_kint(J, pos));
+    /* Use of the target type avoids forwarding conversions. */
+    sp = emitir(IRT(IR_BAND, t), sp, lj_ir_kint(J, mask));
+    tr = emitir(IRT(IR_BAND, t), tr, lj_ir_kint(J, (int32_t)~mask));
+    tr = emitir(IRT(IR_BOR, t), tr, sp);
+    emitir(IRT(IR_XSTORE, t), ptr
