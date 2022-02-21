@@ -726,4 +726,41 @@ static void crec_tailcall(jit_State *J, RecordFFData *rd, cTValue *tv)
 #else
   J->base[-1] = kfunc | TREF_FRAME;
 #endif
-  rd->nres = -1;  /
+  rd->nres = -1;  /* Pending tailcall. */
+}
+
+/* Record ctype __index/__newindex metamethods. */
+static void crec_index_meta(jit_State *J, CTState *cts, CType *ct,
+			    RecordFFData *rd)
+{
+  CTypeID id = ctype_typeid(cts, ct);
+  cTValue *tv = lj_ctype_meta(cts, id, rd->data ? MM_newindex : MM_index);
+  if (!tv)
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  if (tvisfunc(tv)) {
+    crec_tailcall(J, rd, tv);
+  } else if (rd->data == 0 && tvistab(tv) && tref_isstr(J->base[1])) {
+    /* Specialize to result of __index lookup. */
+    cTValue *o = lj_tab_get(J->L, tabV(tv), &rd->argv[1]);
+    J->base[0] = lj_record_constify(J, o);
+    if (!J->base[0])
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    /* Always specialize to the key. */
+    emitir(IRTG(IR_EQ, IRT_STR), J->base[1], lj_ir_kstr(J, strV(&rd->argv[1])));
+  } else {
+    /* NYI: resolving of non-function metamethods. */
+    /* NYI: non-string keys for __index table. */
+    /* NYI: stores to __newindex table. */
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+}
+
+/* Record bitfield load/store. */
+static void crec_index_bf(jit_State *J, RecordFFData *rd, TRef ptr, CTInfo info)
+{
+  IRType t = IRT_I8 + 2*lj_fls(ctype_bitcsz(info)) + ((info&CTF_UNSIGNED)?1:0);
+  TRef tr = emitir(IRT(IR_XLOAD, t), ptr, 0);
+  CTSize pos = ctype_bitpos(info), bsz = ctype_bitbsz(info), shift = 32 - bsz;
+  lj_assertJ(t <= IRT_U32, "only 32 bit bitfields supported");  /* NYI */
+  if (rd->data == 0) {  /* __index metamethod. */
+    if ((
