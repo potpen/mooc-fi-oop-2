@@ -791,4 +791,50 @@ static void crec_index_bf(jit_State *J, RecordFFData *rd, TRef ptr, CTInfo info)
     sp = emitir(IRT(IR_BAND, t), sp, lj_ir_kint(J, mask));
     tr = emitir(IRT(IR_BAND, t), tr, lj_ir_kint(J, (int32_t)~mask));
     tr = emitir(IRT(IR_BOR, t), tr, sp);
-    emitir(IRT(IR_XSTORE, t), ptr
+    emitir(IRT(IR_XSTORE, t), ptr, tr);
+    rd->nres = 0;
+    J->needsnap = 1;
+  }
+}
+
+void LJ_FASTCALL recff_cdata_index(jit_State *J, RecordFFData *rd)
+{
+  TRef idx, ptr = J->base[0];
+  ptrdiff_t ofs = sizeof(GCcdata);
+  GCcdata *cd = argv2cdata(J, ptr, &rd->argv[0]);
+  CTState *cts = ctype_ctsG(J2G(J));
+  CType *ct = ctype_raw(cts, cd->ctypeid);
+  CTypeID sid = 0;
+
+  /* Resolve pointer or reference for cdata object. */
+  if (ctype_isptr(ct->info)) {
+    IRType t = (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
+    if (ctype_isref(ct->info)) ct = ctype_rawchild(cts, ct);
+    ptr = emitir(IRT(IR_FLOAD, t), ptr, IRFL_CDATA_PTR);
+    ofs = 0;
+    ptr = crec_reassoc_ofs(J, ptr, &ofs, 1);
+  }
+
+again:
+  idx = J->base[1];
+  if (tref_isnumber(idx)) {
+    idx = lj_opt_narrow_cindex(J, idx);
+    if (ctype_ispointer(ct->info)) {
+      CTSize sz;
+  integer_key:
+      if ((ct->info & CTF_COMPLEX))
+	idx = emitir(IRT(IR_BAND, IRT_INTP), idx, lj_ir_kintp(J, 1));
+      sz = lj_ctype_size(cts, (sid = ctype_cid(ct->info)));
+      idx = crec_reassoc_ofs(J, idx, &ofs, sz);
+#if LJ_TARGET_ARM || LJ_TARGET_PPC
+      /* Hoist base add to allow fusion of index/shift into operands. */
+      if (LJ_LIKELY(J->flags & JIT_F_OPT_LOOP) && ofs
+#if LJ_TARGET_ARM
+	  && (sz == 1 || sz == 4)
+#endif
+	  ) {
+	ptr = emitir(IRT(IR_ADD, IRT_PTR), ptr, lj_ir_kintp(J, ofs));
+	ofs = 0;
+      }
+#endif
+      idx = emitir(IRT(IR_MUL, IRT_INTP), id
