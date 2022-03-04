@@ -837,4 +837,41 @@ again:
 	ofs = 0;
       }
 #endif
-      idx = emitir(IRT(IR_MUL, IRT_INTP), id
+      idx = emitir(IRT(IR_MUL, IRT_INTP), idx, lj_ir_kintp(J, sz));
+      ptr = emitir(IRT(IR_ADD, IRT_PTR), idx, ptr);
+    }
+  } else if (tref_iscdata(idx)) {
+    GCcdata *cdk = cdataV(&rd->argv[1]);
+    CType *ctk = ctype_raw(cts, cdk->ctypeid);
+    IRType t = crec_ct2irt(cts, ctk);
+    if (ctype_ispointer(ct->info) && t >= IRT_I8 && t <= IRT_U64) {
+      if (ctk->size == 8) {
+	idx = emitir(IRT(IR_FLOAD, t), idx, IRFL_CDATA_INT64);
+      } else if (ctk->size == 4) {
+	idx = emitir(IRT(IR_FLOAD, t), idx, IRFL_CDATA_INT);
+      } else {
+	idx = emitir(IRT(IR_ADD, IRT_PTR), idx,
+		     lj_ir_kintp(J, sizeof(GCcdata)));
+	idx = emitir(IRT(IR_XLOAD, t), idx, 0);
+      }
+      if (LJ_64 && ctk->size < sizeof(intptr_t) && !(ctk->info & CTF_UNSIGNED))
+	idx = emitconv(idx, IRT_INTP, IRT_INT, IRCONV_SEXT);
+      if (!LJ_64 && ctk->size > sizeof(intptr_t)) {
+	idx = emitconv(idx, IRT_INTP, t, 0);
+	lj_needsplit(J);
+      }
+      goto integer_key;
+    }
+  } else if (tref_isstr(idx)) {
+    GCstr *name = strV(&rd->argv[1]);
+    if (cd && cd->ctypeid == CTID_CTYPEID)
+      ct = ctype_raw(cts, crec_constructor(J, cd, ptr));
+    if (ctype_isstruct(ct->info)) {
+      CTSize fofs;
+      CType *fct;
+      fct = lj_ctype_getfield(cts, ct, name, &fofs);
+      if (fct) {
+	ofs += (ptrdiff_t)fofs;
+	/* Always specialize to the field name. */
+	emitir(IRTG(IR_EQ, IRT_STR), idx, lj_ir_kstr(J, name));
+	if (ctype_isconstval(fct
