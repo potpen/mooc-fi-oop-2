@@ -874,4 +874,50 @@ again:
 	ofs += (ptrdiff_t)fofs;
 	/* Always specialize to the field name. */
 	emitir(IRTG(IR_EQ, IRT_STR), idx, lj_ir_kstr(J, name));
-	if (ctype_isconstval(fct
+	if (ctype_isconstval(fct->info)) {
+	  if (fct->size >= 0x80000000u &&
+	      (ctype_child(cts, fct)->info & CTF_UNSIGNED)) {
+	    J->base[0] = lj_ir_knum(J, (lua_Number)(uint32_t)fct->size);
+	    return;
+	  }
+	  J->base[0] = lj_ir_kint(J, (int32_t)fct->size);
+	  return;  /* Interpreter will throw for newindex. */
+	} else if (ctype_isbitfield(fct->info)) {
+	  if (ofs)
+	    ptr = emitir(IRT(IR_ADD, IRT_PTR), ptr, lj_ir_kintp(J, ofs));
+	  crec_index_bf(J, rd, ptr, fct->info);
+	  return;
+	} else {
+	  lj_assertJ(ctype_isfield(fct->info), "field expected");
+	  sid = ctype_cid(fct->info);
+	}
+      }
+    } else if (ctype_iscomplex(ct->info)) {
+      if (name->len == 2 &&
+	  ((strdata(name)[0] == 'r' && strdata(name)[1] == 'e') ||
+	   (strdata(name)[0] == 'i' && strdata(name)[1] == 'm'))) {
+	/* Always specialize to the field name. */
+	emitir(IRTG(IR_EQ, IRT_STR), idx, lj_ir_kstr(J, name));
+	if (strdata(name)[0] == 'i') ofs += (ct->size >> 1);
+	sid = ctype_cid(ct->info);
+      }
+    }
+  }
+  if (!sid) {
+    if (ctype_isptr(ct->info)) {  /* Automatically perform '->'. */
+      CType *cct = ctype_rawchild(cts, ct);
+      if (ctype_isstruct(cct->info)) {
+	ct = cct;
+	cd = NULL;
+	if (tref_isstr(idx)) goto again;
+      }
+    }
+    crec_index_meta(J, cts, ct, rd);
+    return;
+  }
+
+  if (ofs)
+    ptr = emitir(IRT(IR_ADD, IRT_PTR), ptr, lj_ir_kintp(J, ofs));
+
+  /* Resolve reference for field. */
+  ct = ctype_get(cts, sid);
