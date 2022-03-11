@@ -921,3 +921,48 @@ again:
 
   /* Resolve reference for field. */
   ct = ctype_get(cts, sid);
+  if (ctype_isref(ct->info)) {
+    ptr = emitir(IRT(IR_XLOAD, IRT_PTR), ptr, 0);
+    sid = ctype_cid(ct->info);
+    ct = ctype_get(cts, sid);
+  }
+
+  while (ctype_isattrib(ct->info))
+    ct = ctype_child(cts, ct);  /* Skip attributes. */
+
+  if (rd->data == 0) {  /* __index metamethod. */
+    J->base[0] = crec_tv_ct(J, ct, sid, ptr);
+  } else {  /* __newindex metamethod. */
+    rd->nres = 0;
+    J->needsnap = 1;
+    crec_ct_tv(J, ct, ptr, J->base[2], &rd->argv[2]);
+  }
+}
+
+/* Record setting a finalizer. */
+static void crec_finalizer(jit_State *J, TRef trcd, TRef trfin, cTValue *fin)
+{
+  if (tvisgcv(fin)) {
+    if (!trfin) trfin = lj_ir_kptr(J, gcval(fin));
+  } else if (tvisnil(fin)) {
+    trfin = lj_ir_kptr(J, NULL);
+  } else {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  lj_ir_call(J, IRCALL_lj_cdata_setfin, trcd,
+	     trfin, lj_ir_kint(J, (int32_t)itype(fin)));
+  J->needsnap = 1;
+}
+
+/* Record cdata allocation. */
+static void crec_alloc(jit_State *J, RecordFFData *rd, CTypeID id)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CTSize sz;
+  CTInfo info = lj_ctype_info(cts, id, &sz);
+  CType *d = ctype_raw(cts, id);
+  TRef trcd, trid = lj_ir_kint(J, id);
+  cTValue *fin;
+  /* Use special instruction to box pointer or 32/64 bit integer. */
+  if (ctype_isptr(info) || (ctype_isinteger(info) && (sz == 4 || sz == 8))) {
+    TRef sp = J->base[1] ? crec_c
