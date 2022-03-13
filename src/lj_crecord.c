@@ -996,3 +996,45 @@ static void crec_alloc(jit_State *J, RecordFFData *rd, CTypeID id)
 	lj_trace_err(J, LJ_TRERR_NYICONV);  /* NYI: init large/VLA/VLS types. */
       dp = emitir(IRT(IR_ADD, IRT_PTR), trcd, lj_ir_kintp(J, sizeof(GCcdata)));
       if (trsz == TREF_NIL) trsz = lj_ir_kint(J, sz);
+      align = ctype_align(info);
+      if (align < CT_MEMALIGN) align = CT_MEMALIGN;
+      crec_fill(J, dp, trsz, lj_ir_kint(J, 0), (1u << align));
+    } else if (J->base[1] && !J->base[2] &&
+	!lj_cconv_multi_init(cts, d, &rd->argv[1])) {
+      goto single_init;
+    } else if (ctype_isarray(d->info)) {
+      CType *dc = ctype_rawchild(cts, d);  /* Array element type. */
+      CTSize ofs, esize = dc->size;
+      TRef sp = 0;
+      TValue tv;
+      TValue *sval = &tv;
+      MSize i;
+      tv.u64 = 0;
+      if (!(ctype_isnum(dc->info) || ctype_isptr(dc->info)) ||
+	  esize * CREC_FILL_MAXUNROLL < sz)
+	goto special;
+      for (i = 1, ofs = 0; ofs < sz; ofs += esize) {
+	TRef dp = emitir(IRT(IR_ADD, IRT_PTR), trcd,
+			 lj_ir_kintp(J, ofs + sizeof(GCcdata)));
+	if (J->base[i]) {
+	  sp = J->base[i];
+	  sval = &rd->argv[i];
+	  i++;
+	} else if (i != 2) {
+	  sp = ctype_isnum(dc->info) ? lj_ir_kint(J, 0) : TREF_NIL;
+	}
+	crec_ct_tv(J, dc, dp, sp, sval);
+      }
+    } else if (ctype_isstruct(d->info)) {
+      CTypeID fid;
+      MSize i = 1;
+      if (!J->base[1]) {  /* Handle zero-fill of struct-of-NYI. */
+	fid = d->sib;
+	while (fid) {
+	  CType *df = ctype_get(cts, fid);
+	  fid = df->sib;
+	  if (ctype_isfield(df->info)) {
+	    CType *dc;
+	    if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+	    dc = ctype_rawchild(cts, df);  /* Field type. */
+	    if (!(ctype_isnum(dc->info) 
