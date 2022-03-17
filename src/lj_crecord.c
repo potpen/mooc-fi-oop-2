@@ -1087,4 +1087,60 @@ static void crec_alloc(jit_State *J, RecordFFData *rd, CTypeID id)
       if (J->base[1]) {
 	crec_ct_tv(J, d, dp, J->base[1], &rd->argv[1]);
       } else {
-	TV
+	TValue tv;
+	tv.u64 = 0;
+	crec_ct_tv(J, d, dp, lj_ir_kint(J, 0), &tv);
+      }
+    }
+  }
+  J->base[0] = trcd;
+  /* Handle __gc metamethod. */
+  fin = lj_ctype_meta(cts, id, MM_gc);
+  if (fin)
+    crec_finalizer(J, trcd, 0, fin);
+}
+
+/* Record argument conversions. */
+static TRef crec_call_args(jit_State *J, RecordFFData *rd,
+			   CTState *cts, CType *ct)
+{
+  TRef args[CCI_NARGS_MAX];
+  CTypeID fid;
+  MSize i, n;
+  TRef tr, *base;
+  cTValue *o;
+#if LJ_TARGET_X86
+#if LJ_ABI_WIN
+  TRef *arg0 = NULL, *arg1 = NULL;
+#endif
+  int ngpr = 0;
+  if (ctype_cconv(ct->info) == CTCC_THISCALL)
+    ngpr = 1;
+  else if (ctype_cconv(ct->info) == CTCC_FASTCALL)
+    ngpr = 2;
+#endif
+
+  /* Skip initial attributes. */
+  fid = ct->sib;
+  while (fid) {
+    CType *ctf = ctype_get(cts, fid);
+    if (!ctype_isattrib(ctf->info)) break;
+    fid = ctf->sib;
+  }
+  args[0] = TREF_NIL;
+  for (n = 0, base = J->base+1, o = rd->argv+1; *base; n++, base++, o++) {
+    CTypeID did;
+    CType *d;
+
+    if (n >= CCI_NARGS_MAX)
+      lj_trace_err(J, LJ_TRERR_NYICALL);
+
+    if (fid) {  /* Get argument type from field. */
+      CType *ctf = ctype_get(cts, fid);
+      fid = ctf->sib;
+      lj_assertJ(ctype_isfield(ctf->info), "field expected");
+      did = ctype_cid(ctf->info);
+    } else {
+      if (!(ct->info & CTF_VARARG))
+	lj_trace_err(J, LJ_TRERR_NYICALL);  /* Too many arguments. */
+      did = lj_ccall_ctid_vararg(cts, o);  /* Infer v
