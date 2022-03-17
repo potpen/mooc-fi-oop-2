@@ -1143,4 +1143,52 @@ static TRef crec_call_args(jit_State *J, RecordFFData *rd,
     } else {
       if (!(ct->info & CTF_VARARG))
 	lj_trace_err(J, LJ_TRERR_NYICALL);  /* Too many arguments. */
-      did = lj_ccall_ctid_vararg(cts, o);  /* Infer v
+      did = lj_ccall_ctid_vararg(cts, o);  /* Infer vararg type. */
+    }
+    d = ctype_raw(cts, did);
+    if (!(ctype_isnum(d->info) || ctype_isptr(d->info) ||
+	  ctype_isenum(d->info)))
+      lj_trace_err(J, LJ_TRERR_NYICALL);
+    tr = crec_ct_tv(J, d, 0, *base, o);
+    if (ctype_isinteger_or_bool(d->info)) {
+      if (d->size < 4) {
+	if ((d->info & CTF_UNSIGNED))
+	  tr = emitconv(tr, IRT_INT, d->size==1 ? IRT_U8 : IRT_U16, 0);
+	else
+	  tr = emitconv(tr, IRT_INT, d->size==1 ? IRT_I8 : IRT_I16,IRCONV_SEXT);
+      }
+    } else if (LJ_SOFTFP32 && ctype_isfp(d->info) && d->size > 4) {
+      lj_needsplit(J);
+    }
+#if LJ_TARGET_X86
+    /* 64 bit args must not end up in registers for fastcall/thiscall. */
+#if LJ_ABI_WIN
+    if (!ctype_isfp(d->info)) {
+      /* Sigh, the Windows/x86 ABI allows reordering across 64 bit args. */
+      if (tref_typerange(tr, IRT_I64, IRT_U64)) {
+	if (ngpr) {
+	  arg0 = &args[n]; args[n++] = TREF_NIL; ngpr--;
+	  if (ngpr) {
+	    arg1 = &args[n]; args[n++] = TREF_NIL; ngpr--;
+	  }
+	}
+      } else {
+	if (arg0) { *arg0 = tr; arg0 = NULL; n--; continue; }
+	if (arg1) { *arg1 = tr; arg1 = NULL; n--; continue; }
+	if (ngpr) ngpr--;
+      }
+    }
+#else
+    if (!ctype_isfp(d->info) && ngpr) {
+      if (tref_typerange(tr, IRT_I64, IRT_U64)) {
+	/* No reordering for other x86 ABIs. Simply add alignment args. */
+	do { args[n++] = TREF_NIL; } while (--ngpr);
+      } else {
+	ngpr--;
+      }
+    }
+#endif
+#endif
+    args[n] = tr;
+  }
+  tr = args[
