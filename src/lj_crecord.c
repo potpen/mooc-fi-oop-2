@@ -1191,4 +1191,48 @@ static TRef crec_call_args(jit_State *J, RecordFFData *rd,
 #endif
     args[n] = tr;
   }
-  tr = args[
+  tr = args[0];
+  for (i = 1; i < n; i++)
+    tr = emitir(IRT(IR_CARG, IRT_NIL), tr, args[i]);
+  return tr;
+}
+
+/* Create a snapshot for the caller, simulating a 'false' return value. */
+static void crec_snap_caller(jit_State *J)
+{
+  lua_State *L = J->L;
+  TValue *base = L->base, *top = L->top;
+  const BCIns *pc = J->pc;
+  TRef ftr = J->base[-1-LJ_FR2];
+  ptrdiff_t delta;
+  if (!frame_islua(base-1) || J->framedepth <= 0)
+    lj_trace_err(J, LJ_TRERR_NYICALL);
+  J->pc = frame_pc(base-1); delta = 1+LJ_FR2+bc_a(J->pc[-1]);
+  L->top = base; L->base = base - delta;
+  J->base[-1-LJ_FR2] = TREF_FALSE;
+  J->base -= delta; J->baseslot -= (BCReg)delta;
+  J->maxslot = (BCReg)delta-LJ_FR2; J->framedepth--;
+  lj_snap_add(J);
+  L->base = base; L->top = top;
+  J->framedepth++; J->maxslot = 1;
+  J->base += delta; J->baseslot += (BCReg)delta;
+  J->base[-1-LJ_FR2] = ftr; J->pc = pc;
+}
+
+/* Record function call. */
+static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CType *ct = ctype_raw(cts, cd->ctypeid);
+  IRType tp = IRT_PTR;
+  if (ctype_isptr(ct->info)) {
+    tp = (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
+    ct = ctype_rawchild(cts, ct);
+  }
+  if (ctype_isfunc(ct->info)) {
+    TRef func = emitir(IRT(IR_FLOAD, tp), J->base[0], IRFL_CDATA_PTR);
+    CType *ctr = ctype_rawchild(cts, ct);
+    IRType t = crec_ct2irt(cts, ctr);
+    TRef tr;
+    TValue tv;
+  
