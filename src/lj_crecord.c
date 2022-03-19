@@ -1272,4 +1272,52 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
     } else if (t == IRT_PTR || (LJ_64 && t == IRT_P32) ||
 	       t == IRT_I64 || t == IRT_U64 || ctype_isenum(ctr->info)) {
       TRef trid = lj_ir_kint(J, ctype_cid(ct->info));
-      tr = emitir(IRTG(IR_CNEWI, IRT_CDAT
+      tr = emitir(IRTG(IR_CNEWI, IRT_CDATA), trid, tr);
+      if (t == IRT_I64 || t == IRT_U64) lj_needsplit(J);
+    } else if (t == IRT_FLOAT || t == IRT_U32) {
+      tr = emitconv(tr, IRT_NUM, t, 0);
+    } else if (t == IRT_I8 || t == IRT_I16) {
+      tr = emitconv(tr, IRT_INT, t, IRCONV_SEXT);
+    } else if (t == IRT_U8 || t == IRT_U16) {
+      tr = emitconv(tr, IRT_INT, t, 0);
+    }
+    J->base[0] = tr;
+    J->needsnap = 1;
+    return 1;
+  }
+  return 0;
+}
+
+void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  GCcdata *cd = argv2cdata(J, J->base[0], &rd->argv[0]);
+  CTypeID id = cd->ctypeid;
+  CType *ct;
+  cTValue *tv;
+  MMS mm = MM_call;
+  if (id == CTID_CTYPEID) {
+    id = crec_constructor(J, cd, J->base[0]);
+    mm = MM_new;
+  } else if (crec_call(J, rd, cd)) {
+    return;
+  }
+  /* Record ctype __call/__new metamethod. */
+  ct = ctype_raw(cts, id);
+  tv = lj_ctype_meta(cts, ctype_isptr(ct->info) ? ctype_cid(ct->info) : id, mm);
+  if (tv) {
+    if (tvisfunc(tv)) {
+      crec_tailcall(J, rd, tv);
+      return;
+    }
+  } else if (mm == MM_new) {
+    crec_alloc(J, rd, id);
+    return;
+  }
+  /* No metamethod or NYI: non-function metamethods. */
+  lj_trace_err(J, LJ_TRERR_BADTYPE);
+}
+
+static TRef crec_arith_int64(jit_State *J, TRef *sp, CType **s, MMS mm)
+{
+  if (sp[0] && sp[1] && ctype_isnum(s[0]->info) && ctype_isnum(s[1]-
