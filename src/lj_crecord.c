@@ -1365,4 +1365,42 @@ static TRef crec_arith_int64(jit_State *J, TRef *sp, CType **s, MMS mm)
       }
       lj_ir_set(J, IRTG(op, dt), sp[0], sp[1]);
       J->postproc = LJ_POST_FIXGUARD;
-      retu
+      return TREF_TRUE;
+    } else {
+      tr = emitir(IRT(mm+(int)IR_ADD-(int)MM_add, dt), sp[0], sp[1]);
+    }
+    return emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), tr);
+  }
+  return 0;
+}
+
+static TRef crec_arith_ptr(jit_State *J, TRef *sp, CType **s, MMS mm)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CType *ctp = s[0];
+  if (!(sp[0] && sp[1])) return 0;
+  if (ctype_isptr(ctp->info) || ctype_isrefarray(ctp->info)) {
+    if ((mm == MM_sub || mm == MM_eq || mm == MM_lt || mm == MM_le) &&
+	(ctype_isptr(s[1]->info) || ctype_isrefarray(s[1]->info))) {
+      if (mm == MM_sub) {  /* Pointer difference. */
+	TRef tr;
+	CTSize sz = lj_ctype_size(cts, ctype_cid(ctp->info));
+	if (sz == 0 || (sz & (sz-1)) != 0)
+	  return 0;  /* NYI: integer division. */
+	tr = emitir(IRT(IR_SUB, IRT_INTP), sp[0], sp[1]);
+	tr = emitir(IRT(IR_BSAR, IRT_INTP), tr, lj_ir_kint(J, lj_fls(sz)));
+#if LJ_64
+	tr = emitconv(tr, IRT_NUM, IRT_INTP, 0);
+#endif
+	return tr;
+      } else {  /* Pointer comparison (unsigned). */
+	/* Assume true comparison. Fixup and emit pending guard later. */
+	IROp op = mm == MM_eq ? IR_EQ : mm == MM_lt ? IR_ULT : IR_ULE;
+	lj_ir_set(J, IRTG(op, IRT_PTR), sp[0], sp[1]);
+	J->postproc = LJ_POST_FIXGUARD;
+	return TREF_TRUE;
+      }
+    }
+    if (!((mm == MM_add || mm == MM_sub) && ctype_isnum(s[1]->info)))
+      return 0;
+  } else if (mm == MM_add && ctype_isnum(ctp->inf
