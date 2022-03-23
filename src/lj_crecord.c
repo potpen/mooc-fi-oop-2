@@ -1403,4 +1403,45 @@ static TRef crec_arith_ptr(jit_State *J, TRef *sp, CType **s, MMS mm)
     }
     if (!((mm == MM_add || mm == MM_sub) && ctype_isnum(s[1]->info)))
       return 0;
-  } else if (mm == MM_add && ctype_isnum(ctp->inf
+  } else if (mm == MM_add && ctype_isnum(ctp->info) &&
+	     (ctype_isptr(s[1]->info) || ctype_isrefarray(s[1]->info))) {
+    TRef tr = sp[0]; sp[0] = sp[1]; sp[1] = tr;  /* Swap pointer and index. */
+    ctp = s[1];
+  } else {
+    return 0;
+  }
+  {
+    TRef tr = sp[1];
+    IRType t = tref_type(tr);
+    CTSize sz = lj_ctype_size(cts, ctype_cid(ctp->info));
+    CTypeID id;
+#if LJ_64
+    if (t == IRT_NUM || t == IRT_FLOAT)
+      tr = emitconv(tr, IRT_INTP, t, IRCONV_ANY);
+    else if (!(t == IRT_I64 || t == IRT_U64))
+      tr = emitconv(tr, IRT_INTP, IRT_INT,
+		    ((t - IRT_I8) & 1) ? 0 : IRCONV_SEXT);
+#else
+    if (!tref_typerange(sp[1], IRT_I8, IRT_U32)) {
+      tr = emitconv(tr, IRT_INTP, t,
+		    (t == IRT_NUM || t == IRT_FLOAT) ? IRCONV_ANY : 0);
+    }
+#endif
+    tr = emitir(IRT(IR_MUL, IRT_INTP), tr, lj_ir_kintp(J, sz));
+    tr = emitir(IRT(mm+(int)IR_ADD-(int)MM_add, IRT_PTR), sp[0], tr);
+    id = lj_ctype_intern(cts, CTINFO(CT_PTR, CTALIGN_PTR|ctype_cid(ctp->info)),
+			 CTSIZE_PTR);
+    return emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), tr);
+  }
+}
+
+/* Record ctype arithmetic metamethods. */
+static TRef crec_arith_meta(jit_State *J, TRef *sp, CType **s, CTState *cts,
+			    RecordFFData *rd)
+{
+  cTValue *tv = NULL;
+  if (J->base[0]) {
+    if (tviscdata(&rd->argv[0])) {
+      CTypeID id = argv2cdata(J, J->base[0], &rd->argv[0])->ctypeid;
+      CType *ct = ctype_raw(cts, id);
+      if (ctype_isptr(ct->info)) id = ctype_cid(ct
