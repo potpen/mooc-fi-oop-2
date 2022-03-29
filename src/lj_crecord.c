@@ -1531,4 +1531,44 @@ void LJ_FASTCALL recff_cdata_arith(jit_State *J, RecordFFData *rd)
       ct = ctype_get(cts, CTID_INT32);
     } else if (tref_isstr(tr)) {
       TRef tr2 = J->base[1-i];
-      CTy
+      CTypeID id = argv2cdata(J, tr2, &rd->argv[1-i])->ctypeid;
+      ct = ctype_raw(cts, id);
+      if (ctype_isenum(ct->info)) {  /* Match string against enum constant. */
+	GCstr *str = strV(&rd->argv[i]);
+	CTSize ofs;
+	CType *cct = lj_ctype_getfield(cts, ct, str, &ofs);
+	if (cct && ctype_isconstval(cct->info)) {
+	  /* Specialize to the name of the enum constant. */
+	  emitir(IRTG(IR_EQ, IRT_STR), tr, lj_ir_kstr(J, str));
+	  ct = ctype_child(cts, cct);
+	  tr = lj_ir_kint(J, (int32_t)ofs);
+	} else {  /* Interpreter will throw or return false. */
+	  ct = ctype_get(cts, CTID_P_VOID);
+	}
+      } else if (ctype_isptr(ct->info)) {
+	tr = emitir(IRT(IR_ADD, IRT_PTR), tr, lj_ir_kintp(J, sizeof(GCstr)));
+      } else {
+	ct = ctype_get(cts, CTID_P_VOID);
+      }
+    } else if (!tref_isnum(tr)) {
+      tr = 0;
+      ct = ctype_get(cts, CTID_P_VOID);
+    }
+  ok:
+    s[i] = ct;
+    sp[i] = tr;
+  }
+  {
+    TRef tr;
+    MMS mm = (MMS)rd->data;
+    if ((mm == MM_len || mm == MM_concat ||
+	 (!(tr = crec_arith_int64(J, sp, s, mm)) &&
+	  !(tr = crec_arith_ptr(J, sp, s, mm)))) &&
+	!(tr = crec_arith_meta(J, sp, s, cts, rd)))
+      return;
+    J->base[0] = tr;
+    /* Fixup cdata comparisons, too. Avoids some cdata escapes. */
+    if (J->postproc == LJ_POST_FIXGUARD && frame_iscont(J->L->base-1) &&
+	!irt_isguard(J->guardemit)) {
+      const BCIns *pc = frame_contpc(J->L->base-1) - 1;
+      if (bc_op(*pc) <= BC_IS
