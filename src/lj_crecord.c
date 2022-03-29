@@ -1571,4 +1571,47 @@ void LJ_FASTCALL recff_cdata_arith(jit_State *J, RecordFFData *rd)
     if (J->postproc == LJ_POST_FIXGUARD && frame_iscont(J->L->base-1) &&
 	!irt_isguard(J->guardemit)) {
       const BCIns *pc = frame_contpc(J->L->base-1) - 1;
-      if (bc_op(*pc) <= BC_IS
+      if (bc_op(*pc) <= BC_ISNEP) {
+	J2G(J)->tmptv.u64 = (uint64_t)(uintptr_t)pc;
+	J->postproc = LJ_POST_FIXCOMP;
+      }
+    }
+  }
+}
+
+/* -- C library namespace metamethods ------------------------------------- */
+
+void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  if (tref_isudata(J->base[0]) && tref_isstr(J->base[1]) &&
+      udataV(&rd->argv[0])->udtype == UDTYPE_FFI_CLIB) {
+    CLibrary *cl = (CLibrary *)uddata(udataV(&rd->argv[0]));
+    GCstr *name = strV(&rd->argv[1]);
+    CType *ct;
+    CTypeID id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    cTValue *tv = lj_tab_getstr(cl->cache, name);
+    rd->nres = rd->data;
+    if (id && tv && !tvisnil(tv)) {
+      /* Specialize to the symbol name and make the result a constant. */
+      emitir(IRTG(IR_EQ, IRT_STR), J->base[1], lj_ir_kstr(J, name));
+      if (ctype_isconstval(ct->info)) {
+	if (ct->size >= 0x80000000u &&
+	    (ctype_child(cts, ct)->info & CTF_UNSIGNED))
+	  J->base[0] = lj_ir_knum(J, (lua_Number)(uint32_t)ct->size);
+	else
+	  J->base[0] = lj_ir_kint(J, (int32_t)ct->size);
+      } else if (ctype_isextern(ct->info)) {
+	CTypeID sid = ctype_cid(ct->info);
+	void *sp = *(void **)cdataptr(cdataV(tv));
+	TRef ptr;
+	ct = ctype_raw(cts, sid);
+	if (LJ_64 && !checkptr32(sp))
+	  ptr = lj_ir_kintp(J, (uintptr_t)sp);
+	else
+	  ptr = lj_ir_kptr(J, sp);
+	if (rd->data) {
+	  J->base[0] = crec_tv_ct(J, ct, sid, ptr);
+	} else {
+	  J->needsnap = 1;
+	  crec_ct_tv(J, ct, ptr,
