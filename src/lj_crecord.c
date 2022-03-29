@@ -1489,4 +1489,46 @@ void LJ_FASTCALL recff_cdata_arith(jit_State *J, RecordFFData *rd)
       IRType t;
       ct = ctype_raw(cts, id);
       t = crec_ct2irt(cts, ct);
-    
+      if (ctype_isptr(ct->info)) {  /* Resolve pointer or reference. */
+	tr = emitir(IRT(IR_FLOAD, t), tr, IRFL_CDATA_PTR);
+	if (ctype_isref(ct->info)) {
+	  ct = ctype_rawchild(cts, ct);
+	  t = crec_ct2irt(cts, ct);
+	}
+      } else if (t == IRT_I64 || t == IRT_U64) {
+	tr = emitir(IRT(IR_FLOAD, t), tr, IRFL_CDATA_INT64);
+	lj_needsplit(J);
+	goto ok;
+      } else if (t == IRT_INT || t == IRT_U32) {
+	tr = emitir(IRT(IR_FLOAD, t), tr, IRFL_CDATA_INT);
+	if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
+	goto ok;
+      } else if (ctype_isfunc(ct->info)) {
+	CTypeID id0 = i ? ctype_typeid(cts, s[0]) : 0;
+	tr = emitir(IRT(IR_FLOAD, IRT_PTR), tr, IRFL_CDATA_PTR);
+	ct = ctype_get(cts,
+	  lj_ctype_intern(cts, CTINFO(CT_PTR, CTALIGN_PTR|id), CTSIZE_PTR));
+	if (i) {
+	  s[0] = ctype_get(cts, id0);  /* cts->tab may have been reallocated. */
+	}
+	goto ok;
+      } else {
+	tr = emitir(IRT(IR_ADD, IRT_PTR), tr, lj_ir_kintp(J, sizeof(GCcdata)));
+      }
+      if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
+      if (ctype_isnum(ct->info)) {
+	if (t == IRT_CDATA) {
+	  tr = 0;
+	} else {
+	  if (t == IRT_I64 || t == IRT_U64) lj_needsplit(J);
+	  tr = emitir(IRT(IR_XLOAD, t), tr, 0);
+	}
+      }
+    } else if (tref_isnil(tr)) {
+      tr = lj_ir_kptr(J, NULL);
+      ct = ctype_get(cts, CTID_P_VOID);
+    } else if (tref_isinteger(tr)) {
+      ct = ctype_get(cts, CTID_INT32);
+    } else if (tref_isstr(tr)) {
+      TRef tr2 = J->base[1-i];
+      CTy
