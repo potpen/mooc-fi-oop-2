@@ -1614,4 +1614,52 @@ void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
 	  J->base[0] = crec_tv_ct(J, ct, sid, ptr);
 	} else {
 	  J->needsnap = 1;
-	  crec_ct_tv(J, ct, ptr,
+	  crec_ct_tv(J, ct, ptr, J->base[2], &rd->argv[2]);
+	}
+      } else {
+	J->base[0] = lj_ir_kgc(J, obj2gco(cdataV(tv)), IRT_CDATA);
+      }
+    } else {
+      lj_trace_err(J, LJ_TRERR_NOCACHE);
+    }
+  }  /* else: interpreter will throw. */
+}
+
+/* -- FFI library functions ----------------------------------------------- */
+
+static TRef crec_toint(jit_State *J, CTState *cts, TRef sp, TValue *sval)
+{
+  return crec_ct_tv(J, ctype_get(cts, CTID_INT32), 0, sp, sval);
+}
+
+void LJ_FASTCALL recff_ffi_new(jit_State *J, RecordFFData *rd)
+{
+  crec_alloc(J, rd, argv2ctype(J, J->base[0], &rd->argv[0]));
+}
+
+void LJ_FASTCALL recff_ffi_errno(jit_State *J, RecordFFData *rd)
+{
+  UNUSED(rd);
+  if (J->base[0])
+    lj_trace_err(J, LJ_TRERR_NYICALL);
+  J->base[0] = lj_ir_call(J, IRCALL_lj_vm_errno);
+}
+
+void LJ_FASTCALL recff_ffi_string(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef tr = J->base[0];
+  if (tr) {
+    TRef trlen = J->base[1];
+    if (!tref_isnil(trlen)) {
+      trlen = crec_toint(J, cts, trlen, &rd->argv[1]);
+      tr = crec_ct_tv(J, ctype_get(cts, CTID_P_CVOID), 0, tr, &rd->argv[0]);
+    } else {
+      tr = crec_ct_tv(J, ctype_get(cts, CTID_P_CCHAR), 0, tr, &rd->argv[0]);
+      trlen = lj_ir_call(J, IRCALL_strlen, tr);
+    }
+    J->base[0] = emitir(IRT(IR_XSNEW, IRT_STR), tr, trlen);
+  }  /* else: interpreter will throw. */
+}
+
+void LJ_FASTCALL recff_ffi_copy(jit_State *J, RecordFFDa
