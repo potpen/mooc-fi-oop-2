@@ -1662,4 +1662,40 @@ void LJ_FASTCALL recff_ffi_string(jit_State *J, RecordFFData *rd)
   }  /* else: interpreter will throw. */
 }
 
-void LJ_FASTCALL recff_ffi_copy(jit_State *J, RecordFFDa
+void LJ_FASTCALL recff_ffi_copy(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef trdst = J->base[0], trsrc = J->base[1], trlen = J->base[2];
+  if (trdst && trsrc && (trlen || tref_isstr(trsrc))) {
+    trdst = crec_ct_tv(J, ctype_get(cts, CTID_P_VOID), 0, trdst, &rd->argv[0]);
+    trsrc = crec_ct_tv(J, ctype_get(cts, CTID_P_CVOID), 0, trsrc, &rd->argv[1]);
+    if (trlen) {
+      trlen = crec_toint(J, cts, trlen, &rd->argv[2]);
+    } else {
+      trlen = emitir(IRTI(IR_FLOAD), J->base[1], IRFL_STR_LEN);
+      trlen = emitir(IRTI(IR_ADD), trlen, lj_ir_kint(J, 1));
+    }
+    rd->nres = 0;
+    crec_copy(J, trdst, trsrc, trlen, NULL);
+  }  /* else: interpreter will throw. */
+}
+
+void LJ_FASTCALL recff_ffi_fill(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef trdst = J->base[0], trlen = J->base[1], trfill = J->base[2];
+  if (trdst && trlen) {
+    CTSize step = 1;
+    if (tviscdata(&rd->argv[0])) {  /* Get alignment of original destination. */
+      CTSize sz;
+      CType *ct = ctype_raw(cts, cdataV(&rd->argv[0])->ctypeid);
+      if (ctype_isptr(ct->info))
+	ct = ctype_rawchild(cts, ct);
+      step = (1u<<ctype_align(lj_ctype_info(cts, ctype_typeid(cts, ct), &sz)));
+    }
+    trdst = crec_ct_tv(J, ctype_get(cts, CTID_P_VOID), 0, trdst, &rd->argv[0]);
+    trlen = crec_toint(J, cts, trlen, &rd->argv[1]);
+    if (trfill)
+      trfill = crec_toint(J, cts, trfill, &rd->argv[2]);
+    else
+      trfill = lj_ir_kint
