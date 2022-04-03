@@ -1698,4 +1698,51 @@ void LJ_FASTCALL recff_ffi_fill(jit_State *J, RecordFFData *rd)
     if (trfill)
       trfill = crec_toint(J, cts, trfill, &rd->argv[2]);
     else
-      trfill = lj_ir_kint
+      trfill = lj_ir_kint(J, 0);
+    rd->nres = 0;
+    crec_fill(J, trdst, trlen, trfill, step);
+  }  /* else: interpreter will throw. */
+}
+
+void LJ_FASTCALL recff_ffi_typeof(jit_State *J, RecordFFData *rd)
+{
+  if (tref_iscdata(J->base[0])) {
+    TRef trid = lj_ir_kint(J, argv2ctype(J, J->base[0], &rd->argv[0]));
+    J->base[0] = emitir(IRTG(IR_CNEWI, IRT_CDATA),
+			lj_ir_kint(J, CTID_CTYPEID), trid);
+  } else {
+    setfuncV(J->L, &J->errinfo, J->fn);
+    lj_trace_err_info(J, LJ_TRERR_NYIFFU);
+  }
+}
+
+void LJ_FASTCALL recff_ffi_istype(jit_State *J, RecordFFData *rd)
+{
+  argv2ctype(J, J->base[0], &rd->argv[0]);
+  if (tref_iscdata(J->base[1])) {
+    argv2ctype(J, J->base[1], &rd->argv[1]);
+    J->postproc = LJ_POST_FIXBOOL;
+    J->base[0] = TREF_TRUE;
+  } else {
+    J->base[0] = TREF_FALSE;
+  }
+}
+
+void LJ_FASTCALL recff_ffi_abi(jit_State *J, RecordFFData *rd)
+{
+  if (tref_isstr(J->base[0])) {
+    /* Specialize to the ABI string to make the boolean result a constant. */
+    emitir(IRTG(IR_EQ, IRT_STR), J->base[0], lj_ir_kstr(J, strV(&rd->argv[0])));
+    J->postproc = LJ_POST_FIXBOOL;
+    J->base[0] = TREF_TRUE;
+  } else {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+}
+
+/* Record ffi.sizeof(), ffi.alignof(), ffi.offsetof(). */
+void LJ_FASTCALL recff_ffi_xof(jit_State *J, RecordFFData *rd)
+{
+  CTypeID id = argv2ctype(J, J->base[0], &rd->argv[0]);
+  if (rd->data == FF_ffi_sizeof) {
+    CType *ct = lj_ctype_rawref(ctype_ctsG
