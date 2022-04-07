@@ -1828,4 +1828,48 @@ int LJ_FASTCALL recff_bit64_nary(jit_State *J, RecordFFData *rd)
   return 0;
 }
 
-int LJ_FASTCALL recff_bit64_shift(jit_State *J, Reco
+int LJ_FASTCALL recff_bit64_shift(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CTypeID id;
+  TRef tsh = 0;
+  if (J->base[0] && tref_iscdata(J->base[1])) {
+    tsh = crec_ct_tv(J, ctype_get(cts, CTID_INT64), 0,
+		     J->base[1], &rd->argv[1]);
+    if (!tref_isinteger(tsh))
+      tsh = emitconv(tsh, IRT_INT, tref_type(tsh), 0);
+    J->base[1] = tsh;
+  }
+  id = crec_bit64_type(cts, &rd->argv[0]);
+  if (id) {
+    TRef tr = crec_ct_tv(J, ctype_get(cts, id), 0, J->base[0], &rd->argv[0]);
+    uint32_t op = rd->data;
+    if (!tsh) tsh = lj_opt_narrow_tobit(J, J->base[1]);
+    if (!(op < IR_BROL ? LJ_TARGET_MASKSHIFT : LJ_TARGET_MASKROT) &&
+	!tref_isk(tsh))
+      tsh = emitir(IRTI(IR_BAND), tsh, lj_ir_kint(J, 63));
+#ifdef LJ_TARGET_UNIFYROT
+      if (op == (LJ_TARGET_UNIFYROT == 1 ? IR_BROR : IR_BROL)) {
+	op = LJ_TARGET_UNIFYROT == 1 ? IR_BROL : IR_BROR;
+	tsh = emitir(IRTI(IR_NEG), tsh, tsh);
+      }
+#endif
+    tr = emitir(IRT(op, id-CTID_INT64+IRT_I64), tr, tsh);
+    J->base[0] = emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), tr);
+    return 1;
+  }
+  return 0;
+}
+
+TRef recff_bit64_tohex(jit_State *J, RecordFFData *rd, TRef hdr)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CTypeID id = crec_bit64_type(cts, &rd->argv[0]);
+  TRef tr, trsf = J->base[1];
+  SFormat sf = (STRFMT_UINT|STRFMT_T_HEX);
+  int32_t n;
+  if (trsf) {
+    CTypeID id2 = 0;
+    n = (int32_t)lj_carith_check64(J->L, 2, &id2);
+    if (id2)
+      trsf = cre
