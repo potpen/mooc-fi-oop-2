@@ -1872,4 +1872,39 @@ TRef recff_bit64_tohex(jit_State *J, RecordFFData *rd, TRef hdr)
     CTypeID id2 = 0;
     n = (int32_t)lj_carith_check64(J->L, 2, &id2);
     if (id2)
-      trsf = cre
+      trsf = crec_ct_tv(J, ctype_get(cts, CTID_INT32), 0, trsf, &rd->argv[1]);
+    else
+      trsf = lj_opt_narrow_tobit(J, trsf);
+    emitir(IRTGI(IR_EQ), trsf, lj_ir_kint(J, n));  /* Specialize to n. */
+  } else {
+    n = id ? 16 : 8;
+  }
+  if (n < 0) { n = (int32_t)(~n+1u); sf |= STRFMT_F_UPPER; }
+  if ((uint32_t)n > 254) n = 254;
+  sf |= ((SFormat)((n+1)&255) << STRFMT_SH_PREC);
+  if (id) {
+    tr = crec_ct_tv(J, ctype_get(cts, id), 0, J->base[0], &rd->argv[0]);
+    if (n < 16)
+      tr = emitir(IRT(IR_BAND, IRT_U64), tr,
+		  lj_ir_kint64(J, ((uint64_t)1 << 4*n)-1));
+  } else {
+    tr = lj_opt_narrow_tobit(J, J->base[0]);
+    if (n < 8)
+      tr = emitir(IRTI(IR_BAND), tr, lj_ir_kint(J, (int32_t)((1u << 4*n)-1)));
+    tr = emitconv(tr, IRT_U64, IRT_INT, 0);  /* No sign-extension. */
+    lj_needsplit(J);
+  }
+  return lj_ir_call(J, IRCALL_lj_strfmt_putfxint, hdr, lj_ir_kint(J, sf), tr);
+}
+
+/* -- Miscellaneous library functions ------------------------------------- */
+
+void LJ_FASTCALL lj_crecord_tonumber(jit_State *J, RecordFFData *rd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  CType *d, *ct = lj_ctype_rawref(cts, cdataV(&rd->argv[0])->ctypeid);
+  if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
+  if (ctype_isnum(ct->info) || ctype_iscomplex(ct->info)) {
+    if (ctype_isinteger_or_bool(ct->info) && ct->size <= 4 &&
+	!(ct->size == 4 && (ct->info & CTF_UNSIGNED)))
+      d = ctype_get(cts, CTID_INT32);
