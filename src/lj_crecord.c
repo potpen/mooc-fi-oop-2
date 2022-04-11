@@ -1908,3 +1908,42 @@ void LJ_FASTCALL lj_crecord_tonumber(jit_State *J, RecordFFData *rd)
     if (ctype_isinteger_or_bool(ct->info) && ct->size <= 4 &&
 	!(ct->size == 4 && (ct->info & CTF_UNSIGNED)))
       d = ctype_get(cts, CTID_INT32);
+    else
+      d = ctype_get(cts, CTID_DOUBLE);
+    J->base[0] = crec_ct_tv(J, d, 0, J->base[0], &rd->argv[0]);
+  } else {
+    /* Specialize to the ctype that couldn't be converted. */
+    argv2cdata(J, J->base[0], &rd->argv[0]);
+    J->base[0] = TREF_NIL;
+  }
+}
+
+TRef lj_crecord_loadiu64(jit_State *J, TRef tr, cTValue *o)
+{
+  CTypeID id = argv2cdata(J, tr, o)->ctypeid;
+  if (!(id == CTID_INT64 || id == CTID_UINT64))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  lj_needsplit(J);
+  return emitir(IRT(IR_FLOAD, id == CTID_INT64 ? IRT_I64 : IRT_U64), tr,
+		IRFL_CDATA_INT64);
+}
+
+#if LJ_HASBUFFER
+TRef lj_crecord_topcvoid(jit_State *J, TRef tr, cTValue *o)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  if (!tref_iscdata(tr)) lj_trace_err(J, LJ_TRERR_BADTYPE);
+  return crec_ct_tv(J, ctype_get(cts, CTID_P_CVOID), 0, tr, o);
+}
+
+TRef lj_crecord_topuint8(jit_State *J, TRef tr)
+{
+  return emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, CTID_P_UINT8), tr);
+}
+#endif
+
+#undef IR
+#undef emitir
+#undef emitconv
+
+#endif
