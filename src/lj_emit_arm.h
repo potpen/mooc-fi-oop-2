@@ -109,4 +109,50 @@ static void emit_lso(ASMState *as, ARMIns ai, Reg rd, Reg rn, int32_t ofs)
 static void emit_vlso(ASMState *as, ARMIns ai, Reg rd, Reg rn, int32_t ofs)
 {
   lj_assertA(ofs >= -1020 && ofs <= 1020 && (ofs&3) == 0,
-	     "load/store offset %d ou
+	     "load/store offset %d out of range", ofs);
+  if (ofs < 0) ofs = -ofs; else ai |= ARMI_LS_U;
+  *--as->mcp = ai | ARMI_LS_P | ARMF_D(rd & 15) | ARMF_N(rn) | (ofs >> 2);
+}
+#endif
+
+/* -- Emit loads/stores --------------------------------------------------- */
+
+/* Prefer spills of BASE/L. */
+#define emit_canremat(ref)	((ref) < ASMREF_L)
+
+/* Try to find a one step delta relative to another constant. */
+static int emit_kdelta1(ASMState *as, Reg d, int32_t i)
+{
+  RegSet work = ~as->freeset & RSET_GPR;
+  while (work) {
+    Reg r = rset_picktop(work);
+    IRRef ref = regcost_ref(as->cost[r]);
+    lj_assertA(r != d, "dest reg not free");
+    if (emit_canremat(ref)) {
+      int32_t delta = i - (ra_iskref(ref) ? ra_krefk(as, ref) : IR(ref)->i);
+      uint32_t k = emit_isk12(ARMI_ADD, delta);
+      if (k) {
+	if (k == ARMI_K12)
+	  emit_dm(as, ARMI_MOV, d, r);
+	else
+	  emit_dn(as, ARMI_ADD^k, d, r);
+	return 1;
+      }
+    }
+    rset_clear(work, r);
+  }
+  return 0;  /* Failed. */
+}
+
+/* Try to find a two step delta relative to another constant. */
+static int emit_kdelta2(ASMState *as, Reg rd, int32_t i)
+{
+  RegSet work = ~as->freeset & RSET_GPR;
+  while (work) {
+    Reg r = rset_picktop(work);
+    IRRef ref = regcost_ref(as->cost[r]);
+    lj_assertA(r != rd, "dest reg %d not free", rd);
+    if (emit_canremat(ref)) {
+      int32_t other = ra_iskref(ref) ? ra_krefk(as, ref) : IR(ref)->i;
+      if (other) {
+	int
