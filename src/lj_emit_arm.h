@@ -155,4 +155,44 @@ static int emit_kdelta2(ASMState *as, Reg rd, int32_t i)
     if (emit_canremat(ref)) {
       int32_t other = ra_iskref(ref) ? ra_krefk(as, ref) : IR(ref)->i;
       if (other) {
-	int
+	int32_t delta = i - other;
+	uint32_t sh, inv = 0, k2, k;
+	if (delta < 0) { delta = (int32_t)(~(uint32_t)delta+1u); inv = ARMI_ADD^ARMI_SUB; }
+	sh = lj_ffs(delta) & ~1;
+	k2 = emit_isk12(0, delta & (255 << sh));
+	k = emit_isk12(0, delta & ~(255 << sh));
+	if (k) {
+	  emit_dn(as, ARMI_ADD^k2^inv, rd, rd);
+	  emit_dn(as, ARMI_ADD^k^inv, rd, r);
+	  return 1;
+	}
+      }
+    }
+    rset_clear(work, r);
+  }
+  return 0;  /* Failed. */
+}
+
+/* Load a 32 bit constant into a GPR. */
+static void emit_loadi(ASMState *as, Reg rd, int32_t i)
+{
+  uint32_t k = emit_isk12(ARMI_MOV, i);
+  lj_assertA(rset_test(as->freeset, rd) || rd == RID_TMP,
+	     "dest reg %d not free", rd);
+  if (k) {
+    /* Standard K12 constant. */
+    emit_d(as, ARMI_MOV^k, rd);
+  } else if ((as->flags & JIT_F_ARMV6T2) && (uint32_t)i < 0x00010000u) {
+    /* 16 bit loword constant for ARMv6T2. */
+    emit_d(as, ARMI_MOVW|(i & 0x0fff)|((i & 0xf000)<<4), rd);
+  } else if (emit_kdelta1(as, rd, i)) {
+    /* One step delta relative to another constant. */
+  } else if ((as->flags & JIT_F_ARMV6T2)) {
+    /* 32 bit hiword/loword constant for ARMv6T2. */
+    emit_d(as, ARMI_MOVT|((i>>16) & 0x0fff)|(((i>>16) & 0xf000)<<4), rd);
+    emit_d(as, ARMI_MOVW|(i & 0x0fff)|((i & 0xf000)<<4), rd);
+  } else if (emit_kdelta2(as, rd, i)) {
+    /* Two step delta relative to another constant. */
+  } else {
+    /* Otherwise construct the constant with up to 4 instructions. */
+    /* NYI: use mvn+bic, use pc-rela
