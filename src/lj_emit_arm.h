@@ -69,4 +69,44 @@ static void emit_d(ASMState *as, ARMIns ai, Reg rd)
   *--as->mcp = ai | ARMF_D(rd);
 }
 
-static void 
+static void emit_n(ASMState *as, ARMIns ai, Reg rn)
+{
+  *--as->mcp = ai | ARMF_N(rn);
+}
+
+static void emit_m(ASMState *as, ARMIns ai, Reg rm)
+{
+  *--as->mcp = ai | ARMF_M(rm);
+}
+
+static void emit_lsox(ASMState *as, ARMIns ai, Reg rd, Reg rn, int32_t ofs)
+{
+  lj_assertA(ofs >= -255 && ofs <= 255,
+	     "load/store offset %d out of range", ofs);
+  if (ofs < 0) ofs = -ofs; else ai |= ARMI_LS_U;
+  *--as->mcp = ai | ARMI_LS_P | ARMI_LSX_I | ARMF_D(rd) | ARMF_N(rn) |
+	       ((ofs & 0xf0) << 4) | (ofs & 0x0f);
+}
+
+static void emit_lso(ASMState *as, ARMIns ai, Reg rd, Reg rn, int32_t ofs)
+{
+  lj_assertA(ofs >= -4095 && ofs <= 4095,
+	     "load/store offset %d out of range", ofs);
+  /* Combine LDR/STR pairs to LDRD/STRD. */
+  if (*as->mcp == (ai|ARMI_LS_P|ARMI_LS_U|ARMF_D(rd^1)|ARMF_N(rn)|(ofs^4)) &&
+      (ai & ~(ARMI_LDR^ARMI_STR)) == ARMI_STR && rd != rn &&
+      (uint32_t)ofs <= 252 && !(ofs & 3) && !((rd ^ (ofs >>2)) & 1) &&
+      as->mcp != as->mcloop) {
+    as->mcp++;
+    emit_lsox(as, ai == ARMI_LDR ? ARMI_LDRD : ARMI_STRD, rd&~1, rn, ofs&~4);
+    return;
+  }
+  if (ofs < 0) ofs = -ofs; else ai |= ARMI_LS_U;
+  *--as->mcp = ai | ARMI_LS_P | ARMF_D(rd) | ARMF_N(rn) | ofs;
+}
+
+#if !LJ_SOFTFP
+static void emit_vlso(ASMState *as, ARMIns ai, Reg rd, Reg rn, int32_t ofs)
+{
+  lj_assertA(ofs >= -1020 && ofs <= 1020 && (ofs&3) == 0,
+	     "load/store offset %d ou
