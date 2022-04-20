@@ -195,4 +195,55 @@ static void emit_loadi(ASMState *as, Reg rd, int32_t i)
     /* Two step delta relative to another constant. */
   } else {
     /* Otherwise construct the constant with up to 4 instructions. */
-    /* NYI: use mvn+bic, use pc-rela
+    /* NYI: use mvn+bic, use pc-relative loads. */
+    for (;;) {
+      uint32_t sh = lj_ffs(i) & ~1;
+      int32_t m = i & (255 << sh);
+      i &= ~(255 << sh);
+      if (i == 0) {
+	emit_d(as, ARMI_MOV ^ emit_isk12(0, m), rd);
+	break;
+      }
+      emit_dn(as, ARMI_ORR ^ emit_isk12(0, m), rd, rd);
+    }
+  }
+}
+
+#define emit_loada(as, rd, addr)	emit_loadi(as, (rd), i32ptr((addr)))
+
+static Reg ra_allock(ASMState *as, intptr_t k, RegSet allow);
+
+/* Get/set from constant pointer. */
+static void emit_lsptr(ASMState *as, ARMIns ai, Reg r, void *p)
+{
+  int32_t i = i32ptr(p);
+  emit_lso(as, ai, r, ra_allock(as, (i & ~4095), rset_exclude(RSET_GPR, r)),
+	   (i & 4095));
+}
+
+#if !LJ_SOFTFP
+/* Load a number constant into an FPR. */
+static void emit_loadk64(ASMState *as, Reg r, IRIns *ir)
+{
+  cTValue *tv = ir_knum(ir);
+  int32_t i;
+  if ((as->flags & JIT_F_VFPV3) && !tv->u32.lo) {
+    uint32_t hi = tv->u32.hi;
+    uint32_t b = ((hi >> 22) & 0x1ff);
+    if (!(hi & 0xffff) && (b == 0x100 || b == 0x0ff)) {
+      *--as->mcp = ARMI_VMOVI_D | ARMF_D(r & 15) |
+		   ((tv->u32.hi >> 12) & 0x00080000) |
+		   ((tv->u32.hi >> 4) & 0x00070000) |
+		   ((tv->u32.hi >> 16) & 0x0000000f);
+      return;
+    }
+  }
+  i = i32ptr(tv);
+  emit_vlso(as, ARMI_VLDR_D, r,
+	    ra_allock(as, (i & ~1020), RSET_GPR), (i & 1020));
+}
+#endif
+
+/* Get/set global_State fields. */
+#define emit_getgl(as, r, field) \
+  emit_lsptr(as, ARMI_LDR, (r)
