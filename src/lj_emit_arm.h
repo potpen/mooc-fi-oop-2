@@ -246,4 +246,47 @@ static void emit_loadk64(ASMState *as, Reg r, IRIns *ir)
 
 /* Get/set global_State fields. */
 #define emit_getgl(as, r, field) \
-  emit_lsptr(as, ARMI_LDR, (r)
+  emit_lsptr(as, ARMI_LDR, (r), (void *)&J2G(as->J)->field)
+#define emit_setgl(as, r, field) \
+  emit_lsptr(as, ARMI_STR, (r), (void *)&J2G(as->J)->field)
+
+/* Trace number is determined from pc of exit instruction. */
+#define emit_setvmstate(as, i)		UNUSED(i)
+
+/* -- Emit control-flow instructions -------------------------------------- */
+
+/* Label for internal jumps. */
+typedef MCode *MCLabel;
+
+/* Return label pointing to current PC. */
+#define emit_label(as)		((as)->mcp)
+
+static void emit_branch(ASMState *as, ARMIns ai, MCode *target)
+{
+  MCode *p = as->mcp;
+  ptrdiff_t delta = (target - p) - 1;
+  lj_assertA(((delta + 0x00800000) >> 24) == 0, "branch target out of range");
+  *--p = ai | ((uint32_t)delta & 0x00ffffffu);
+  as->mcp = p;
+}
+
+#define emit_jmp(as, target) emit_branch(as, ARMI_B, (target))
+
+static void emit_call(ASMState *as, void *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = ((char *)target - (char *)p) - 8;
+  if ((((delta>>2) + 0x00800000) >> 24) == 0) {
+    if ((delta & 1))
+      *p = ARMI_BLX | ((uint32_t)(delta>>2) & 0x00ffffffu) | ((delta&2) << 23);
+    else
+      *p = ARMI_BL | ((uint32_t)(delta>>2) & 0x00ffffffu);
+  } else {  /* Target out of range: need indirect call. But don't use R0-R3. */
+    Reg r = ra_allock(as, i32ptr(target), RSET_RANGE(RID_R4, RID_R12+1));
+    *p = ARMI_BLXr | ARMF_M(r);
+  }
+}
+
+/* -- Emit generic operations --------------------------------------------- */
+
+/* Generic move between tw
