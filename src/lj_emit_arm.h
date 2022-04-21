@@ -289,4 +289,48 @@ static void emit_call(ASMState *as, void *target)
 
 /* -- Emit generic operations --------------------------------------------- */
 
-/* Generic move between tw
+/* Generic move between two regs. */
+static void emit_movrr(ASMState *as, IRIns *ir, Reg dst, Reg src)
+{
+#if LJ_SOFTFP
+  lj_assertA(!irt_isnum(ir->t), "unexpected FP op"); UNUSED(ir);
+#else
+  if (dst >= RID_MAX_GPR) {
+    emit_dm(as, irt_isnum(ir->t) ? ARMI_VMOV_D : ARMI_VMOV_S,
+	    (dst & 15), (src & 15));
+    return;
+  }
+#endif
+  if (as->mcp != as->mcloop) {  /* Swap early registers for loads/stores. */
+    MCode ins = *as->mcp, swp = (src^dst);
+    if ((ins & 0x0c000000) == 0x04000000 && (ins & 0x02000010) != 0x02000010) {
+      if (!((ins ^ (dst << 16)) & 0x000f0000))
+	*as->mcp = ins ^ (swp << 16);  /* Swap N in load/store. */
+      if (!(ins & 0x00100000) && !((ins ^ (dst << 12)) & 0x0000f000))
+	*as->mcp = ins ^ (swp << 12);  /* Swap D in store. */
+    }
+  }
+  emit_dm(as, ARMI_MOV, dst, src);
+}
+
+/* Generic load of register with base and (small) offset address. */
+static void emit_loadofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
+{
+#if LJ_SOFTFP
+  lj_assertA(!irt_isnum(ir->t), "unexpected FP op"); UNUSED(ir);
+#else
+  if (r >= RID_MAX_GPR)
+    emit_vlso(as, irt_isnum(ir->t) ? ARMI_VLDR_D : ARMI_VLDR_S, r, base, ofs);
+  else
+#endif
+    emit_lso(as, ARMI_LDR, r, base, ofs);
+}
+
+/* Generic store of register with base and (small) offset address. */
+static void emit_storeofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
+{
+#if LJ_SOFTFP
+  lj_assertA(!irt_isnum(ir->t), "unexpected FP op"); UNUSED(ir);
+#else
+  if (r >= RID_MAX_GPR)
+    emit_vl
