@@ -333,4 +333,29 @@ static void emit_storeofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
   lj_assertA(!irt_isnum(ir->t), "unexpected FP op"); UNUSED(ir);
 #else
   if (r >= RID_MAX_GPR)
-    emit_vl
+    emit_vlso(as, irt_isnum(ir->t) ? ARMI_VSTR_D : ARMI_VSTR_S, r, base, ofs);
+  else
+#endif
+    emit_lso(as, ARMI_STR, r, base, ofs);
+}
+
+/* Emit an arithmetic/logic operation with a constant operand. */
+static void emit_opk(ASMState *as, ARMIns ai, Reg dest, Reg src,
+		     int32_t i, RegSet allow)
+{
+  uint32_t k = emit_isk12(ai, i);
+  if (k)
+    emit_dn(as, ai^k, dest, src);
+  else
+    emit_dnm(as, ai, dest, src, ra_allock(as, i, allow));
+}
+
+/* Add offset to pointer. */
+static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
+{
+  if (ofs)
+    emit_opk(as, ARMI_ADD, r, r, ofs, rset_exclude(RSET_GPR, r));
+}
+
+#define emit_spsub(as, ofs)	emit_addptr(as, RID_SP, -(ofs))
+
