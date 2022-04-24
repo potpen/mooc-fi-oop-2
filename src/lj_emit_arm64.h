@@ -62,4 +62,63 @@ static uint32_t emit_isk13(uint64_t n, int is64)
   if (inv)
     return A64I_K13 | (((lz-w) & 127) << 16) | (((lz+tz-w-1) & 63) << 10);
   else
-   
+    return A64I_K13 | ((w-tz) << 16) | (((63-lz-tz-w-w) & 63) << 10);
+}
+
+static uint32_t emit_isfpk64(uint64_t n)
+{
+  uint64_t etop9 = ((n >> 54) & 0x1ff);
+  if ((n << 16) == 0 && (etop9 == 0x100 || etop9 == 0x0ff)) {
+    return (uint32_t)(((n >> 48) & 0x7f) | ((n >> 56) & 0x80));
+  }
+  return ~0u;
+}
+
+/* -- Emit basic instructions --------------------------------------------- */
+
+static void emit_dnma(ASMState *as, A64Ins ai, Reg rd, Reg rn, Reg rm, Reg ra)
+{
+  *--as->mcp = ai | A64F_D(rd) | A64F_N(rn) | A64F_M(rm) | A64F_A(ra);
+}
+
+static void emit_dnm(ASMState *as, A64Ins ai, Reg rd, Reg rn, Reg rm)
+{
+  *--as->mcp = ai | A64F_D(rd) | A64F_N(rn) | A64F_M(rm);
+}
+
+static void emit_dm(ASMState *as, A64Ins ai, Reg rd, Reg rm)
+{
+  *--as->mcp = ai | A64F_D(rd) | A64F_M(rm);
+}
+
+static void emit_dn(ASMState *as, A64Ins ai, Reg rd, Reg rn)
+{
+  *--as->mcp = ai | A64F_D(rd) | A64F_N(rn);
+}
+
+static void emit_nm(ASMState *as, A64Ins ai, Reg rn, Reg rm)
+{
+  *--as->mcp = ai | A64F_N(rn) | A64F_M(rm);
+}
+
+static void emit_d(ASMState *as, A64Ins ai, Reg rd)
+{
+  *--as->mcp = ai | A64F_D(rd);
+}
+
+static void emit_n(ASMState *as, A64Ins ai, Reg rn)
+{
+  *--as->mcp = ai | A64F_N(rn);
+}
+
+static int emit_checkofs(A64Ins ai, int64_t ofs)
+{
+  int scale = (ai >> 30) & 3;
+  if (ofs < 0 || (ofs & ((1<<scale)-1))) {
+    return (ofs >= -256 && ofs <= 255) ? -1 : 0;
+  } else {
+    return (ofs < (4096<<scale)) ? 1 : 0;
+  }
+}
+
+static void emit_lso(ASMState *as, A6
