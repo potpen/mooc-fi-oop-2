@@ -121,4 +121,43 @@ static int emit_checkofs(A64Ins ai, int64_t ofs)
   }
 }
 
-static void emit_lso(ASMState *as, A6
+static void emit_lso(ASMState *as, A64Ins ai, Reg rd, Reg rn, int64_t ofs)
+{
+  int ot = emit_checkofs(ai, ofs), sc = (ai >> 30) & 3;
+  lj_assertA(ot, "load/store offset %d out of range", ofs);
+  /* Combine LDR/STR pairs to LDP/STP. */
+  if ((sc == 2 || sc == 3) &&
+      (!(ai & 0x400000) || rd != rn) &&
+      as->mcp != as->mcloop) {
+    uint32_t prev = *as->mcp & ~A64F_D(31);
+    int ofsm = ofs - (1<<sc), ofsp = ofs + (1<<sc);
+    A64Ins aip;
+    if (prev == (ai | A64F_N(rn) | A64F_U12(ofsm>>sc)) ||
+	prev == ((ai^A64I_LS_U) | A64F_N(rn) | A64F_S9(ofsm&0x1ff))) {
+      aip = (A64F_A(rd) | A64F_D(*as->mcp & 31));
+    } else if (prev == (ai | A64F_N(rn) | A64F_U12(ofsp>>sc)) ||
+	       prev == ((ai^A64I_LS_U) | A64F_N(rn) | A64F_S9(ofsp&0x1ff))) {
+      aip = (A64F_D(rd) | A64F_A(*as->mcp & 31));
+      ofsm = ofs;
+    } else {
+      goto nopair;
+    }
+    if (ofsm >= (int)((unsigned int)-64<<sc) && ofsm <= (63<<sc)) {
+      *as->mcp = aip | A64F_N(rn) | ((ofsm >> sc) << 15) |
+	(ai ^ ((ai == A64I_LDRx || ai == A64I_STRx) ? 0x50000000 : 0x90000000));
+      return;
+    }
+  }
+nopair:
+  if (ot == 1)
+    *--as->mcp = ai | A64F_D(rd) | A64F_N(rn) | A64F_U12(ofs >> sc);
+  else
+    *--as->mcp = (ai^A64I_LS_U) | A64F_D(rd) | A64F_N(rn) | A64F_S9(ofs & 0x1ff);
+}
+
+/* -- Emit loads/stores --------------------------------------------------- */
+
+/* Prefer rematerialization of BASE/L from global_State over spills. */
+#define emit_canremat(ref)	((ref) <= ASMREF_L)
+
+/* Try to find an N-
