@@ -160,4 +160,47 @@ nopair:
 /* Prefer rematerialization of BASE/L from global_State over spills. */
 #define emit_canremat(ref)	((ref) <= ASMREF_L)
 
-/* Try to find an N-
+/* Try to find an N-step delta relative to other consts with N < lim. */
+static int emit_kdelta(ASMState *as, Reg rd, uint64_t k, int lim)
+{
+  RegSet work = (~as->freeset & RSET_GPR) | RID2RSET(RID_GL);
+  if (lim <= 1) return 0;  /* Can't beat that. */
+  while (work) {
+    Reg r = rset_picktop(work);
+    IRRef ref = regcost_ref(as->cost[r]);
+    lj_assertA(r != rd, "dest reg %d not free", rd);
+    if (ref < REF_TRUE) {
+      uint64_t kx = ra_iskref(ref) ? (uint64_t)ra_krefk(as, ref) :
+				     get_k64val(as, ref);
+      int64_t delta = (int64_t)(k - kx);
+      if (delta == 0) {
+	emit_dm(as, A64I_MOVx, rd, r);
+	return 1;
+      } else {
+	uint32_t k12 = emit_isk12(delta < 0 ? (int64_t)(~(uint64_t)delta+1u) : delta);
+	if (k12) {
+	  emit_dn(as, (delta < 0 ? A64I_SUBx : A64I_ADDx)^k12, rd, r);
+	  return 1;
+	}
+	/* Do other ops or multi-step deltas pay off? Probably not.
+	** E.g. XOR rarely helps with pointer consts.
+	*/
+      }
+    }
+    rset_clear(work, r);
+  }
+  return 0;  /* Failed. */
+}
+
+static void emit_loadk(ASMState *as, Reg rd, uint64_t u64, int is64)
+{
+  int i, zeros = 0, ones = 0, neg;
+  if (!is64) u64 = (int64_t)(int32_t)u64;  /* Sign-extend. */
+  /* Count homogeneous 16 bit fragments. */
+  for (i = 0; i < 4; i++) {
+    uint64_t frag = (u64 >> i*16) & 0xffff;
+    zeros += (frag == 0);
+    ones += (frag == 0xffff);
+  }
+  neg = ones > zeros;  /* Use MOVN if it pays off. */
+  if ((neg ? ones : zeros) < 3) {  /* Need
