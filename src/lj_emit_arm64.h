@@ -291,4 +291,51 @@ static void emit_loadk64(ASMState *as, Reg r, IRIns *ir)
     if (checkmcpofs(as, k))
       emit_d(as, A64I_LDRLx | A64F_S19(mcpofs(as, k)>>2), r);
     else
-     
+      emit_loadu64(as, r, *k);
+  }
+}
+
+/* Get/set global_State fields. */
+#define emit_getgl(as, r, field) \
+  emit_lsptr(as, A64I_LDRx, (r), (void *)&J2G(as->J)->field)
+#define emit_setgl(as, r, field) \
+  emit_lsptr(as, A64I_STRx, (r), (void *)&J2G(as->J)->field)
+
+/* Trace number is determined from pc of exit instruction. */
+#define emit_setvmstate(as, i)	UNUSED(i)
+
+/* -- Emit control-flow instructions -------------------------------------- */
+
+/* Label for internal jumps. */
+typedef MCode *MCLabel;
+
+/* Return label pointing to current PC. */
+#define emit_label(as)		((as)->mcp)
+
+static void emit_cond_branch(ASMState *as, A64CC cond, MCode *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = target - p;
+  lj_assertA(A64F_S_OK(delta, 19), "branch target out of range");
+  *p = A64I_BCC | A64F_S19(delta) | cond;
+}
+
+static void emit_branch(ASMState *as, A64Ins ai, MCode *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = target - p;
+  lj_assertA(A64F_S_OK(delta, 26), "branch target out of range");
+  *p = ai | A64F_S26(delta);
+}
+
+static void emit_tnb(ASMState *as, A64Ins ai, Reg r, uint32_t bit, MCode *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = target - p;
+  lj_assertA(bit < 63, "bit number out of range");
+  lj_assertA(A64F_S_OK(delta, 14), "branch target out of range");
+  if (bit > 31) ai |= A64I_X;
+  *p = ai | A64F_BIT(bit & 31) | A64F_S14(delta) | r;
+}
+
+static void emit_cnb(ASM
