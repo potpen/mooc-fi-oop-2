@@ -203,4 +203,48 @@ static void emit_loadk(ASMState *as, Reg rd, uint64_t u64, int is64)
     ones += (frag == 0xffff);
   }
   neg = ones > zeros;  /* Use MOVN if it pays off. */
-  if ((neg ? ones : zeros) < 3) {  /* Need
+  if ((neg ? ones : zeros) < 3) {  /* Need 2+ ins. Try shorter K13 encoding. */
+    uint32_t k13 = emit_isk13(u64, is64);
+    if (k13) {
+      emit_dn(as, (is64|A64I_ORRw)^k13, rd, RID_ZERO);
+      return;
+    }
+  }
+  if (!emit_kdelta(as, rd, u64, 4 - (neg ? ones : zeros))) {
+    int shift = 0, lshift = 0;
+    uint64_t n64 = neg ? ~u64 : u64;
+    if (n64 != 0) {
+      /* Find first/last fragment to be filled. */
+      shift = (63-emit_clz64(n64)) & ~15;
+      lshift = emit_ctz64(n64) & ~15;
+    }
+    /* MOVK requires the original value (u64). */
+    while (shift > lshift) {
+      uint32_t u16 = (u64 >> shift) & 0xffff;
+      /* Skip fragments that are correctly filled by MOVN/MOVZ. */
+      if (u16 != (neg ? 0xffff : 0))
+	emit_d(as, is64 | A64I_MOVKw | A64F_U16(u16) | A64F_LSL16(shift), rd);
+      shift -= 16;
+    }
+    /* But MOVN needs an inverted value (n64). */
+    emit_d(as, (neg ? A64I_MOVNx : A64I_MOVZx) |
+	       A64F_U16((n64 >> lshift) & 0xffff) | A64F_LSL16(lshift), rd);
+  }
+}
+
+/* Load a 32 bit constant into a GPR. */
+#define emit_loadi(as, rd, i)	emit_loadk(as, rd, i, 0)
+
+/* Load a 64 bit constant into a GPR. */
+#define emit_loadu64(as, rd, i)	emit_loadk(as, rd, i, A64I_X)
+
+#define emit_loada(as, r, addr)	emit_loadu64(as, (r), (uintptr_t)(addr))
+
+#define glofs(as, k) \
+  ((intptr_t)((uintptr_t)(k) - (uintptr_t)&J2GG(as->J)->g))
+#define mcpofs(as, k) \
+  ((intptr_t)((uintptr_t)(k) - (uintptr_t)(as->mcp - 1)))
+#define checkmcpofs(as, k) \
+  (A64F_S_OK(mcpofs(as, k)>>2, 19))
+
+static Reg ra_allock(A
