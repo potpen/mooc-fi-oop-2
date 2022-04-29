@@ -247,4 +247,48 @@ static void emit_loadk(ASMState *as, Reg rd, uint64_t u64, int is64)
 #define checkmcpofs(as, k) \
   (A64F_S_OK(mcpofs(as, k)>>2, 19))
 
-static Reg ra_allock(A
+static Reg ra_allock(ASMState *as, intptr_t k, RegSet allow);
+
+/* Get/set from constant pointer. */
+static void emit_lsptr(ASMState *as, A64Ins ai, Reg r, void *p)
+{
+  /* First, check if ip + offset is in range. */
+  if ((ai & 0x00400000) && checkmcpofs(as, p)) {
+    emit_d(as, A64I_LDRLx | A64F_S19(mcpofs(as, p)>>2), r);
+  } else {
+    Reg base = RID_GL;  /* Next, try GL + offset. */
+    int64_t ofs = glofs(as, p);
+    if (!emit_checkofs(ai, ofs)) {  /* Else split up into base reg + offset. */
+      int64_t i64 = i64ptr(p);
+      base = ra_allock(as, (i64 & ~0x7fffull), rset_exclude(RSET_GPR, r));
+      ofs = i64 & 0x7fffull;
+    }
+    emit_lso(as, ai, r, base, ofs);
+  }
+}
+
+/* Load 64 bit IR constant into register. */
+static void emit_loadk64(ASMState *as, Reg r, IRIns *ir)
+{
+  const uint64_t *k = &ir_k64(ir)->u64;
+  int64_t ofs;
+  if (r >= RID_MAX_GPR) {
+    uint32_t fpk = emit_isfpk64(*k);
+    if (fpk != ~0u) {
+      emit_d(as, A64I_FMOV_DI | A64F_FP8(fpk), (r & 31));
+      return;
+    }
+  }
+  ofs = glofs(as, k);
+  if (emit_checkofs(A64I_LDRx, ofs)) {
+    emit_lso(as, r >= RID_MAX_GPR ? A64I_LDRd : A64I_LDRx,
+	     (r & 31), RID_GL, ofs);
+  } else {
+    if (r >= RID_MAX_GPR) {
+      emit_dn(as, A64I_FMOV_D_R, (r & 31), RID_TMP);
+      r = RID_TMP;
+    }
+    if (checkmcpofs(as, k))
+      emit_d(as, A64I_LDRLx | A64F_S19(mcpofs(as, k)>>2), r);
+    else
+     
