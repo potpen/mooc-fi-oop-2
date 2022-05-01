@@ -338,4 +338,46 @@ static void emit_tnb(ASMState *as, A64Ins ai, Reg r, uint32_t bit, MCode *target
   *p = ai | A64F_BIT(bit & 31) | A64F_S14(delta) | r;
 }
 
-static void emit_cnb(ASM
+static void emit_cnb(ASMState *as, A64Ins ai, Reg r, MCode *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = target - p;
+  lj_assertA(A64F_S_OK(delta, 19), "branch target out of range");
+  *p = ai | A64F_S19(delta) | r;
+}
+
+#define emit_jmp(as, target)	emit_branch(as, A64I_B, (target))
+
+static void emit_call(ASMState *as, void *target)
+{
+  MCode *p = --as->mcp;
+  ptrdiff_t delta = (char *)target - (char *)p;
+  if (A64F_S_OK(delta>>2, 26)) {
+    *p = A64I_BL | A64F_S26(delta>>2);
+  } else {  /* Target out of range: need indirect call. But don't use R0-R7. */
+    Reg r = ra_allock(as, i64ptr(target),
+		      RSET_RANGE(RID_X8, RID_MAX_GPR)-RSET_FIXED);
+    *p = A64I_BLR | A64F_N(r);
+  }
+}
+
+/* -- Emit generic operations --------------------------------------------- */
+
+/* Generic move between two regs. */
+static void emit_movrr(ASMState *as, IRIns *ir, Reg dst, Reg src)
+{
+  if (dst >= RID_MAX_GPR) {
+    emit_dn(as, irt_isnum(ir->t) ? A64I_FMOV_D : A64I_FMOV_S,
+	    (dst & 31), (src & 31));
+    return;
+  }
+  if (as->mcp != as->mcloop) {  /* Swap early registers for loads/stores. */
+    MCode ins = *as->mcp, swp = (src^dst);
+    if ((ins & 0xbf800000) == 0xb9000000) {
+      if (!((ins ^ (dst << 5)) & 0x000003e0))
+	*as->mcp = ins ^ (swp << 5);  /* Swap N in load/store. */
+      if (!(ins & 0x00400000) && !((ins ^ dst) & 0x0000001f))
+	*as->mcp = ins ^ swp;  /* Swap D in store. */
+    }
+  }
+  emit_dm(as, A64
