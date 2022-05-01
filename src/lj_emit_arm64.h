@@ -380,4 +380,46 @@ static void emit_movrr(ASMState *as, IRIns *ir, Reg dst, Reg src)
 	*as->mcp = ins ^ swp;  /* Swap D in store. */
     }
   }
-  emit_dm(as, A64
+  emit_dm(as, A64I_MOVx, dst, src);
+}
+
+/* Generic load of register with base and (small) offset address. */
+static void emit_loadofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
+{
+  if (r >= RID_MAX_GPR)
+    emit_lso(as, irt_isnum(ir->t) ? A64I_LDRd : A64I_LDRs, (r & 31), base, ofs);
+  else
+    emit_lso(as, irt_is64(ir->t) ? A64I_LDRx : A64I_LDRw, r, base, ofs);
+}
+
+/* Generic store of register with base and (small) offset address. */
+static void emit_storeofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
+{
+  if (r >= RID_MAX_GPR)
+    emit_lso(as, irt_isnum(ir->t) ? A64I_STRd : A64I_STRs, (r & 31), base, ofs);
+  else
+    emit_lso(as, irt_is64(ir->t) ? A64I_STRx : A64I_STRw, r, base, ofs);
+}
+
+/* Emit an arithmetic operation with a constant operand. */
+static void emit_opk(ASMState *as, A64Ins ai, Reg dest, Reg src,
+		     int32_t i, RegSet allow)
+{
+  uint32_t k = emit_isk12(i);
+  if (k)
+    emit_dn(as, ai^k, dest, src);
+  else
+    emit_dnm(as, ai, dest, src, ra_allock(as, i, allow));
+}
+
+/* Add offset to pointer. */
+static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
+{
+  if (ofs)
+    emit_opk(as, ofs < 0 ? A64I_SUBx : A64I_ADDx, r, r,
+		 ofs < 0 ? (int32_t)(~(uint32_t)ofs+1u) : ofs,
+		 rset_exclude(RSET_GPR, r));
+}
+
+#define emit_spsub(as, ofs)	emit_addptr(as, RID_SP, -(ofs))
+
