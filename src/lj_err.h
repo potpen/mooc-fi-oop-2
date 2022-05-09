@@ -50,4 +50,9 @@ LJ_FUNC void lj_err_deregister_mcode(void *base, size_t sz, uint8_t *info);
 #endif
 
 #if LJ_UNWIND_EXT && !LJ_ABI_WIN && defined(LUA_USE_ASSERT)
-LJ_FUNC void 
+LJ_FUNC void lj_err_verify(void);
+#else
+#define lj_err_verify()		((void)0)
+#endif
+
+#endif
