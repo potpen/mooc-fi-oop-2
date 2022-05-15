@@ -96,4 +96,38 @@ static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
 #define lj_gc_barriert(L, t, tv) \
   { if (tviswhite(tv) && isblack(obj2gco(t))) \
       lj_gc_barrierback(G(L), (t)); }
-#define lj_gc_objbarriert(L, t
+#define lj_gc_objbarriert(L, t, o)  \
+  { if (iswhite(obj2gco(o)) && isblack(obj2gco(t))) \
+      lj_gc_barrierback(G(L), (t)); }
+
+/* Barrier for stores to any other object. TValue and GCobj variant. */
+#define lj_gc_barrier(L, p, tv) \
+  { if (tviswhite(tv) && isblack(obj2gco(p))) \
+      lj_gc_barrierf(G(L), obj2gco(p), gcV(tv)); }
+#define lj_gc_objbarrier(L, p, o) \
+  { if (iswhite(obj2gco(o)) && isblack(obj2gco(p))) \
+      lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
+
+/* Allocator. */
+LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
+LJ_FUNC void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size);
+LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
+			  MSize *szp, MSize lim, MSize esz);
+
+#define lj_mem_new(L, s)	lj_mem_realloc(L, NULL, 0, (s))
+
+static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
+{
+  g->gc.total -= (GCSize)osize;
+  g->allocf(g->allocd, p, osize, 0);
+}
+
+#define lj_mem_newvec(L, n, t)	((t *)lj_mem_new(L, (GCSize)((n)*sizeof(t))))
+#define lj_mem_reallocvec(L, p, on, n, t) \
+  ((p) = (t *)lj_mem_realloc(L, p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
+#define lj_mem_growvec(L, p, n, m, t) \
+  ((p) = (t *)lj_mem_grow(L, (p), &(n), (m), (MSize)sizeof(t)))
+#define lj_mem_freevec(g, p, n, t)	lj_mem_free(g, (p), (n)*sizeof(t))
+
+#define lj_mem_newobj(L, t)	((t *)lj_mem_newgco(L, sizeof(t)))
+#define lj_mem_newt(L, s, t)	((
