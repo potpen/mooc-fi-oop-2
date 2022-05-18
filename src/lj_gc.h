@@ -130,4 +130,7 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 #define lj_mem_freevec(g, p, n, t)	lj_mem_free(g, (p), (n)*sizeof(t))
 
 #define lj_mem_newobj(L, t)	((t *)lj_mem_newgco(L, sizeof(t)))
-#define lj_mem_newt(L, s, t)	((
+#define lj_mem_newt(L, s, t)	((t *)lj_mem_new(L, (s)))
+#define lj_mem_freet(g, p)	lj_mem_free(g, (p), sizeof(*(p)))
+
+#endif
