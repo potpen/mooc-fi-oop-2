@@ -90,3 +90,57 @@ Temporary breakpoint 1, TRACE_1 () at x.lua:2
 (gdb) disass TRACE_1
 Dump of assembler code for function TRACE_1:
 0xf7fd9fba <TRACE_1+0>:	mov    DWORD PTR ds:0xf7e0e2a0,0x1
+0xf7fd9fc4 <TRACE_1+10>:	movsd  xmm7,QWORD PTR [edx+0x20]
+[...]
+0xf7fd9ff8 <TRACE_1+62>:	jmp    0xf7fd2014
+End of assembler dump.
+(gdb) tbreak TRACE_2
+Function "TRACE_2" not defined.
+Temporary breakpoint 2 (TRACE_2) pending.
+(gdb) cont
+Continuing.
+
+Temporary breakpoint 2, TRACE_2 () at x.lua:1
+1	for outer=1,100 do
+(gdb) info frame
+Stack level 0, frame at 0xffffd7c0:
+ eip = 0xf7fd9f60 in TRACE_2 (x.lua:1); saved eip 0x8053690
+ called by frame at 0xffffd7e0
+ source language unknown.
+ Arglist at 0xffffd78c, args:
+ Locals at 0xffffd78c, Previous frame's sp is 0xffffd7c0
+ Saved registers:
+  ebx at 0xffffd7ac, ebp at 0xffffd7b8, esi at 0xffffd7b0, edi at 0xffffd7b4,
+  eip at 0xffffd7bc
+(gdb)
+
+** ------------------------------------------------------------------------
+*/
+
+/* -- GDB JIT API --------------------------------------------------------- */
+
+/* GDB JIT actions. */
+enum {
+  GDBJIT_NOACTION = 0,
+  GDBJIT_REGISTER,
+  GDBJIT_UNREGISTER
+};
+
+/* GDB JIT entry. */
+typedef struct GDBJITentry {
+  struct GDBJITentry *next_entry;
+  struct GDBJITentry *prev_entry;
+  const char *symfile_addr;
+  uint64_t symfile_size;
+} GDBJITentry;
+
+/* GDB JIT descriptor. */
+typedef struct GDBJITdesc {
+  uint32_t version;
+  uint32_t action_flag;
+  GDBJITentry *relevant_entry;
+  GDBJITentry *first_entry;
+} GDBJITdesc;
+
+GDBJITdesc __jit_debug_descriptor = {
+  1, GDBJIT_NOACTION, NULL, 
