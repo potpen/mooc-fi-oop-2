@@ -143,4 +143,84 @@ typedef struct GDBJITdesc {
 } GDBJITdesc;
 
 GDBJITdesc __jit_debug_descriptor = {
-  1, GDBJIT_NOACTION, NULL, 
+  1, GDBJIT_NOACTION, NULL, NULL
+};
+
+/* GDB sets a breakpoint at this function. */
+void LJ_NOINLINE __jit_debug_register_code()
+{
+  __asm__ __volatile__("");
+};
+
+/* -- In-memory ELF object definitions ------------------------------------ */
+
+/* ELF definitions. */
+typedef struct ELFheader {
+  uint8_t emagic[4];
+  uint8_t eclass;
+  uint8_t eendian;
+  uint8_t eversion;
+  uint8_t eosabi;
+  uint8_t eabiversion;
+  uint8_t epad[7];
+  uint16_t type;
+  uint16_t machine;
+  uint32_t version;
+  uintptr_t entry;
+  uintptr_t phofs;
+  uintptr_t shofs;
+  uint32_t flags;
+  uint16_t ehsize;
+  uint16_t phentsize;
+  uint16_t phnum;
+  uint16_t shentsize;
+  uint16_t shnum;
+  uint16_t shstridx;
+} ELFheader;
+
+typedef struct ELFsectheader {
+  uint32_t name;
+  uint32_t type;
+  uintptr_t flags;
+  uintptr_t addr;
+  uintptr_t ofs;
+  uintptr_t size;
+  uint32_t link;
+  uint32_t info;
+  uintptr_t align;
+  uintptr_t entsize;
+} ELFsectheader;
+
+#define ELFSECT_IDX_ABS		0xfff1
+
+enum {
+  ELFSECT_TYPE_PROGBITS = 1,
+  ELFSECT_TYPE_SYMTAB = 2,
+  ELFSECT_TYPE_STRTAB = 3,
+  ELFSECT_TYPE_NOBITS = 8
+};
+
+#define ELFSECT_FLAGS_WRITE	1
+#define ELFSECT_FLAGS_ALLOC	2
+#define ELFSECT_FLAGS_EXEC	4
+
+typedef struct ELFsymbol {
+#if LJ_64
+  uint32_t name;
+  uint8_t info;
+  uint8_t other;
+  uint16_t sectidx;
+  uintptr_t value;
+  uint64_t size;
+#else
+  uint32_t name;
+  uintptr_t value;
+  uint32_t size;
+  uint8_t info;
+  uint8_t other;
+  uint16_t sectidx;
+#endif
+} ELFsymbol;
+
+enum {
+  ELFSYM_TYPE_FUN
