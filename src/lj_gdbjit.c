@@ -301,4 +301,66 @@ enum {
   DW_REG_RA = 30,
 #elif LJ_TARGET_PPC
   DW_REG_SP = 1,
-  DW_REG_RA =
+  DW_REG_RA = 65,
+  DW_REG_CR = 70,
+#elif LJ_TARGET_MIPS
+  DW_REG_SP = 29,
+  DW_REG_RA = 31,
+#else
+#error "Unsupported target architecture"
+#endif
+};
+
+/* Minimal list of sections for the in-memory ELF object. */
+enum {
+  GDBJIT_SECT_NULL,
+  GDBJIT_SECT_text,
+  GDBJIT_SECT_eh_frame,
+  GDBJIT_SECT_shstrtab,
+  GDBJIT_SECT_strtab,
+  GDBJIT_SECT_symtab,
+  GDBJIT_SECT_debug_info,
+  GDBJIT_SECT_debug_abbrev,
+  GDBJIT_SECT_debug_line,
+  GDBJIT_SECT__MAX
+};
+
+enum {
+  GDBJIT_SYM_UNDEF,
+  GDBJIT_SYM_FILE,
+  GDBJIT_SYM_FUNC,
+  GDBJIT_SYM__MAX
+};
+
+/* In-memory ELF object. */
+typedef struct GDBJITobj {
+  ELFheader hdr;			/* ELF header. */
+  ELFsectheader sect[GDBJIT_SECT__MAX];	/* ELF sections. */
+  ELFsymbol sym[GDBJIT_SYM__MAX];	/* ELF symbol table. */
+  uint8_t space[4096];			/* Space for various section data. */
+} GDBJITobj;
+
+/* Combined structure for GDB JIT entry and ELF object. */
+typedef struct GDBJITentryobj {
+  GDBJITentry entry;
+  size_t sz;
+  GDBJITobj obj;
+} GDBJITentryobj;
+
+/* Template for in-memory ELF header. */
+static const ELFheader elfhdr_template = {
+  .emagic = { 0x7f, 'E', 'L', 'F' },
+  .eclass = LJ_64 ? 2 : 1,
+  .eendian = LJ_ENDIAN_SELECT(1, 2),
+  .eversion = 1,
+#if LJ_TARGET_LINUX
+  .eosabi = 0,  /* Nope, it's not 3. */
+#elif defined(__FreeBSD__)
+  .eosabi = 9,
+#elif defined(__NetBSD__)
+  .eosabi = 2,
+#elif defined(__OpenBSD__)
+  .eosabi = 12,
+#elif defined(__DragonFly__)
+  .eosabi = 0,
+#elif L
