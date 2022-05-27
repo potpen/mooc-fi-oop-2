@@ -457,4 +457,55 @@ static void gdbjit_sleb128(GDBJITctx *ctx, int32_t v)
 #define DALIGNNOP(s)	while ((uintptr_t)p & ((s)-1)) *p++ = DW_CFA_nop
 #define DSECT(name, stmt) \
   { uint32_t *szp_##name = (uint32_t *)p; p += 4; stmt \
-    *s
+    *szp_##name = (uint32_t)((p-(uint8_t *)szp_##name)-4); } \
+
+/* Initialize ELF section headers. */
+static void LJ_FASTCALL gdbjit_secthdr(GDBJITctx *ctx)
+{
+  ELFsectheader *sect;
+
+  *ctx->p++ = '\0';  /* Empty string at start of string table. */
+
+#define SECTDEF(id, tp, al) \
+  sect = &ctx->obj.sect[GDBJIT_SECT_##id]; \
+  sect->name = gdbjit_strz(ctx, "." #id); \
+  sect->type = ELFSECT_TYPE_##tp; \
+  sect->align = (al)
+
+  SECTDEF(text, NOBITS, 16);
+  sect->flags = ELFSECT_FLAGS_ALLOC|ELFSECT_FLAGS_EXEC;
+  sect->addr = ctx->mcaddr;
+  sect->ofs = 0;
+  sect->size = ctx->szmcode;
+
+  SECTDEF(eh_frame, PROGBITS, sizeof(uintptr_t));
+  sect->flags = ELFSECT_FLAGS_ALLOC;
+
+  SECTDEF(shstrtab, STRTAB, 1);
+  SECTDEF(strtab, STRTAB, 1);
+
+  SECTDEF(symtab, SYMTAB, sizeof(uintptr_t));
+  sect->ofs = offsetof(GDBJITobj, sym);
+  sect->size = sizeof(ctx->obj.sym);
+  sect->link = GDBJIT_SECT_strtab;
+  sect->entsize = sizeof(ELFsymbol);
+  sect->info = GDBJIT_SYM_FUNC;
+
+  SECTDEF(debug_info, PROGBITS, 1);
+  SECTDEF(debug_abbrev, PROGBITS, 1);
+  SECTDEF(debug_line, PROGBITS, 1);
+
+#undef SECTDEF
+}
+
+/* Initialize symbol table. */
+static void LJ_FASTCALL gdbjit_symtab(GDBJITctx *ctx)
+{
+  ELFsymbol *sym;
+
+  *ctx->p++ = '\0';  /* Empty string at start of string table. */
+
+  sym = &ctx->obj.sym[GDBJIT_SYM_FILE];
+  sym->name = gdbjit_strz(ctx, "JIT mcode");
+  sym->sectidx = ELFSECT_IDX_ABS;
+ 
