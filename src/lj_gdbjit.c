@@ -413,4 +413,48 @@ typedef struct GDBJITctx {
   BCLine lineno;	/* Starting line number. */
   const char *filename;	/* Starting file name. */
   size_t objsize;	/* Final size of ELF object. */
-  GDBJITobj obj;	/* In-mem
+  GDBJITobj obj;	/* In-memory ELF object. */
+} GDBJITctx;
+
+/* Add a zero-terminated string. */
+static uint32_t gdbjit_strz(GDBJITctx *ctx, const char *str)
+{
+  uint8_t *p = ctx->p;
+  uint32_t ofs = (uint32_t)(p - ctx->startp);
+  do {
+    *p++ = (uint8_t)*str;
+  } while (*str++);
+  ctx->p = p;
+  return ofs;
+}
+
+/* Append a decimal number. */
+static void gdbjit_catnum(GDBJITctx *ctx, uint32_t n)
+{
+  if (n >= 10) { uint32_t m = n / 10; n = n % 10; gdbjit_catnum(ctx, m); }
+  *ctx->p++ = '0' + n;
+}
+
+/* Add a SLEB128 value. */
+static void gdbjit_sleb128(GDBJITctx *ctx, int32_t v)
+{
+  uint8_t *p = ctx->p;
+  for (; (uint32_t)(v+0x40) >= 0x80; v >>= 7)
+    *p++ = (uint8_t)((v & 0x7f) | 0x80);
+  *p++ = (uint8_t)(v & 0x7f);
+  ctx->p = p;
+}
+
+/* Shortcuts to generate DWARF structures. */
+#define DB(x)		(*p++ = (x))
+#define DI8(x)		(*(int8_t *)p = (x), p++)
+#define DU16(x)		(*(uint16_t *)p = (x), p += 2)
+#define DU32(x)		(*(uint32_t *)p = (x), p += 4)
+#define DADDR(x)	(*(uintptr_t *)p = (x), p += sizeof(uintptr_t))
+#define DUV(x)		(p = (uint8_t *)lj_strfmt_wuleb128((char *)p, (x)))
+#define DSV(x)		(ctx->p = p, gdbjit_sleb128(ctx, (x)), p = ctx->p)
+#define DSTR(str)	(ctx->p = p, gdbjit_strz(ctx, (str)), p = ctx->p)
+#define DALIGNNOP(s)	while ((uintptr_t)p & ((s)-1)) *p++ = DW_CFA_nop
+#define DSECT(name, stmt) \
+  { uint32_t *szp_##name = (uint32_t *)p; p += 4; stmt \
+    *s
