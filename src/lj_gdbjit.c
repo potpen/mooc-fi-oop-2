@@ -363,4 +363,54 @@ static const ELFheader elfhdr_template = {
   .eosabi = 12,
 #elif defined(__DragonFly__)
   .eosabi = 0,
-#elif L
+#elif LJ_TARGET_SOLARIS
+  .eosabi = 6,
+#else
+  .eosabi = 0,
+#endif
+  .eabiversion = 0,
+  .epad = { 0, 0, 0, 0, 0, 0, 0 },
+  .type = 1,
+#if LJ_TARGET_X86
+  .machine = 3,
+#elif LJ_TARGET_X64
+  .machine = 62,
+#elif LJ_TARGET_ARM
+  .machine = 40,
+#elif LJ_TARGET_ARM64
+  .machine = 183,
+#elif LJ_TARGET_PPC
+  .machine = 20,
+#elif LJ_TARGET_MIPS
+  .machine = 8,
+#else
+#error "Unsupported target architecture"
+#endif
+  .version = 1,
+  .entry = 0,
+  .phofs = 0,
+  .shofs = offsetof(GDBJITobj, sect),
+  .flags = 0,
+  .ehsize = sizeof(ELFheader),
+  .phentsize = 0,
+  .phnum = 0,
+  .shentsize = sizeof(ELFsectheader),
+  .shnum = GDBJIT_SECT__MAX,
+  .shstridx = GDBJIT_SECT_shstrtab
+};
+
+/* -- In-memory ELF object generation ------------------------------------- */
+
+/* Context for generating the ELF object for the GDB JIT API. */
+typedef struct GDBJITctx {
+  uint8_t *p;		/* Pointer to next address in obj.space. */
+  uint8_t *startp;	/* Pointer to start address in obj.space. */
+  GCtrace *T;		/* Generate symbols for this trace. */
+  uintptr_t mcaddr;	/* Machine code address. */
+  MSize szmcode;	/* Size of machine code. */
+  MSize spadjp;		/* Stack adjustment for parent trace or interpreter. */
+  MSize spadj;		/* Stack adjustment for trace itself. */
+  BCLine lineno;	/* Starting line number. */
+  const char *filename;	/* Starting file name. */
+  size_t objsize;	/* Final size of ELF object. */
+  GDBJITobj obj;	/* In-mem
