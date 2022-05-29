@@ -508,4 +508,48 @@ static void LJ_FASTCALL gdbjit_symtab(GDBJITctx *ctx)
   sym = &ctx->obj.sym[GDBJIT_SYM_FILE];
   sym->name = gdbjit_strz(ctx, "JIT mcode");
   sym->sectidx = ELFSECT_IDX_ABS;
- 
+  sym->info = ELFSYM_TYPE_FILE|ELFSYM_BIND_LOCAL;
+
+  sym = &ctx->obj.sym[GDBJIT_SYM_FUNC];
+  sym->name = gdbjit_strz(ctx, "TRACE_"); ctx->p--;
+  gdbjit_catnum(ctx, ctx->T->traceno); *ctx->p++ = '\0';
+  sym->sectidx = GDBJIT_SECT_text;
+  sym->value = 0;
+  sym->size = ctx->szmcode;
+  sym->info = ELFSYM_TYPE_FUNC|ELFSYM_BIND_GLOBAL;
+}
+
+/* Initialize .eh_frame section. */
+static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
+{
+  uint8_t *p = ctx->p;
+  uint8_t *framep = p;
+
+  /* Emit DWARF EH CIE. */
+  DSECT(CIE,
+    DU32(0);			/* Offset to CIE itself. */
+    DB(DW_CIE_VERSION);
+    DSTR("zR");			/* Augmentation. */
+    DUV(1);			/* Code alignment factor. */
+    DSV(-(int32_t)sizeof(uintptr_t));  /* Data alignment factor. */
+    DB(DW_REG_RA);		/* Return address register. */
+    DB(1); DB(DW_EH_PE_textrel|DW_EH_PE_udata4);  /* Augmentation data. */
+    DB(DW_CFA_def_cfa); DUV(DW_REG_SP); DUV(sizeof(uintptr_t));
+#if LJ_TARGET_PPC
+    DB(DW_CFA_offset_extended_sf); DB(DW_REG_RA); DSV(-1);
+#else
+    DB(DW_CFA_offset|DW_REG_RA); DUV(1);
+#endif
+    DALIGNNOP(sizeof(uintptr_t));
+  )
+
+  /* Emit DWARF EH FDE. */
+  DSECT(FDE,
+    DU32((uint32_t)(p-framep));	/* Offset to CIE. */
+    DU32(0);			/* Machine code offset relative to .text. */
+    DU32(ctx->szmcode);		/* Machine code length. */
+    DB(0);			/* Augmentation data. */
+    /* Registers saved in CFRAME. */
+#if LJ_TARGET_X86
+    DB(DW_CFA_offset|DW_REG_BP); DUV(2);
+    DB(DW_CFA_offset|DW_RE
