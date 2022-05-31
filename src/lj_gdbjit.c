@@ -594,4 +594,57 @@ static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
 #else
 #error "Unsupported target architecture"
 #endif
-    if (ctx->spadjp != ctx->spadj) {  /* Parent/interpreter stack frame siz
+    if (ctx->spadjp != ctx->spadj) {  /* Parent/interpreter stack frame size. */
+      DB(DW_CFA_def_cfa_offset); DUV(ctx->spadjp);
+      DB(DW_CFA_advance_loc|1);  /* Only an approximation. */
+    }
+    DB(DW_CFA_def_cfa_offset); DUV(ctx->spadj);  /* Trace stack frame size. */
+    DALIGNNOP(sizeof(uintptr_t));
+  )
+
+  ctx->p = p;
+}
+
+/* Initialize .debug_info section. */
+static void LJ_FASTCALL gdbjit_debuginfo(GDBJITctx *ctx)
+{
+  uint8_t *p = ctx->p;
+
+  DSECT(info,
+    DU16(2);			/* DWARF version. */
+    DU32(0);			/* Abbrev offset. */
+    DB(sizeof(uintptr_t));	/* Pointer size. */
+
+    DUV(1);			/* Abbrev #1: DW_TAG_compile_unit. */
+    DSTR(ctx->filename);	/* DW_AT_name. */
+    DADDR(ctx->mcaddr);		/* DW_AT_low_pc. */
+    DADDR(ctx->mcaddr + ctx->szmcode);  /* DW_AT_high_pc. */
+    DU32(0);			/* DW_AT_stmt_list. */
+  )
+
+  ctx->p = p;
+}
+
+/* Initialize .debug_abbrev section. */
+static void LJ_FASTCALL gdbjit_debugabbrev(GDBJITctx *ctx)
+{
+  uint8_t *p = ctx->p;
+
+  /* Abbrev #1: DW_TAG_compile_unit. */
+  DUV(1); DUV(DW_TAG_compile_unit);
+  DB(DW_children_no);
+  DUV(DW_AT_name);	DUV(DW_FORM_string);
+  DUV(DW_AT_low_pc);	DUV(DW_FORM_addr);
+  DUV(DW_AT_high_pc);	DUV(DW_FORM_addr);
+  DUV(DW_AT_stmt_list);	DUV(DW_FORM_data4);
+  DB(0); DB(0);
+
+  ctx->p = p;
+}
+
+#define DLNE(op, s)	(DB(DW_LNS_extended_op), DUV(1+(s)), DB((op)))
+
+/* Initialize .debug_line section. */
+static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
+{
+  uint8_t *p = ctx->p;
