@@ -552,4 +552,46 @@ static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
     /* Registers saved in CFRAME. */
 #if LJ_TARGET_X86
     DB(DW_CFA_offset|DW_REG_BP); DUV(2);
-    DB(DW_CFA_offset|DW_RE
+    DB(DW_CFA_offset|DW_REG_DI); DUV(3);
+    DB(DW_CFA_offset|DW_REG_SI); DUV(4);
+    DB(DW_CFA_offset|DW_REG_BX); DUV(5);
+#elif LJ_TARGET_X64
+    DB(DW_CFA_offset|DW_REG_BP); DUV(2);
+    DB(DW_CFA_offset|DW_REG_BX); DUV(3);
+    DB(DW_CFA_offset|DW_REG_15); DUV(4);
+    DB(DW_CFA_offset|DW_REG_14); DUV(5);
+    /* Extra registers saved for JIT-compiled code. */
+    DB(DW_CFA_offset|DW_REG_13); DUV(LJ_GC64 ? 10 : 9);
+    DB(DW_CFA_offset|DW_REG_12); DUV(LJ_GC64 ? 11 : 10);
+#elif LJ_TARGET_ARM
+    {
+      int i;
+      for (i = 11; i >= 4; i--) { DB(DW_CFA_offset|i); DUV(2+(11-i)); }
+    }
+#elif LJ_TARGET_ARM64
+    {
+      int i;
+      DB(DW_CFA_offset|31); DUV(2);
+      for (i = 28; i >= 19; i--) { DB(DW_CFA_offset|i); DUV(3+(28-i)); }
+      for (i = 15; i >= 8; i--) { DB(DW_CFA_offset|32|i); DUV(28-i); }
+    }
+#elif LJ_TARGET_PPC
+    {
+      int i;
+      DB(DW_CFA_offset_extended); DB(DW_REG_CR); DUV(55);
+      for (i = 14; i <= 31; i++) {
+	DB(DW_CFA_offset|i); DUV(37+(31-i));
+	DB(DW_CFA_offset|32|i); DUV(2+2*(31-i));
+      }
+    }
+#elif LJ_TARGET_MIPS
+    {
+      int i;
+      DB(DW_CFA_offset|30); DUV(2);
+      for (i = 23; i >= 16; i--) { DB(DW_CFA_offset|i); DUV(26-i); }
+      for (i = 30; i >= 20; i -= 2) { DB(DW_CFA_offset|32|i); DUV(42-i); }
+    }
+#else
+#error "Unsupported target architecture"
+#endif
+    if (ctx->spadjp != ctx->spadj) {  /* Parent/interpreter stack frame siz
