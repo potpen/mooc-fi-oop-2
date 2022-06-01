@@ -648,3 +648,56 @@ static void LJ_FASTCALL gdbjit_debugabbrev(GDBJITctx *ctx)
 static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
 {
   uint8_t *p = ctx->p;
+
+  DSECT(line,
+    DU16(2);			/* DWARF version. */
+    DSECT(header,
+      DB(1);			/* Minimum instruction length. */
+      DB(1);			/* is_stmt. */
+      DI8(0);			/* Line base for special opcodes. */
+      DB(2);			/* Line range for special opcodes. */
+      DB(3+1);			/* Opcode base at DW_LNS_advance_line+1. */
+      DB(0); DB(1); DB(1);	/* Standard opcode lengths. */
+      /* Directory table. */
+      DB(0);
+      /* File name table. */
+      DSTR(ctx->filename); DUV(0); DUV(0); DUV(0);
+      DB(0);
+    )
+
+    DLNE(DW_LNE_set_address, sizeof(uintptr_t)); DADDR(ctx->mcaddr);
+    if (ctx->lineno) {
+      DB(DW_LNS_advance_line); DSV(ctx->lineno-1);
+    }
+    DB(DW_LNS_copy);
+    DB(DW_LNS_advance_pc); DUV(ctx->szmcode);
+    DLNE(DW_LNE_end_sequence, 0);
+  )
+
+  ctx->p = p;
+}
+
+#undef DLNE
+
+/* Undef shortcuts. */
+#undef DB
+#undef DI8
+#undef DU16
+#undef DU32
+#undef DADDR
+#undef DUV
+#undef DSV
+#undef DSTR
+#undef DALIGNNOP
+#undef DSECT
+
+/* Type of a section initializer callback. */
+typedef void (LJ_FASTCALL *GDBJITinitf)(GDBJITctx *ctx);
+
+/* Call section initializer and set the section offset and size. */
+static void gdbjit_initsect(GDBJITctx *ctx, int sect, GDBJITinitf initf)
+{
+  ctx->startp = ctx->p;
+  ctx->obj.sect[sect].ofs = (uintptr_t)((char *)ctx->p - (char *)&ctx->obj);
+  initf(ctx);
+  ctx->obj.sect[sect].size = (uintptr_t)(ctx->p - ctx->
