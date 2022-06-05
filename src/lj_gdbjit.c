@@ -700,4 +700,49 @@ static void gdbjit_initsect(GDBJITctx *ctx, int sect, GDBJITinitf initf)
   ctx->startp = ctx->p;
   ctx->obj.sect[sect].ofs = (uintptr_t)((char *)ctx->p - (char *)&ctx->obj);
   initf(ctx);
-  ctx->obj.sect[sect].size = (uintptr_t)(ctx->p - ctx->
+  ctx->obj.sect[sect].size = (uintptr_t)(ctx->p - ctx->startp);
+}
+
+#define SECTALIGN(p, a) \
+  ((p) = (uint8_t *)(((uintptr_t)(p) + ((a)-1)) & ~(uintptr_t)((a)-1)))
+
+/* Build in-memory ELF object. */
+static void gdbjit_buildobj(GDBJITctx *ctx)
+{
+  GDBJITobj *obj = &ctx->obj;
+  /* Fill in ELF header and clear structures. */
+  memcpy(&obj->hdr, &elfhdr_template, sizeof(ELFheader));
+  memset(&obj->sect, 0, sizeof(ELFsectheader)*GDBJIT_SECT__MAX);
+  memset(&obj->sym, 0, sizeof(ELFsymbol)*GDBJIT_SYM__MAX);
+  /* Initialize sections. */
+  ctx->p = obj->space;
+  gdbjit_initsect(ctx, GDBJIT_SECT_shstrtab, gdbjit_secthdr);
+  gdbjit_initsect(ctx, GDBJIT_SECT_strtab, gdbjit_symtab);
+  gdbjit_initsect(ctx, GDBJIT_SECT_debug_info, gdbjit_debuginfo);
+  gdbjit_initsect(ctx, GDBJIT_SECT_debug_abbrev, gdbjit_debugabbrev);
+  gdbjit_initsect(ctx, GDBJIT_SECT_debug_line, gdbjit_debugline);
+  SECTALIGN(ctx->p, sizeof(uintptr_t));
+  gdbjit_initsect(ctx, GDBJIT_SECT_eh_frame, gdbjit_ehframe);
+  ctx->objsize = (size_t)((char *)ctx->p - (char *)obj);
+  lj_assertX(ctx->objsize < sizeof(GDBJITobj), "GDBJITobj overflow");
+}
+
+#undef SECTALIGN
+
+/* -- Interface to GDB JIT API -------------------------------------------- */
+
+static int gdbjit_lock;
+
+static void gdbjit_lock_acquire()
+{
+  while (__sync_lock_test_and_set(&gdbjit_lock, 1)) {
+    /* Just spin; futexes or pthreads aren't worth the portability cost. */
+  }
+}
+
+static void gdbjit_lock_release()
+{
+  __sync_lock_release(&gdbjit_lock);
+}
+
+/* Add new entry to GDB
