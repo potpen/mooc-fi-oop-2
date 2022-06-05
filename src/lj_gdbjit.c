@@ -745,4 +745,40 @@ static void gdbjit_lock_release()
   __sync_lock_release(&gdbjit_lock);
 }
 
-/* Add new entry to GDB
+/* Add new entry to GDB JIT symbol chain. */
+static void gdbjit_newentry(lua_State *L, GDBJITctx *ctx)
+{
+  /* Allocate memory for GDB JIT entry and ELF object. */
+  MSize sz = (MSize)(sizeof(GDBJITentryobj) - sizeof(GDBJITobj) + ctx->objsize);
+  GDBJITentryobj *eo = lj_mem_newt(L, sz, GDBJITentryobj);
+  memcpy(&eo->obj, &ctx->obj, ctx->objsize);  /* Copy ELF object. */
+  eo->sz = sz;
+  ctx->T->gdbjit_entry = (void *)eo;
+  /* Link new entry to chain and register it. */
+  eo->entry.prev_entry = NULL;
+  gdbjit_lock_acquire();
+  eo->entry.next_entry = __jit_debug_descriptor.first_entry;
+  if (eo->entry.next_entry)
+    eo->entry.next_entry->prev_entry = &eo->entry;
+  eo->entry.symfile_addr = (const char *)&eo->obj;
+  eo->entry.symfile_size = ctx->objsize;
+  __jit_debug_descriptor.first_entry = &eo->entry;
+  __jit_debug_descriptor.relevant_entry = &eo->entry;
+  __jit_debug_descriptor.action_flag = GDBJIT_REGISTER;
+  __jit_debug_register_code();
+  gdbjit_lock_release();
+}
+
+/* Add debug info for newly compiled trace and notify GDB. */
+void lj_gdbjit_addtrace(jit_State *J, GCtrace *T)
+{
+  GDBJITctx ctx;
+  GCproto *pt = &gcref(T->startpt)->pt;
+  TraceNo parent = T->ir[REF_BASE].op1;
+  const BCIns *startpc = mref(T->startpc, const BCIns);
+  ctx.T = T;
+  ctx.mcaddr = (uintptr_t)T->mcode;
+  ctx.szmcode = T->szmcode;
+  ctx.spadjp = CFRAME_SIZE_JIT +
+	       (MSize)(parent ? traceref(J, parent)->spadjust : 0);
+  ctx.spadj = CFRAME_SIZE_JIT + T->
