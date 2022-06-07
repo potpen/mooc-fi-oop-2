@@ -781,4 +781,38 @@ void lj_gdbjit_addtrace(jit_State *J, GCtrace *T)
   ctx.szmcode = T->szmcode;
   ctx.spadjp = CFRAME_SIZE_JIT +
 	       (MSize)(parent ? traceref(J, parent)->spadjust : 0);
-  ctx.spadj = CFRAME_SIZE_JIT + T->
+  ctx.spadj = CFRAME_SIZE_JIT + T->spadjust;
+  lj_assertJ(startpc >= proto_bc(pt) && startpc < proto_bc(pt) + pt->sizebc,
+	     "start PC out of range");
+  ctx.lineno = lj_debug_line(pt, proto_bcpos(pt, startpc));
+  ctx.filename = proto_chunknamestr(pt);
+  if (*ctx.filename == '@' || *ctx.filename == '=')
+    ctx.filename++;
+  else
+    ctx.filename = "(string)";
+  gdbjit_buildobj(&ctx);
+  gdbjit_newentry(J->L, &ctx);
+}
+
+/* Delete debug info for trace and notify GDB. */
+void lj_gdbjit_deltrace(jit_State *J, GCtrace *T)
+{
+  GDBJITentryobj *eo = (GDBJITentryobj *)T->gdbjit_entry;
+  if (eo) {
+    gdbjit_lock_acquire();
+    if (eo->entry.prev_entry)
+      eo->entry.prev_entry->next_entry = eo->entry.next_entry;
+    else
+      __jit_debug_descriptor.first_entry = eo->entry.next_entry;
+    if (eo->entry.next_entry)
+      eo->entry.next_entry->prev_entry = eo->entry.prev_entry;
+    __jit_debug_descriptor.relevant_entry = &eo->entry;
+    __jit_debug_descriptor.action_flag = GDBJIT_UNREGISTER;
+    __jit_debug_register_code();
+    gdbjit_lock_release();
+    lj_mem_free(J2G(J), eo, eo->sz);
+  }
+}
+
+#endif
+#endif
