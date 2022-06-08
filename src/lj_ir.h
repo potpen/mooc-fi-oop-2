@@ -103,4 +103,64 @@
   _(ALOAD,	L , ref, ___) \
   _(HLOAD,	L , ref, ___) \
   _(ULOAD,	L , ref, ___) \
-  _(FLOAD,	L , ref
+  _(FLOAD,	L , ref, lit) \
+  _(XLOAD,	L , ref, lit) \
+  _(SLOAD,	L , lit, lit) \
+  _(VLOAD,	L , ref, lit) \
+  _(ALEN,	L , ref, ref) \
+  \
+  _(ASTORE,	S , ref, ref) \
+  _(HSTORE,	S , ref, ref) \
+  _(USTORE,	S , ref, ref) \
+  _(FSTORE,	S , ref, ref) \
+  _(XSTORE,	S , ref, ref) \
+  \
+  /* Allocations. */ \
+  _(SNEW,	N , ref, ref)  /* CSE is ok, not marked as A. */ \
+  _(XSNEW,	A , ref, ref) \
+  _(TNEW,	AW, lit, lit) \
+  _(TDUP,	AW, ref, ___) \
+  _(CNEW,	AW, ref, ref) \
+  _(CNEWI,	NW, ref, ref)  /* CSE is ok, not marked as A. */ \
+  \
+  /* Buffer operations. */ \
+  _(BUFHDR,	L , ref, lit) \
+  _(BUFPUT,	LW, ref, ref) \
+  _(BUFSTR,	AW, ref, ref) \
+  \
+  /* Barriers. */ \
+  _(TBAR,	S , ref, ___) \
+  _(OBAR,	S , ref, ref) \
+  _(XBAR,	S , ___, ___) \
+  \
+  /* Type conversions. */ \
+  _(CONV,	N , ref, lit) \
+  _(TOBIT,	N , ref, ref) \
+  _(TOSTR,	N , ref, lit) \
+  _(STRTO,	N , ref, ___) \
+  \
+  /* Calls. */ \
+  _(CALLN,	NW, ref, lit) \
+  _(CALLA,	AW, ref, lit) \
+  _(CALLL,	LW, ref, lit) \
+  _(CALLS,	S , ref, lit) \
+  _(CALLXS,	S , ref, ref) \
+  _(CARG,	N , ref, ref) \
+  \
+  /* End of list. */
+
+/* IR opcodes (max. 256). */
+typedef enum {
+#define IRENUM(name, m, m1, m2)	IR_##name,
+IRDEF(IRENUM)
+#undef IRENUM
+  IR__MAX
+} IROp;
+
+/* Stored opcode. */
+typedef uint8_t IROp1;
+
+LJ_STATIC_ASSERT(((int)IR_EQ^1) == (int)IR_NE);
+LJ_STATIC_ASSERT(((int)IR_LT^1) == (int)IR_GE);
+LJ_STATIC_ASSERT(((int)IR_LE^1) == (int)IR_GT);
+LJ_STATIC_ASSERT(((int)
