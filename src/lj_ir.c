@@ -296,3 +296,206 @@ TRef lj_ir_kgc(jit_State *J, GCobj *o, IRType t)
   J->chain[IR_KGC] = (IRRef1)ref;
 found:
   return TREF(ref, t);
+}
+
+/* Allocate GCtrace constant placeholder (no interning). */
+TRef lj_ir_ktrace(jit_State *J)
+{
+  IRRef ref = ir_nextkgc(J);
+  IRIns *ir = IR(ref);
+  lj_assertJ(irt_toitype_(IRT_P64) == LJ_TTRACE, "mismatched type mapping");
+  ir->t.irt = IRT_P64;
+  ir->o = LJ_GC64 ? IR_KNUM : IR_KNULL;  /* Not IR_KGC yet, but same size. */
+  ir->op12 = 0;
+  ir->prev = 0;
+  return TREF(ref, IRT_P64);
+}
+
+/* Intern pointer constant. */
+TRef lj_ir_kptr_(jit_State *J, IROp op, void *ptr)
+{
+  IRIns *ir, *cir = J->cur.ir;
+  IRRef ref;
+#if LJ_64 && !LJ_GC64
+  lj_assertJ((void *)(uintptr_t)u32ptr(ptr) == ptr, "out-of-range GC pointer");
+#endif
+  for (ref = J->chain[op]; ref; ref = cir[ref].prev)
+    if (ir_kptr(&cir[ref]) == ptr)
+      goto found;
+#if LJ_GC64
+  ref = ir_nextk64(J);
+#else
+  ref = ir_nextk(J);
+#endif
+  ir = IR(ref);
+  ir->op12 = 0;
+  setmref(ir[LJ_GC64].ptr, ptr);
+  ir->t.irt = IRT_PGC;
+  ir->o = op;
+  ir->prev = J->chain[op];
+  J->chain[op] = (IRRef1)ref;
+found:
+  return TREF(ref, IRT_PGC);
+}
+
+/* Intern typed NULL constant. */
+TRef lj_ir_knull(jit_State *J, IRType t)
+{
+  IRIns *ir, *cir = J->cur.ir;
+  IRRef ref;
+  for (ref = J->chain[IR_KNULL]; ref; ref = cir[ref].prev)
+    if (irt_t(cir[ref].t) == t)
+      goto found;
+  ref = ir_nextk(J);
+  ir = IR(ref);
+  ir->i = 0;
+  ir->t.irt = (uint8_t)t;
+  ir->o = IR_KNULL;
+  ir->prev = J->chain[IR_KNULL];
+  J->chain[IR_KNULL] = (IRRef1)ref;
+found:
+  return TREF(ref, t);
+}
+
+/* Intern key slot. */
+TRef lj_ir_kslot(jit_State *J, TRef key, IRRef slot)
+{
+  IRIns *ir, *cir = J->cur.ir;
+  IRRef2 op12 = IRREF2((IRRef1)key, (IRRef1)slot);
+  IRRef ref;
+  /* Const part is not touched by CSE/DCE, so 0-65535 is ok for IRMlit here. */
+  lj_assertJ(tref_isk(key) && slot == (IRRef)(IRRef1)slot,
+	     "out-of-range key/slot");
+  for (ref = J->chain[IR_KSLOT]; ref; ref = cir[ref].prev)
+    if (cir[ref].op12 == op12)
+      goto found;
+  ref = ir_nextk(J);
+  ir = IR(ref);
+  ir->op12 = op12;
+  ir->t.irt = IRT_P32;
+  ir->o = IR_KSLOT;
+  ir->prev = J->chain[IR_KSLOT];
+  J->chain[IR_KSLOT] = (IRRef1)ref;
+found:
+  return TREF(ref, IRT_P32);
+}
+
+/* -- Access to IR constants ---------------------------------------------- */
+
+/* Copy value of IR constant. */
+void lj_ir_kvalue(lua_State *L, TValue *tv, const IRIns *ir)
+{
+  UNUSED(L);
+  lj_assertL(ir->o != IR_KSLOT, "unexpected KSLOT");  /* Common mistake. */
+  switch (ir->o) {
+  case IR_KPRI: setpriV(tv, irt_toitype(ir->t)); break;
+  case IR_KINT: setintV(tv, ir->i); break;
+  case IR_KGC: setgcV(L, tv, ir_kgc(ir), irt_toitype(ir->t)); break;
+  case IR_KPTR: case IR_KKPTR:
+    setnumV(tv, (lua_Number)(uintptr_t)ir_kptr(ir));
+    break;
+  case IR_KNULL: setintV(tv, 0); break;
+  case IR_KNUM: setnumV(tv, ir_knum(ir)->n); break;
+#if LJ_HASFFI
+  case IR_KINT64: {
+    GCcdata *cd = lj_cdata_new_(L, CTID_INT64, 8);
+    *(uint64_t *)cdataptr(cd) = ir_kint64(ir)->u64;
+    setcdataV(L, tv, cd);
+    break;
+    }
+#endif
+  default: lj_assertL(0, "bad IR constant op %d", ir->o); break;
+  }
+}
+
+/* -- Convert IR operand types -------------------------------------------- */
+
+/* Convert from string to number. */
+TRef LJ_FASTCALL lj_ir_tonumber(jit_State *J, TRef tr)
+{
+  if (!tref_isnumber(tr)) {
+    if (tref_isstr(tr))
+      tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
+    else
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  return tr;
+}
+
+/* Convert from integer or string to number. */
+TRef LJ_FASTCALL lj_ir_tonum(jit_State *J, TRef tr)
+{
+  if (!tref_isnum(tr)) {
+    if (tref_isinteger(tr))
+      tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
+    else if (tref_isstr(tr))
+      tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
+    else
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  return tr;
+}
+
+/* Convert from integer or number to string. */
+TRef LJ_FASTCALL lj_ir_tostr(jit_State *J, TRef tr)
+{
+  if (!tref_isstr(tr)) {
+    if (!tref_isnumber(tr))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    tr = emitir(IRT(IR_TOSTR, IRT_STR), tr,
+		tref_isnum(tr) ? IRTOSTR_NUM : IRTOSTR_INT);
+  }
+  return tr;
+}
+
+/* -- Miscellaneous IR ops ------------------------------------------------ */
+
+/* Evaluate numeric comparison. */
+int lj_ir_numcmp(lua_Number a, lua_Number b, IROp op)
+{
+  switch (op) {
+  case IR_EQ: return (a == b);
+  case IR_NE: return (a != b);
+  case IR_LT: return (a < b);
+  case IR_GE: return (a >= b);
+  case IR_LE: return (a <= b);
+  case IR_GT: return (a > b);
+  case IR_ULT: return !(a >= b);
+  case IR_UGE: return !(a < b);
+  case IR_ULE: return !(a > b);
+  case IR_UGT: return !(a <= b);
+  default: lj_assertX(0, "bad IR op %d", op); return 0;
+  }
+}
+
+/* Evaluate string comparison. */
+int lj_ir_strcmp(GCstr *a, GCstr *b, IROp op)
+{
+  int res = lj_str_cmp(a, b);
+  switch (op) {
+  case IR_LT: return (res < 0);
+  case IR_GE: return (res >= 0);
+  case IR_LE: return (res <= 0);
+  case IR_GT: return (res > 0);
+  default: lj_assertX(0, "bad IR op %d", op); return 0;
+  }
+}
+
+/* Rollback IR to previous state. */
+void lj_ir_rollback(jit_State *J, IRRef ref)
+{
+  IRRef nins = J->cur.nins;
+  while (nins > ref) {
+    IRIns *ir;
+    nins--;
+    ir = IR(nins);
+    J->chain[ir->o] = ir->prev;
+  }
+  J->cur.nins = nins;
+}
+
+#undef IR
+#undef fins
+#undef emitir
+
+#endif
