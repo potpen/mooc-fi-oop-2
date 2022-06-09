@@ -163,4 +163,46 @@ typedef uint8_t IROp1;
 LJ_STATIC_ASSERT(((int)IR_EQ^1) == (int)IR_NE);
 LJ_STATIC_ASSERT(((int)IR_LT^1) == (int)IR_GE);
 LJ_STATIC_ASSERT(((int)IR_LE^1) == (int)IR_GT);
-LJ_STATIC_ASSERT(((int)
+LJ_STATIC_ASSERT(((int)IR_LT^3) == (int)IR_GT);
+LJ_STATIC_ASSERT(((int)IR_LT^4) == (int)IR_ULT);
+
+/* Delta between xLOAD and xSTORE. */
+#define IRDELTA_L2S		((int)IR_ASTORE - (int)IR_ALOAD)
+
+LJ_STATIC_ASSERT((int)IR_HLOAD + IRDELTA_L2S == (int)IR_HSTORE);
+LJ_STATIC_ASSERT((int)IR_ULOAD + IRDELTA_L2S == (int)IR_USTORE);
+LJ_STATIC_ASSERT((int)IR_FLOAD + IRDELTA_L2S == (int)IR_FSTORE);
+LJ_STATIC_ASSERT((int)IR_XLOAD + IRDELTA_L2S == (int)IR_XSTORE);
+
+/* -- Named IR literals --------------------------------------------------- */
+
+/* FPMATH sub-functions. ORDER FPM. */
+#define IRFPMDEF(_) \
+  _(FLOOR) _(CEIL) _(TRUNC)  /* Must be first and in this order. */ \
+  _(SQRT) _(LOG) _(LOG2) \
+  _(OTHER)
+
+typedef enum {
+#define FPMENUM(name)		IRFPM_##name,
+IRFPMDEF(FPMENUM)
+#undef FPMENUM
+  IRFPM__MAX
+} IRFPMathOp;
+
+/* FLOAD fields. */
+#define IRFLDEF(_) \
+  _(STR_LEN,	offsetof(GCstr, len)) \
+  _(FUNC_ENV,	offsetof(GCfunc, l.env)) \
+  _(FUNC_PC,	offsetof(GCfunc, l.pc)) \
+  _(FUNC_FFID,	offsetof(GCfunc, l.ffid)) \
+  _(THREAD_ENV,	offsetof(lua_State, env)) \
+  _(TAB_META,	offsetof(GCtab, metatable)) \
+  _(TAB_ARRAY,	offsetof(GCtab, array)) \
+  _(TAB_NODE,	offsetof(GCtab, node)) \
+  _(TAB_ASIZE,	offsetof(GCtab, asize)) \
+  _(TAB_HMASK,	offsetof(GCtab, hmask)) \
+  _(TAB_NOMM,	offsetof(GCtab, nomm)) \
+  _(UDATA_META,	offsetof(GCudata, metatable)) \
+  _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
+  _(UDATA_FILE,	sizeof(GCudata)) \
+  _(SBUF_W,	sizeof(GCudata) +
