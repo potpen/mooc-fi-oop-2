@@ -205,4 +205,40 @@ IRFPMDEF(FPMENUM)
   _(UDATA_META,	offsetof(GCudata, metatable)) \
   _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
   _(UDATA_FILE,	sizeof(GCudata)) \
-  _(SBUF_W,	sizeof(GCudata) +
+  _(SBUF_W,	sizeof(GCudata) + offsetof(SBufExt, w)) \
+  _(SBUF_E,	sizeof(GCudata) + offsetof(SBufExt, e)) \
+  _(SBUF_B,	sizeof(GCudata) + offsetof(SBufExt, b)) \
+  _(SBUF_L,	sizeof(GCudata) + offsetof(SBufExt, L)) \
+  _(SBUF_REF,	sizeof(GCudata) + offsetof(SBufExt, cowref)) \
+  _(SBUF_R,	sizeof(GCudata) + offsetof(SBufExt, r)) \
+  _(CDATA_CTYPEID, offsetof(GCcdata, ctypeid)) \
+  _(CDATA_PTR,	sizeof(GCcdata)) \
+  _(CDATA_INT,	sizeof(GCcdata)) \
+  _(CDATA_INT64, sizeof(GCcdata)) \
+  _(CDATA_INT64_4, sizeof(GCcdata) + 4)
+
+typedef enum {
+#define FLENUM(name, ofs)	IRFL_##name,
+IRFLDEF(FLENUM)
+#undef FLENUM
+  IRFL__MAX
+} IRFieldID;
+
+/* TMPREF mode bits, stored in op2. */
+#define IRTMPREF_IN1		0x01	/* First input value. */
+#define IRTMPREF_OUT1		0x02	/* First output value. */
+#define IRTMPREF_OUT2		0x04	/* Second output value. */
+
+/* SLOAD mode bits, stored in op2. */
+#define IRSLOAD_PARENT		0x01	/* Coalesce with parent trace. */
+#define IRSLOAD_FRAME		0x02	/* Load 32 bits of ftsz. */
+#define IRSLOAD_TYPECHECK	0x04	/* Needs type check. */
+#define IRSLOAD_CONVERT		0x08	/* Number to integer conversion. */
+#define IRSLOAD_READONLY	0x10	/* Read-only, omit slot store. */
+#define IRSLOAD_INHERIT		0x20	/* Inherited by exits/side traces. */
+#define IRSLOAD_KEYINDEX	0x40	/* Table traversal key index. */
+
+/* XLOAD mode bits, stored in op2. */
+#define IRXLOAD_READONLY	0x01	/* Load from read-only data. */
+#define IRXLOAD_VOLATILE	0x02	/* Load from volatile data. */
+#define IRXLOAD_UNALIGNED	0x04	/* Unaligned 
