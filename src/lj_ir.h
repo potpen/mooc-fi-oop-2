@@ -241,4 +241,35 @@ IRFLDEF(FLENUM)
 /* XLOAD mode bits, stored in op2. */
 #define IRXLOAD_READONLY	0x01	/* Load from read-only data. */
 #define IRXLOAD_VOLATILE	0x02	/* Load from volatile data. */
-#define IRXLOAD_UNALIGNED	0x04	/* Unaligned 
+#define IRXLOAD_UNALIGNED	0x04	/* Unaligned load. */
+
+/* BUFHDR mode, stored in op2. */
+#define IRBUFHDR_RESET		0	/* Reset buffer. */
+#define IRBUFHDR_APPEND		1	/* Append to buffer. */
+#define IRBUFHDR_WRITE		2	/* Write to string buffer. */
+
+/* CONV mode, stored in op2. */
+#define IRCONV_SRCMASK		0x001f	/* Source IRType. */
+#define IRCONV_DSTMASK		0x03e0	/* Dest. IRType (also in ir->t). */
+#define IRCONV_DSH		5
+#define IRCONV_NUM_INT		((IRT_NUM<<IRCONV_DSH)|IRT_INT)
+#define IRCONV_INT_NUM		((IRT_INT<<IRCONV_DSH)|IRT_NUM)
+#define IRCONV_SEXT		0x0800	/* Sign-extend integer to integer. */
+#define IRCONV_MODEMASK		0x0fff
+#define IRCONV_CONVMASK		0xf000
+#define IRCONV_CSH		12
+/* Number to integer conversion mode. Ordered by strength of the checks. */
+#define IRCONV_TOBIT  (0<<IRCONV_CSH)	/* None. Cache only: TOBIT conv. */
+#define IRCONV_ANY    (1<<IRCONV_CSH)	/* Any FP number is ok. */
+#define IRCONV_INDEX  (2<<IRCONV_CSH)	/* Check + special backprop rules. */
+#define IRCONV_CHECK  (3<<IRCONV_CSH)	/* Number checked for integerness. */
+#define IRCONV_NONE   IRCONV_ANY	/* INT|*64 no conv, but change type. */
+
+/* TOSTR mode, stored in op2. */
+#define IRTOSTR_INT		0	/* Convert integer to string. */
+#define IRTOSTR_NUM		1	/* Convert number to string. */
+#define IRTOSTR_CHAR		2	/* Convert char value to string. */
+
+/* -- IR operands --------------------------------------------------------- */
+
+/* IR operand mode (2
