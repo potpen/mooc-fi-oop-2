@@ -272,4 +272,51 @@ IRFLDEF(FLENUM)
 
 /* -- IR operands --------------------------------------------------------- */
 
-/* IR operand mode (2
+/* IR operand mode (2 bit). */
+typedef enum {
+  IRMref,		/* IR reference. */
+  IRMlit,		/* 16 bit unsigned literal. */
+  IRMcst,		/* Constant literal: i, gcr or ptr. */
+  IRMnone		/* Unused operand. */
+} IRMode;
+#define IRM___		IRMnone
+
+/* Mode bits: Commutative, {Normal/Ref, Alloc, Load, Store}, Non-weak guard. */
+#define IRM_C			0x10
+
+#define IRM_N			0x00
+#define IRM_R			IRM_N
+#define IRM_A			0x20
+#define IRM_L			0x40
+#define IRM_S			0x60
+
+#define IRM_W			0x80
+
+#define IRM_NW			(IRM_N|IRM_W)
+#define IRM_CW			(IRM_C|IRM_W)
+#define IRM_AW			(IRM_A|IRM_W)
+#define IRM_LW			(IRM_L|IRM_W)
+
+#define irm_op1(m)		((IRMode)((m)&3))
+#define irm_op2(m)		((IRMode)(((m)>>2)&3))
+#define irm_iscomm(m)		((m) & IRM_C)
+#define irm_kind(m)		((m) & IRM_S)
+
+#define IRMODE(name, m, m1, m2)	(((IRM##m1)|((IRM##m2)<<2)|(IRM_##m))^IRM_W),
+
+LJ_DATA const uint8_t lj_ir_mode[IR__MAX+1];
+
+/* -- IR instruction types ------------------------------------------------ */
+
+#define IRTSIZE_PGC		(LJ_GC64 ? 8 : 4)
+
+/* Map of itypes to non-negative numbers and their sizes. ORDER LJ_T.
+** LJ_TUPVAL/LJ_TTRACE never appear in a TValue. Use these itypes for
+** IRT_P32 and IRT_P64, which never escape the IR.
+** The various integers are only used in the IR and can only escape to
+** a TValue after implicit or explicit conversion. Their types must be
+** contiguous and next to IRT_NUM (see the typerange macros below).
+*/
+#define IRTDEF(_) \
+  _(NIL, 4) _(FALSE, 4) _(TRUE, 4) _(LIGHTUD, LJ_64 ? 8 : 4) \
+  _(S
