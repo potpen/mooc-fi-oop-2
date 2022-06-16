@@ -319,4 +319,46 @@ LJ_DATA const uint8_t lj_ir_mode[IR__MAX+1];
 */
 #define IRTDEF(_) \
   _(NIL, 4) _(FALSE, 4) _(TRUE, 4) _(LIGHTUD, LJ_64 ? 8 : 4) \
-  _(S
+  _(STR, IRTSIZE_PGC) _(P32, 4) _(THREAD, IRTSIZE_PGC) _(PROTO, IRTSIZE_PGC) \
+  _(FUNC, IRTSIZE_PGC) _(P64, 8) _(CDATA, IRTSIZE_PGC) _(TAB, IRTSIZE_PGC) \
+  _(UDATA, IRTSIZE_PGC) \
+  _(FLOAT, 4) _(NUM, 8) _(I8, 1) _(U8, 1) _(I16, 2) _(U16, 2) \
+  _(INT, 4) _(U32, 4) _(I64, 8) _(U64, 8) \
+  _(SOFTFP, 4)  /* There is room for 8 more types. */
+
+/* IR result type and flags (8 bit). */
+typedef enum {
+#define IRTENUM(name, size)	IRT_##name,
+IRTDEF(IRTENUM)
+#undef IRTENUM
+  IRT__MAX,
+
+  /* Native pointer type and the corresponding integer type. */
+  IRT_PTR = LJ_64 ? IRT_P64 : IRT_P32,
+  IRT_PGC = LJ_GC64 ? IRT_P64 : IRT_P32,
+  IRT_IGC = LJ_GC64 ? IRT_I64 : IRT_INT,
+  IRT_INTP = LJ_64 ? IRT_I64 : IRT_INT,
+  IRT_UINTP = LJ_64 ? IRT_U64 : IRT_U32,
+
+  /* Additional flags. */
+  IRT_MARK = 0x20,	/* Marker for misc. purposes. */
+  IRT_ISPHI = 0x40,	/* Instruction is left or right PHI operand. */
+  IRT_GUARD = 0x80,	/* Instruction is a guard. */
+
+  /* Masks. */
+  IRT_TYPE = 0x1f,
+  IRT_T = 0xff
+} IRType;
+
+#define irtype_ispri(irt)	((uint32_t)(irt) <= IRT_TRUE)
+
+/* Stored IRType. */
+typedef struct IRType1 { uint8_t irt; } IRType1;
+
+#define IRT(o, t)		((uint32_t)(((o)<<8) | (t)))
+#define IRTI(o)			(IRT((o), IRT_INT))
+#define IRTN(o)			(IRT((o), IRT_NUM))
+#define IRTG(o, t)		(IRT((o), IRT_GUARD|(t)))
+#define IRTGI(o)		(IRT((o), IRT_GUARD|IRT_INT))
+
+#define
