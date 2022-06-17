@@ -388,4 +388,54 @@ typedef struct IRType1 { uint8_t irt; } IRType1;
 #define irt_isinteger(t)	(irt_typerange((t), IRT_I8, IRT_INT))
 #define irt_isgcv(t)		(irt_typerange((t), IRT_STR, IRT_UDATA))
 #define irt_isaddr(t)		(irt_typerange((t), IRT_LIGHTUD, IRT_UDATA))
-#define irt_isint64(t)		(irt_typerange((t), IRT_I64, I
+#define irt_isint64(t)		(irt_typerange((t), IRT_I64, IRT_U64))
+
+#if LJ_GC64
+/* Include IRT_NIL, so IR(ASMREF_L) (aka REF_NIL) is considered 64 bit. */
+#define IRT_IS64 \
+  ((1u<<IRT_NUM)|(1u<<IRT_I64)|(1u<<IRT_U64)|(1u<<IRT_P64)|\
+   (1u<<IRT_LIGHTUD)|(1u<<IRT_STR)|(1u<<IRT_THREAD)|(1u<<IRT_PROTO)|\
+   (1u<<IRT_FUNC)|(1u<<IRT_CDATA)|(1u<<IRT_TAB)|(1u<<IRT_UDATA)|\
+   (1u<<IRT_NIL))
+#elif LJ_64
+#define IRT_IS64 \
+  ((1u<<IRT_NUM)|(1u<<IRT_I64)|(1u<<IRT_U64)|(1u<<IRT_P64)|(1u<<IRT_LIGHTUD))
+#else
+#define IRT_IS64 \
+  ((1u<<IRT_NUM)|(1u<<IRT_I64)|(1u<<IRT_U64))
+#endif
+
+#define irt_is64(t)		((IRT_IS64 >> irt_type(t)) & 1)
+#define irt_is64orfp(t)		(((IRT_IS64|(1u<<IRT_FLOAT))>>irt_type(t)) & 1)
+
+#define irt_size(t)		(lj_ir_type_size[irt_t((t))])
+
+LJ_DATA const uint8_t lj_ir_type_size[];
+
+static LJ_AINLINE IRType itype2irt(const TValue *tv)
+{
+  if (tvisint(tv))
+    return IRT_INT;
+  else if (tvisnum(tv))
+    return IRT_NUM;
+#if LJ_64 && !LJ_GC64
+  else if (tvislightud(tv))
+    return IRT_LIGHTUD;
+#endif
+  else
+    return (IRType)~itype(tv);
+}
+
+static LJ_AINLINE uint32_t irt_toitype_(IRType t)
+{
+  lj_assertX(!LJ_64 || LJ_GC64 || t != IRT_LIGHTUD,
+	     "no plain type tag for lightuserdata");
+  if (LJ_DUALNUM && t > IRT_NUM) {
+    return LJ_TISNUM;
+  } else {
+    lj_assertX(t <= IRT_NUM, "no plain type tag for IR type %d", t);
+    return ~(uint32_t)t;
+  }
+}
+
+#define irt_toitype(t)		irt_toit
