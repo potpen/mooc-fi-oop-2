@@ -361,4 +361,31 @@ typedef struct IRType1 { uint8_t irt; } IRType1;
 #define IRTG(o, t)		(IRT((o), IRT_GUARD|(t)))
 #define IRTGI(o)		(IRT((o), IRT_GUARD|IRT_INT))
 
-#define
+#define irt_t(t)		((IRType)(t).irt)
+#define irt_type(t)		((IRType)((t).irt & IRT_TYPE))
+#define irt_sametype(t1, t2)	((((t1).irt ^ (t2).irt) & IRT_TYPE) == 0)
+#define irt_typerange(t, first, last) \
+  ((uint32_t)((t).irt & IRT_TYPE) - (uint32_t)(first) <= (uint32_t)(last-first))
+
+#define irt_isnil(t)		(irt_type(t) == IRT_NIL)
+#define irt_ispri(t)		((uint32_t)irt_type(t) <= IRT_TRUE)
+#define irt_islightud(t)	(irt_type(t) == IRT_LIGHTUD)
+#define irt_isstr(t)		(irt_type(t) == IRT_STR)
+#define irt_istab(t)		(irt_type(t) == IRT_TAB)
+#define irt_iscdata(t)		(irt_type(t) == IRT_CDATA)
+#define irt_isfloat(t)		(irt_type(t) == IRT_FLOAT)
+#define irt_isnum(t)		(irt_type(t) == IRT_NUM)
+#define irt_isint(t)		(irt_type(t) == IRT_INT)
+#define irt_isi8(t)		(irt_type(t) == IRT_I8)
+#define irt_isu8(t)		(irt_type(t) == IRT_U8)
+#define irt_isi16(t)		(irt_type(t) == IRT_I16)
+#define irt_isu16(t)		(irt_type(t) == IRT_U16)
+#define irt_isu32(t)		(irt_type(t) == IRT_U32)
+#define irt_isi64(t)		(irt_type(t) == IRT_I64)
+#define irt_isu64(t)		(irt_type(t) == IRT_U64)
+
+#define irt_isfp(t)		(irt_isnum(t) || irt_isfloat(t))
+#define irt_isinteger(t)	(irt_typerange((t), IRT_I8, IRT_INT))
+#define irt_isgcv(t)		(irt_typerange((t), IRT_STR, IRT_UDATA))
+#define irt_isaddr(t)		(irt_typerange((t), IRT_LIGHTUD, IRT_UDATA))
+#define irt_isint64(t)		(irt_typerange((t), IRT_I64, I
