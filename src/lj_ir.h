@@ -438,4 +438,45 @@ static LJ_AINLINE uint32_t irt_toitype_(IRType t)
   }
 }
 
-#define irt_toitype(t)		irt_toit
+#define irt_toitype(t)		irt_toitype_(irt_type((t)))
+
+#define irt_isguard(t)		((t).irt & IRT_GUARD)
+#define irt_ismarked(t)		((t).irt & IRT_MARK)
+#define irt_setmark(t)		((t).irt |= IRT_MARK)
+#define irt_clearmark(t)	((t).irt &= ~IRT_MARK)
+#define irt_isphi(t)		((t).irt & IRT_ISPHI)
+#define irt_setphi(t)		((t).irt |= IRT_ISPHI)
+#define irt_clearphi(t)		((t).irt &= ~IRT_ISPHI)
+
+/* Stored combined IR opcode and type. */
+typedef uint16_t IROpT;
+
+/* -- IR references ------------------------------------------------------- */
+
+/* IR references. */
+typedef uint16_t IRRef1;	/* One stored reference. */
+typedef uint32_t IRRef2;	/* Two stored references. */
+typedef uint32_t IRRef;		/* Used to pass around references. */
+
+/* Fixed references. */
+enum {
+  REF_BIAS =	0x8000,
+  REF_TRUE =	REF_BIAS-3,
+  REF_FALSE =	REF_BIAS-2,
+  REF_NIL =	REF_BIAS-1,	/* \--- Constants grow downwards. */
+  REF_BASE =	REF_BIAS,	/* /--- IR grows upwards. */
+  REF_FIRST =	REF_BIAS+1,
+  REF_DROP =	0xffff
+};
+
+/* Note: IRMlit operands must be < REF_BIAS, too!
+** This allows for fast and uniform manipulation of all operands
+** without looking up the operand mode in lj_ir_mode:
+** - CSE calculates the maximum reference of two operands.
+**   This must work with mixed reference/literal operands, too.
+** - DCE marking only checks for operand >= REF_BIAS.
+** - LOOP needs to substitute reference operands.
+**   Constant references and literals must not be modified.
+*/
+
+#define IRREF2(lo, hi)		
