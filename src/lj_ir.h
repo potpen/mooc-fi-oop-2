@@ -479,4 +479,44 @@ enum {
 **   Constant references and literals must not be modified.
 */
 
-#define IRREF2(lo, hi)		
+#define IRREF2(lo, hi)		((IRRef2)(lo) | ((IRRef2)(hi) << 16))
+
+#define irref_isk(ref)		((ref) < REF_BIAS)
+
+/* Tagged IR references (32 bit).
+**
+** +-------+-------+---------------+
+** |  irt  | flags |      ref      |
+** +-------+-------+---------------+
+**
+** The tag holds a copy of the IRType and speeds up IR type checks.
+*/
+typedef uint32_t TRef;
+
+#define TREF_REFMASK		0x0000ffff
+#define TREF_FRAME		0x00010000
+#define TREF_CONT		0x00020000
+#define TREF_KEYINDEX		0x00100000
+
+#define TREF(ref, t)		((TRef)((ref) + ((t)<<24)))
+
+#define tref_ref(tr)		((IRRef1)(tr))
+#define tref_t(tr)		((IRType)((tr)>>24))
+#define tref_type(tr)		((IRType)(((tr)>>24) & IRT_TYPE))
+#define tref_typerange(tr, first, last) \
+  ((((tr)>>24) & IRT_TYPE) - (TRef)(first) <= (TRef)(last-first))
+
+#define tref_istype(tr, t)	(((tr) & (IRT_TYPE<<24)) == ((t)<<24))
+#define tref_isnil(tr)		(tref_istype((tr), IRT_NIL))
+#define tref_isfalse(tr)	(tref_istype((tr), IRT_FALSE))
+#define tref_istrue(tr)		(tref_istype((tr), IRT_TRUE))
+#define tref_islightud(tr)	(tref_istype((tr), IRT_LIGHTUD))
+#define tref_isstr(tr)		(tref_istype((tr), IRT_STR))
+#define tref_isfunc(tr)		(tref_istype((tr), IRT_FUNC))
+#define tref_iscdata(tr)	(tref_istype((tr), IRT_CDATA))
+#define tref_istab(tr)		(tref_istype((tr), IRT_TAB))
+#define tref_isudata(tr)	(tref_istype((tr), IRT_UDATA))
+#define tref_isnum(tr)		(tref_istype((tr), IRT_NUM))
+#define tref_isint(tr)		(tref_istype((tr), IRT_INT))
+
+#define tref_isbool(tr)		(tr
