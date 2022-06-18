@@ -558,4 +558,39 @@ typedef union IRIns {
       IRRef1 op1;	/* IR operand 1. */
     , IRRef1 op2;	/* IR operand 2. */
     )
-    IR
+    IROpT ot;		/* IR opcode and type (overlaps t and o). */
+    IRRef1 prev;	/* Previous ins in same chain (overlaps r and s). */
+  };
+  struct {
+    IRRef2 op12;	/* IR operand 1 and 2 (overlaps op1 and op2). */
+    LJ_ENDIAN_LOHI(
+      IRType1 t;	/* IR type. */
+    , IROp1 o;		/* IR opcode. */
+    )
+    LJ_ENDIAN_LOHI(
+      uint8_t r;	/* Register allocation (overlaps prev). */
+    , uint8_t s;	/* Spill slot allocation (overlaps prev). */
+    )
+  };
+  int32_t i;		/* 32 bit signed integer literal (overlaps op12). */
+  GCRef gcr;		/* GCobj constant (overlaps op12 or entire slot). */
+  MRef ptr;		/* Pointer constant (overlaps op12 or entire slot). */
+  TValue tv;		/* TValue constant (overlaps entire slot). */
+} IRIns;
+
+#define ir_isk64(ir) \
+  ((ir)->o == IR_KNUM || (ir)->o == IR_KINT64 || \
+   (LJ_GC64 && \
+    ((ir)->o == IR_KGC || (ir)->o == IR_KPTR || (ir)->o == IR_KKPTR)))
+
+#define ir_kgc(ir)	check_exp((ir)->o == IR_KGC, gcref((ir)[LJ_GC64].gcr))
+#define ir_kstr(ir)	(gco2str(ir_kgc((ir))))
+#define ir_ktab(ir)	(gco2tab(ir_kgc((ir))))
+#define ir_kfunc(ir)	(gco2func(ir_kgc((ir))))
+#define ir_kcdata(ir)	(gco2cd(ir_kgc((ir))))
+#define ir_knum(ir)	check_exp((ir)->o == IR_KNUM, &(ir)[1].tv)
+#define ir_kint64(ir)	check_exp((ir)->o == IR_KINT64, &(ir)[1].tv)
+#define ir_k64(ir)	check_exp(ir_isk64(ir), &(ir)[1].tv)
+#define ir_kptr(ir) \
+  check_exp((ir)->o == IR_KPTR || (ir)->o == IR_KKPTR, \
+    mre
