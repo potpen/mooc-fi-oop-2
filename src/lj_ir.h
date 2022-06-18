@@ -519,4 +519,43 @@ typedef uint32_t TRef;
 #define tref_isnum(tr)		(tref_istype((tr), IRT_NUM))
 #define tref_isint(tr)		(tref_istype((tr), IRT_INT))
 
-#define tref_isbool(tr)		(tr
+#define tref_isbool(tr)		(tref_typerange((tr), IRT_FALSE, IRT_TRUE))
+#define tref_ispri(tr)		(tref_typerange((tr), IRT_NIL, IRT_TRUE))
+#define tref_istruecond(tr)	(!tref_typerange((tr), IRT_NIL, IRT_FALSE))
+#define tref_isinteger(tr)	(tref_typerange((tr), IRT_I8, IRT_INT))
+#define tref_isnumber(tr)	(tref_typerange((tr), IRT_NUM, IRT_INT))
+#define tref_isnumber_str(tr)	(tref_isnumber((tr)) || tref_isstr((tr)))
+#define tref_isgcv(tr)		(tref_typerange((tr), IRT_STR, IRT_UDATA))
+
+#define tref_isk(tr)		(irref_isk(tref_ref((tr))))
+#define tref_isk2(tr1, tr2)	(irref_isk(tref_ref((tr1) | (tr2))))
+
+#define TREF_PRI(t)		(TREF(REF_NIL-(t), (t)))
+#define TREF_NIL		(TREF_PRI(IRT_NIL))
+#define TREF_FALSE		(TREF_PRI(IRT_FALSE))
+#define TREF_TRUE		(TREF_PRI(IRT_TRUE))
+
+/* -- IR format ----------------------------------------------------------- */
+
+/* IR instruction format (64 bit).
+**
+**    16      16     8   8   8   8
+** +-------+-------+---+---+---+---+
+** |  op1  |  op2  | t | o | r | s |
+** +-------+-------+---+---+---+---+
+** |  op12/i/gco32 |   ot  | prev  | (alternative fields in union)
+** +-------+-------+---+---+---+---+
+** |  TValue/gco64                 | (2nd IR slot for 64 bit constants)
+** +---------------+-------+-------+
+**        32           16      16
+**
+** prev is only valid prior to register allocation and then reused for r + s.
+*/
+
+typedef union IRIns {
+  struct {
+    LJ_ENDIAN_LOHI(
+      IRRef1 op1;	/* IR operand 1. */
+    , IRRef1 op2;	/* IR operand 2. */
+    )
+    IR
