@@ -424,3 +424,108 @@ typedef struct jit_State {
   lua_State *L;		/* Current Lua state. */
   const BCIns *pc;	/* Current PC. */
   GCfunc *fn;		/* Current function. */
+  GCproto *pt;		/* Current prototype. */
+  TRef *base;		/* Current frame base, points into J->slots. */
+
+  uint32_t flags;	/* JIT engine flags. */
+  BCReg maxslot;	/* Relative to baseslot. */
+  BCReg baseslot;	/* Current frame base, offset into J->slots. */
+
+  uint8_t mergesnap;	/* Allowed to merge with next snapshot. */
+  uint8_t needsnap;	/* Need snapshot before recording next bytecode. */
+  IRType1 guardemit;	/* Accumulated IRT_GUARD for emitted instructions. */
+  uint8_t bcskip;	/* Number of bytecode instructions to skip. */
+
+  FoldState fold;	/* Fold state. */
+
+  const BCIns *bc_min;	/* Start of allowed bytecode range for root trace. */
+  MSize bc_extent;	/* Extent of the range. */
+
+  TraceState state;	/* Trace compiler state. */
+
+  int32_t instunroll;	/* Unroll counter for instable loops. */
+  int32_t loopunroll;	/* Unroll counter for loop ops in side traces. */
+  int32_t tailcalled;	/* Number of successive tailcalls. */
+  int32_t framedepth;	/* Current frame depth. */
+  int32_t retdepth;	/* Return frame depth (count of RETF). */
+
+#if LJ_K32__USED
+  uint32_t k32[LJ_K32__MAX];  /* Common 4 byte constants used by backends. */
+#endif
+  TValue ksimd[LJ_KSIMD__MAX*2+1];  /* 16 byte aligned SIMD constants. */
+#if LJ_K64__USED
+  TValue k64[LJ_K64__MAX];  /* Common 8 byte constants. */
+#endif
+
+  IRIns *irbuf;		/* Temp. IR instruction buffer. Biased with REF_BIAS. */
+  IRRef irtoplim;	/* Upper limit of instuction buffer (biased). */
+  IRRef irbotlim;	/* Lower limit of instuction buffer (biased). */
+  IRRef loopref;	/* Last loop reference or ref of final LOOP (or 0). */
+
+  MSize sizesnap;	/* Size of temp. snapshot buffer. */
+  SnapShot *snapbuf;	/* Temp. snapshot buffer. */
+  SnapEntry *snapmapbuf;  /* Temp. snapshot map buffer. */
+  MSize sizesnapmap;	/* Size of temp. snapshot map buffer. */
+
+  PostProc postproc;	/* Required post-processing after execution. */
+#if LJ_SOFTFP32 || (LJ_32 && LJ_HASFFI)
+  uint8_t needsplit;	/* Need SPLIT pass. */
+#endif
+  uint8_t retryrec;	/* Retry recording. */
+
+  GCRef *trace;		/* Array of traces. */
+  TraceNo freetrace;	/* Start of scan for next free trace. */
+  MSize sizetrace;	/* Size of trace array. */
+  IRRef1 ktrace;	/* Reference to KGC with GCtrace. */
+
+  IRRef1 chain[IR__MAX];  /* IR instruction skip-list chain anchors. */
+  TRef slot[LJ_MAX_JSLOTS+LJ_STACK_EXTRA];  /* Stack slot map. */
+
+  int32_t param[JIT_P__MAX];  /* JIT engine parameters. */
+
+  MCode *exitstubgroup[LJ_MAX_EXITSTUBGR];  /* Exit stub group addresses. */
+
+  HotPenalty penalty[PENALTY_SLOTS];  /* Penalty slots. */
+  uint32_t penaltyslot;	/* Round-robin index into penalty slots. */
+
+#ifdef LUAJIT_ENABLE_TABLE_BUMP
+  RBCHashEntry rbchash[RBCHASH_SLOTS];  /* Reverse bytecode map. */
+#endif
+
+  BPropEntry bpropcache[BPROP_SLOTS];  /* Backpropagation cache slots. */
+  uint32_t bpropslot;	/* Round-robin index into bpropcache slots. */
+
+  ScEvEntry scev;	/* Scalar evolution analysis cache slots. */
+
+  const BCIns *startpc;	/* Bytecode PC of starting instruction. */
+  TraceNo parent;	/* Parent of current side trace (0 for root traces). */
+  ExitNo exitno;	/* Exit number in parent of current side trace. */
+  int exitcode;		/* Exit code from unwound trace. */
+
+  BCIns *patchpc;	/* PC for pending re-patch. */
+  BCIns patchins;	/* Instruction for pending re-patch. */
+
+  int mcprot;		/* Protection of current mcode area. */
+  MCode *mcarea;	/* Base of current mcode area. */
+  MCode *mctop;		/* Top of current mcode area. */
+  MCode *mcbot;		/* Bottom of current mcode area. */
+  size_t szmcarea;	/* Size of current mcode area. */
+  size_t szallmcarea;	/* Total size of all allocated mcode areas. */
+
+  TValue errinfo;	/* Additional info element for trace errors. */
+
+#if LJ_HASPROFILE
+  GCproto *prev_pt;	/* Previous prototype. */
+  BCLine prev_line;	/* Previous line. */
+  int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */
+#endif
+} jit_State;
+
+#ifdef LUA_USE_ASSERT
+#define lj_assertJ(c, ...)	lj_assertG_(J2G(J), (c), __VA_ARGS__)
+#else
+#define lj_assertJ(c, ...)	((void)J)
+#endif
+#endif
+
+#endif
