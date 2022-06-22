@@ -593,4 +593,22 @@ typedef union IRIns {
 #define ir_k64(ir)	check_exp(ir_isk64(ir), &(ir)[1].tv)
 #define ir_kptr(ir) \
   check_exp((ir)->o == IR_KPTR || (ir)->o == IR_KKPTR, \
-    mre
+    mref((ir)[LJ_GC64].ptr, void))
+
+/* A store or any other op with a non-weak guard has a side-effect. */
+static LJ_AINLINE int ir_sideeff(IRIns *ir)
+{
+  return (((ir->t.irt | ~IRT_GUARD) & lj_ir_mode[ir->o]) >= IRM_S);
+}
+
+LJ_STATIC_ASSERT((int)IRT_GUARD == (int)IRM_W);
+
+/* Replace IR instruction with NOP. */
+static LJ_AINLINE void lj_ir_nop(IRIns *ir)
+{
+  ir->ot = IRT(IR_NOP, IRT_NIL);
+  ir->op1 = ir->op2 = 0;
+  ir->prev = 0;
+}
+
+#endif
