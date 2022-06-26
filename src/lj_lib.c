@@ -198,3 +198,162 @@ GCstr *lj_lib_checkstr(lua_State *L, int narg)
   TValue *o = L->base + narg-1;
   if (o < L->top) {
     if (LJ_LIKELY(tvisstr(o))) {
+      return strV(o);
+    } else if (tvisnumber(o)) {
+      GCstr *s = lj_strfmt_number(L, o);
+      setstrV(L, o, s);
+      return s;
+    }
+  }
+  lj_err_argt(L, narg, LUA_TSTRING);
+  return NULL;  /* unreachable */
+}
+
+GCstr *lj_lib_optstr(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  return (o < L->top && !tvisnil(o)) ? lj_lib_checkstr(L, narg) : NULL;
+}
+
+#if LJ_DUALNUM
+void lj_lib_checknumber(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top && lj_strscan_numberobj(o)))
+    lj_err_argt(L, narg, LUA_TNUMBER);
+}
+#endif
+
+lua_Number lj_lib_checknum(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top &&
+	(tvisnumber(o) || (tvisstr(o) && lj_strscan_num(strV(o), o)))))
+    lj_err_argt(L, narg, LUA_TNUMBER);
+  if (LJ_UNLIKELY(tvisint(o))) {
+    lua_Number n = (lua_Number)intV(o);
+    setnumV(o, n);
+    return n;
+  } else {
+    return numV(o);
+  }
+}
+
+int32_t lj_lib_checkint(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top && lj_strscan_numberobj(o)))
+    lj_err_argt(L, narg, LUA_TNUMBER);
+  if (LJ_LIKELY(tvisint(o))) {
+    return intV(o);
+  } else {
+    int32_t i = lj_num2int(numV(o));
+    if (LJ_DUALNUM) setintV(o, i);
+    return i;
+  }
+}
+
+int32_t lj_lib_optint(lua_State *L, int narg, int32_t def)
+{
+  TValue *o = L->base + narg-1;
+  return (o < L->top && !tvisnil(o)) ? lj_lib_checkint(L, narg) : def;
+}
+
+GCfunc *lj_lib_checkfunc(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top && tvisfunc(o)))
+    lj_err_argt(L, narg, LUA_TFUNCTION);
+  return funcV(o);
+}
+
+GCtab *lj_lib_checktab(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top && tvistab(o)))
+    lj_err_argt(L, narg, LUA_TTABLE);
+  return tabV(o);
+}
+
+GCtab *lj_lib_checktabornil(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (o < L->top) {
+    if (tvistab(o))
+      return tabV(o);
+    else if (tvisnil(o))
+      return NULL;
+  }
+  lj_err_arg(L, narg, LJ_ERR_NOTABN);
+  return NULL;  /* unreachable */
+}
+
+int lj_lib_checkopt(lua_State *L, int narg, int def, const char *lst)
+{
+  GCstr *s = def >= 0 ? lj_lib_optstr(L, narg) : lj_lib_checkstr(L, narg);
+  if (s) {
+    const char *opt = strdata(s);
+    MSize len = s->len;
+    int i;
+    for (i = 0; *(const uint8_t *)lst; i++) {
+      if (*(const uint8_t *)lst == len && memcmp(opt, lst+1, len) == 0)
+	return i;
+      lst += 1+*(const uint8_t *)lst;
+    }
+    lj_err_argv(L, narg, LJ_ERR_INVOPTM, opt);
+  }
+  return def;
+}
+
+/* -- Strict type checks -------------------------------------------------- */
+
+/* The following type checks do not coerce between strings and numbers.
+** And they handle plain int64_t/uint64_t FFI numbers, too.
+*/
+
+#if LJ_HASBUFFER
+GCstr *lj_lib_checkstrx(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+  if (!(o < L->top && tvisstr(o))) lj_err_argt(L, narg, LUA_TSTRING);
+  return strV(o);
+}
+
+int32_t lj_lib_checkintrange(lua_State *L, int narg, int32_t a, int32_t b)
+{
+  TValue *o = L->base + narg-1;
+  lj_assertL(b >= 0, "expected range must be non-negative");
+  if (o < L->top) {
+    if (LJ_LIKELY(tvisint(o))) {
+      int32_t i = intV(o);
+      if (i >= a && i <= b) return i;
+    } else if (LJ_LIKELY(tvisnum(o))) {
+      /* For performance reasons, this doesn't check for integerness or
+      ** integer overflow. Overflow detection still works, since all FPUs
+      ** return either MININT or MAXINT, which is then out of range.
+      */
+      int32_t i = (int32_t)numV(o);
+      if (i >= a && i <= b) return i;
+#if LJ_HASFFI
+    } else if (tviscdata(o)) {
+      GCcdata *cd = cdataV(o);
+      if (cd->ctypeid == CTID_INT64) {
+	int64_t i = *(int64_t *)cdataptr(cd);
+	if (i >= (int64_t)a && i <= (int64_t)b) return (int32_t)i;
+      } else if (cd->ctypeid == CTID_UINT64) {
+	uint64_t i = *(uint64_t *)cdataptr(cd);
+	if ((a < 0 || i >= (uint64_t)a) && i <= (uint64_t)b) return (int32_t)i;
+      } else {
+	goto badtype;
+      }
+#endif
+    } else {
+      goto badtype;
+    }
+    lj_err_arg(L, narg, LJ_ERR_NUMRNG);
+  }
+badtype:
+  lj_err_argt(L, narg, LUA_TNUMBER);
+  return 0;  /* unreachable */
+}
+#endif
