@@ -62,4 +62,32 @@ typedef struct LexState {
   SBuf sb;		/* String buffer for tokens. */
   lua_Reader rfunc;	/* Reader callback. */
   void *rdata;		/* Reader callback data. */
-  BCLine linenumber;	/* I
+  BCLine linenumber;	/* Input line counter. */
+  BCLine lastline;	/* Line of last token. */
+  GCstr *chunkname;	/* Current chunk name (interned string). */
+  const char *chunkarg;	/* Chunk name argument. */
+  const char *mode;	/* Allow loading bytecode (b) and/or source text (t). */
+  VarInfo *vstack;	/* Stack for names and extents of local variables. */
+  MSize sizevstack;	/* Size of variable stack. */
+  MSize vtop;		/* Top of variable stack. */
+  BCInsLine *bcstack;	/* Stack for bytecode instructions/line numbers. */
+  MSize sizebcstack;	/* Size of bytecode stack. */
+  uint32_t level;	/* Syntactical nesting level. */
+  int endmark;		/* Trust bytecode end marker, even if not at EOF. */
+} LexState;
+
+LJ_FUNC int lj_lex_setup(lua_State *L, LexState *ls);
+LJ_FUNC void lj_lex_cleanup(lua_State *L, LexState *ls);
+LJ_FUNC void lj_lex_next(LexState *ls);
+LJ_FUNC LexToken lj_lex_lookahead(LexState *ls);
+LJ_FUNC const char *lj_lex_token2str(LexState *ls, LexToken tok);
+LJ_FUNC_NORET void lj_lex_error(LexState *ls, LexToken tok, ErrMsg em, ...);
+LJ_FUNC void lj_lex_init(lua_State *L);
+
+#ifdef LUA_USE_ASSERT
+#define lj_assertLS(c, ...)	(lj_assertG_(G(ls->L), (c), __VA_ARGS__))
+#else
+#define lj_assertLS(c, ...)	((void)ls)
+#endif
+
+#endif
