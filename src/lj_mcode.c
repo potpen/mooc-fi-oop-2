@@ -105,4 +105,60 @@ static int mcode_setprot(void *p, size_t sz, DWORD prot)
 
 static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, int prot)
 {
-  void *p = mmap((void *)hint
+  void *p = mmap((void *)hint, sz, prot|MCPROT_CREATE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED) {
+    if (!hint) lj_trace_err(J, LJ_TRERR_MCODEAL);
+    p = NULL;
+  }
+  return p;
+}
+
+static void mcode_free(jit_State *J, void *p, size_t sz)
+{
+  UNUSED(J);
+  munmap(p, sz);
+}
+
+static int mcode_setprot(void *p, size_t sz, int prot)
+{
+  return mprotect(p, sz, prot);
+}
+
+#else
+
+#error "Missing OS support for explicit placement of executable memory"
+
+#endif
+
+/* -- MCode area protection ----------------------------------------------- */
+
+#if LUAJIT_SECURITY_MCODE == 0
+
+/* Define this ONLY if page protection twiddling becomes a bottleneck.
+**
+** It's generally considered to be a potential security risk to have
+** pages with simultaneous write *and* execute access in a process.
+**
+** Do not even think about using this mode for server processes or
+** apps handling untrusted external data.
+**
+** The security risk is not in LuaJIT itself -- but if an adversary finds
+** any *other* flaw in your C application logic, then any RWX memory pages
+** simplify writing an exploit considerably.
+*/
+#define MCPROT_GEN	MCPROT_RWX
+#define MCPROT_RUN	MCPROT_RWX
+
+static void mcode_protect(jit_State *J, int prot)
+{
+  UNUSED(J); UNUSED(prot); UNUSED(mcode_setprot);
+}
+
+#else
+
+/* This is the default behaviour and much safer:
+**
+** Most of the time the memory pages holding machine code are executable,
+** but NONE of them is writable.
+**
+** The c
