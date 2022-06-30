@@ -161,4 +161,53 @@ static void mcode_protect(jit_State *J, int prot)
 ** Most of the time the memory pages holding machine code are executable,
 ** but NONE of them is writable.
 **
-** The c
+** The current memory area is marked read-write (but NOT executable) only
+** during the short time window while the assembler generates machine code.
+*/
+#define MCPROT_GEN	MCPROT_RW
+#define MCPROT_RUN	MCPROT_RX
+
+/* Protection twiddling failed. Probably due to kernel security. */
+static LJ_NORET LJ_NOINLINE void mcode_protfail(jit_State *J)
+{
+  lua_CFunction panic = J2G(J)->panic;
+  if (panic) {
+    lua_State *L = J->L;
+    setstrV(L, L->top++, lj_err_str(L, LJ_ERR_JITPROT));
+    panic(L);
+  }
+  exit(EXIT_FAILURE);
+}
+
+/* Change protection of MCode area. */
+static void mcode_protect(jit_State *J, int prot)
+{
+  if (J->mcprot != prot) {
+    if (LJ_UNLIKELY(mcode_setprot(J->mcarea, J->szmcarea, prot)))
+      mcode_protfail(J);
+    J->mcprot = prot;
+  }
+}
+
+#endif
+
+/* -- MCode area allocation ----------------------------------------------- */
+
+#if LJ_64
+#define mcode_validptr(p)	(p)
+#else
+#define mcode_validptr(p)	((p) && (uintptr_t)(p) < 0xffff0000)
+#endif
+
+#ifdef LJ_TARGET_JUMPRANGE
+
+/* Get memory within relative jump distance of our code in 64 bit mode. */
+static void *mcode_alloc(jit_State *J, size_t sz)
+{
+  /* Target an address in the static assembler code (64K aligned).
+  ** Try addresses within a distance of target-range/2+1MB..target+range/2-1MB.
+  ** Use half the jump range so every address in the range can reach any other.
+  */
+#if LJ_TARGET_MIPS
+  /* Use the middle of the 256MB-aligned region. */
+  uintptr_t targe
