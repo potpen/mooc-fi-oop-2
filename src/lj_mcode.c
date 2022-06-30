@@ -210,4 +210,42 @@ static void *mcode_alloc(jit_State *J, size_t sz)
   */
 #if LJ_TARGET_MIPS
   /* Use the middle of the 256MB-aligned region. */
-  uintptr_t targe
+  uintptr_t target = ((uintptr_t)(void *)lj_vm_exit_handler &
+		      ~(uintptr_t)0x0fffffffu) + 0x08000000u;
+#else
+  uintptr_t target = (uintptr_t)(void *)lj_vm_exit_handler & ~(uintptr_t)0xffff;
+#endif
+  const uintptr_t range = (1u << (LJ_TARGET_JUMPRANGE-1)) - (1u << 21);
+  /* First try a contiguous area below the last one. */
+  uintptr_t hint = J->mcarea ? (uintptr_t)J->mcarea - sz : 0;
+  int i;
+  /* Limit probing iterations, depending on the available pool size. */
+  for (i = 0; i < LJ_TARGET_JUMPRANGE; i++) {
+    if (mcode_validptr(hint)) {
+      void *p = mcode_alloc_at(J, hint, sz, MCPROT_GEN);
+
+      if (mcode_validptr(p) &&
+	  ((uintptr_t)p + sz - target < range || target - (uintptr_t)p < range))
+	return p;
+      if (p) mcode_free(J, p, sz);  /* Free badly placed area. */
+    }
+    /* Next try probing 64K-aligned pseudo-random addresses. */
+    do {
+      hint = lj_prng_u64(&J2G(J)->prng) & ((1u<<LJ_TARGET_JUMPRANGE)-0x10000);
+    } while (!(hint + sz < range+range));
+    hint = target + hint - range;
+  }
+  lj_trace_err(J, LJ_TRERR_MCODEAL);  /* Give up. OS probably ignores hints? */
+  return NULL;
+}
+
+#else
+
+/* All memory addresses are reachable by relative jumps. */
+static void *mcode_alloc(jit_State *J, size_t sz)
+{
+#if defined(__OpenBSD__) || defined(__NetBSD__) || LJ_TARGET_UWP
+  /* Allow better executable memory allocation for OpenBSD W^X mode. */
+  void *p = mcode_alloc_at(J, 0, sz, MCPROT_RUN);
+  if (p && mcode_setprot(p, sz, MCPROT_GEN)) {
+    mcode_free(
