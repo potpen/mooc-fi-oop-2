@@ -248,4 +248,62 @@ static void *mcode_alloc(jit_State *J, size_t sz)
   /* Allow better executable memory allocation for OpenBSD W^X mode. */
   void *p = mcode_alloc_at(J, 0, sz, MCPROT_RUN);
   if (p && mcode_setprot(p, sz, MCPROT_GEN)) {
-    mcode_free(
+    mcode_free(J, p, sz);
+    return NULL;
+  }
+  return p;
+#else
+  return mcode_alloc_at(J, 0, sz, MCPROT_GEN);
+#endif
+}
+
+#endif
+
+/* -- MCode area management ----------------------------------------------- */
+
+/* Allocate a new MCode area. */
+static void mcode_allocarea(jit_State *J)
+{
+  MCode *oldarea = J->mcarea;
+  size_t sz = (size_t)J->param[JIT_P_sizemcode] << 10;
+  sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1);
+  J->mcarea = (MCode *)mcode_alloc(J, sz);
+  J->szmcarea = sz;
+  J->mcprot = MCPROT_GEN;
+  J->mctop = (MCode *)((char *)J->mcarea + J->szmcarea);
+  J->mcbot = (MCode *)((char *)J->mcarea + sizeof(MCLink));
+  ((MCLink *)J->mcarea)->next = oldarea;
+  ((MCLink *)J->mcarea)->size = sz;
+  J->szallmcarea += sz;
+  J->mcbot = (MCode *)lj_err_register_mcode(J->mcarea, sz, (uint8_t *)J->mcbot);
+}
+
+/* Free all MCode areas. */
+void lj_mcode_free(jit_State *J)
+{
+  MCode *mc = J->mcarea;
+  J->mcarea = NULL;
+  J->szallmcarea = 0;
+  while (mc) {
+    MCode *next = ((MCLink *)mc)->next;
+    size_t sz = ((MCLink *)mc)->size;
+    lj_err_deregister_mcode(mc, sz, (uint8_t *)mc + sizeof(MCLink));
+    mcode_free(J, mc, sz);
+    mc = next;
+  }
+}
+
+/* -- MCode transactions -------------------------------------------------- */
+
+/* Reserve the remainder of the current MCode area. */
+MCode *lj_mcode_reserve(jit_State *J, MCode **lim)
+{
+  if (!J->mcarea)
+    mcode_allocarea(J);
+  else
+    mcode_protect(J, MCPROT_GEN);
+  *lim = J->mcbot;
+  return J->mctop;
+}
+
+/* Commit the t
