@@ -306,4 +306,58 @@ MCode *lj_mcode_reserve(jit_State *J, MCode **lim)
   return J->mctop;
 }
 
-/* Commit the t
+/* Commit the top part of the current MCode area. */
+void lj_mcode_commit(jit_State *J, MCode *top)
+{
+  J->mctop = top;
+  mcode_protect(J, MCPROT_RUN);
+}
+
+/* Abort the reservation. */
+void lj_mcode_abort(jit_State *J)
+{
+  if (J->mcarea)
+    mcode_protect(J, MCPROT_RUN);
+}
+
+/* Set/reset protection to allow patching of MCode areas. */
+MCode *lj_mcode_patch(jit_State *J, MCode *ptr, int finish)
+{
+  if (finish) {
+#if LUAJIT_SECURITY_MCODE
+    if (J->mcarea == ptr)
+      mcode_protect(J, MCPROT_RUN);
+    else if (LJ_UNLIKELY(mcode_setprot(ptr, ((MCLink *)ptr)->size, MCPROT_RUN)))
+      mcode_protfail(J);
+#endif
+    return NULL;
+  } else {
+    MCode *mc = J->mcarea;
+    /* Try current area first to use the protection cache. */
+    if (ptr >= mc && ptr < (MCode *)((char *)mc + J->szmcarea)) {
+#if LUAJIT_SECURITY_MCODE
+      mcode_protect(J, MCPROT_GEN);
+#endif
+      return mc;
+    }
+    /* Otherwise search through the list of MCode areas. */
+    for (;;) {
+      mc = ((MCLink *)mc)->next;
+      lj_assertJ(mc != NULL, "broken MCode area chain");
+      if (ptr >= mc && ptr < (MCode *)((char *)mc + ((MCLink *)mc)->size)) {
+#if LUAJIT_SECURITY_MCODE
+	if (LJ_UNLIKELY(mcode_setprot(mc, ((MCLink *)mc)->size, MCPROT_GEN)))
+	  mcode_protfail(J);
+#endif
+	return mc;
+      }
+    }
+  }
+}
+
+/* Limit of MCode reservation reached. */
+void lj_mcode_limiterr(jit_State *J, size_t need)
+{
+  size_t sizemcode, maxmcode;
+  lj_mcode_abort(J);
+  sizemcode = (size_t)J->param[JIT_P_si
