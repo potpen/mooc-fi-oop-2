@@ -145,3 +145,115 @@ static void sink_mark_snap(jit_State *J, SnapShot *snap)
 {
   SnapEntry *map = &J->cur.snapmap[snap->mapofs];
   MSize n, nent = snap->nent;
+  for (n = 0; n < nent; n++) {
+    IRRef ref = snap_ref(map[n]);
+    if (!irref_isk(ref))
+      irt_setmark(IR(ref)->t);
+  }
+}
+
+/* Iteratively remark PHI refs with differing marks or PHI value counts. */
+static void sink_remark_phi(jit_State *J)
+{
+  IRIns *ir;
+  int remark;
+  do {
+    remark = 0;
+    for (ir = IR(J->cur.nins-1); ir->o == IR_PHI; ir--) {
+      IRIns *irl = IR(ir->op1), *irr = IR(ir->op2);
+      if (!((irl->t.irt ^ irr->t.irt) & IRT_MARK) && irl->prev == irr->prev)
+	continue;
+      remark |= (~(irl->t.irt & irr->t.irt) & IRT_MARK);
+      irt_setmark(IR(ir->op1)->t);
+      irt_setmark(IR(ir->op2)->t);
+    }
+  } while (remark);
+}
+
+/* Sweep instructions and tag sunken allocations and stores. */
+static void sink_sweep_ins(jit_State *J)
+{
+  IRIns *ir, *irbase = IR(REF_BASE);
+  for (ir = IR(J->cur.nins-1) ; ir >= irbase; ir--) {
+    switch (ir->o) {
+    case IR_ASTORE: case IR_HSTORE: case IR_FSTORE: case IR_XSTORE: {
+      IRIns *ira = sink_checkalloc(J, ir);
+      if (ira && !irt_ismarked(ira->t)) {
+	int delta = (int)(ir - ira);
+	ir->prev = REGSP(RID_SINK, delta > 255 ? 255 : delta);
+      } else {
+	ir->prev = REGSP_INIT;
+      }
+      break;
+      }
+    case IR_NEWREF:
+      if (!irt_ismarked(IR(ir->op1)->t)) {
+	ir->prev = REGSP(RID_SINK, 0);
+      } else {
+	irt_clearmark(ir->t);
+	ir->prev = REGSP_INIT;
+      }
+      break;
+#if LJ_HASFFI
+    case IR_CNEW: case IR_CNEWI:
+#endif
+    case IR_TNEW: case IR_TDUP:
+      if (!irt_ismarked(ir->t)) {
+	ir->t.irt &= ~IRT_GUARD;
+	ir->prev = REGSP(RID_SINK, 0);
+	J->cur.sinktags = 1;  /* Signal present SINK tags to assembler. */
+      } else {
+	irt_clearmark(ir->t);
+	ir->prev = REGSP_INIT;
+      }
+      break;
+    case IR_PHI: {
+      IRIns *ira = IR(ir->op2);
+      if (!irt_ismarked(ira->t) &&
+	  (ira->o == IR_TNEW || ira->o == IR_TDUP ||
+	   (LJ_HASFFI && (ira->o == IR_CNEW || ira->o == IR_CNEWI)))) {
+	ir->prev = REGSP(RID_SINK, 0);
+      } else {
+	ir->prev = REGSP_INIT;
+      }
+      break;
+      }
+    default:
+      irt_clearmark(ir->t);
+      ir->prev = REGSP_INIT;
+      break;
+    }
+  }
+  for (ir = IR(J->cur.nk); ir < irbase; ir++) {
+    irt_clearmark(ir->t);
+    ir->prev = REGSP_INIT;
+    /* The false-positive of irt_is64() for ASMREF_L (REF_NIL) is OK here. */
+    if (irt_is64(ir->t) && ir->o != IR_KNULL)
+      ir++;
+  }
+}
+
+/* Allocation sinking and store sinking.
+**
+** 1. Mark all non-sinkable allocations.
+** 2. Then sink all remaining allocations and the related stores.
+*/
+void lj_opt_sink(jit_State *J)
+{
+  const uint32_t need = (JIT_F_OPT_SINK|JIT_F_OPT_FWD|
+			 JIT_F_OPT_DCE|JIT_F_OPT_CSE|JIT_F_OPT_FOLD);
+  if ((J->flags & need) == need &&
+      (J->chain[IR_TNEW] || J->chain[IR_TDUP] ||
+       (LJ_HASFFI && (J->chain[IR_CNEW] || J->chain[IR_CNEWI])))) {
+    if (!J->loopref)
+      sink_mark_snap(J, &J->cur.snap[J->cur.nsnap-1]);
+    sink_mark_ins(J);
+    if (J->loopref)
+      sink_remark_phi(J);
+    sink_sweep_ins(J);
+  }
+}
+
+#undef IR
+
+#endif
