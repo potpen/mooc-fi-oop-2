@@ -2044,3 +2044,560 @@ static TRef kfold_xload(jit_State *J, IRIns *ir, const void *p)
   }
   return lj_ir_kint(J, k);
 }
+
+/* Turn: string.sub(str, a, b) == kstr
+** into: string.byte(str, a) == string.byte(kstr, 1) etc.
+** Note: this creates unaligned XLOADs on x86/x64.
+*/
+LJFOLD(EQ SNEW KGC)
+LJFOLD(NE SNEW KGC)
+LJFOLDF(merge_eqne_snew_kgc)
+{
+  GCstr *kstr = ir_kstr(fright);
+  int32_t len = (int32_t)kstr->len;
+  lj_assertJ(irt_isstr(fins->t), "bad equality IR type");
+
+#if LJ_TARGET_UNALIGNED
+#define FOLD_SNEW_MAX_LEN	4  /* Handle string lengths 0, 1, 2, 3, 4. */
+#define FOLD_SNEW_TYPE8		IRT_I8	/* Creates shorter immediates. */
+#else
+#define FOLD_SNEW_MAX_LEN	1  /* Handle string lengths 0 or 1. */
+#define FOLD_SNEW_TYPE8		IRT_U8  /* Prefer unsigned loads. */
+#endif
+
+  PHIBARRIER(fleft);
+  if (len <= FOLD_SNEW_MAX_LEN) {
+    IROp op = (IROp)fins->o;
+    IRRef strref = fleft->op1;
+    if (IR(strref)->o != IR_STRREF)
+      return NEXTFOLD;
+    if (op == IR_EQ) {
+      emitir(IRTGI(IR_EQ), fleft->op2, lj_ir_kint(J, len));
+      /* Caveat: fins/fleft/fright is no longer valid after emitir. */
+    } else {
+      /* NE is not expanded since this would need an OR of two conds. */
+      if (!irref_isk(fleft->op2))  /* Only handle the constant length case. */
+	return NEXTFOLD;
+      if (IR(fleft->op2)->i != len)
+	return DROPFOLD;
+    }
+    if (len > 0) {
+      /* A 4 byte load for length 3 is ok -- all strings have an extra NUL. */
+      uint16_t ot = (uint16_t)(len == 1 ? IRT(IR_XLOAD, FOLD_SNEW_TYPE8) :
+			       len == 2 ? IRT(IR_XLOAD, IRT_U16) :
+			       IRTI(IR_XLOAD));
+      TRef tmp = emitir(ot, strref,
+			IRXLOAD_READONLY | (len > 1 ? IRXLOAD_UNALIGNED : 0));
+      TRef val = kfold_xload(J, IR(tref_ref(tmp)), strdata(kstr));
+      if (len == 3)
+	tmp = emitir(IRTI(IR_BAND), tmp,
+		     lj_ir_kint(J, LJ_ENDIAN_SELECT(0x00ffffff, 0xffffff00)));
+      fins->op1 = (IRRef1)tmp;
+      fins->op2 = (IRRef1)val;
+      fins->ot = (IROpT)IRTGI(op);
+      return RETRYFOLD;
+    } else {
+      return DROPFOLD;
+    }
+  }
+  return NEXTFOLD;
+}
+
+/* -- Loads --------------------------------------------------------------- */
+
+/* Loads cannot be folded or passed on to CSE in general.
+** Alias analysis is needed to check for forwarding opportunities.
+**
+** Caveat: *all* loads must be listed here or they end up at CSE!
+*/
+
+LJFOLD(ALOAD any)
+LJFOLDX(lj_opt_fwd_aload)
+
+/* From HREF fwd (see below). Must eliminate, not supported by fwd/backend. */
+LJFOLD(HLOAD KKPTR)
+LJFOLDF(kfold_hload_kkptr)
+{
+  UNUSED(J);
+  lj_assertJ(ir_kptr(fleft) == niltvg(J2G(J)), "expected niltv");
+  return TREF_NIL;
+}
+
+LJFOLD(HLOAD any)
+LJFOLDX(lj_opt_fwd_hload)
+
+LJFOLD(ULOAD any)
+LJFOLDX(lj_opt_fwd_uload)
+
+LJFOLD(ALEN any any)
+LJFOLDX(lj_opt_fwd_alen)
+
+/* Upvalue refs are really loads, but there are no corresponding stores.
+** So CSE is ok for them, except for UREFO across a GC step (see below).
+** If the referenced function is const, its upvalue addresses are const, too.
+** This can be used to improve CSE by looking for the same address,
+** even if the upvalues originate from a different function.
+*/
+LJFOLD(UREFO KGC any)
+LJFOLD(UREFC KGC any)
+LJFOLDF(cse_uref)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_CSE)) {
+    IRRef ref = J->chain[fins->o];
+    GCfunc *fn = ir_kfunc(fleft);
+    GCupval *uv = gco2uv(gcref(fn->l.uvptr[(fins->op2 >> 8)]));
+    while (ref > 0) {
+      IRIns *ir = IR(ref);
+      if (irref_isk(ir->op1)) {
+	GCfunc *fn2 = ir_kfunc(IR(ir->op1));
+	if (gco2uv(gcref(fn2->l.uvptr[(ir->op2 >> 8)])) == uv) {
+	  if (fins->o == IR_UREFO && gcstep_barrier(J, ref))
+	    break;
+	  return ref;
+	}
+      }
+      ref = ir->prev;
+    }
+  }
+  return EMITFOLD;
+}
+
+LJFOLD(HREFK any any)
+LJFOLDX(lj_opt_fwd_hrefk)
+
+LJFOLD(HREF TNEW any)
+LJFOLDF(fwd_href_tnew)
+{
+  if (lj_opt_fwd_href_nokey(J))
+    return lj_ir_kkptr(J, niltvg(J2G(J)));
+  return NEXTFOLD;
+}
+
+LJFOLD(HREF TDUP KPRI)
+LJFOLD(HREF TDUP KGC)
+LJFOLD(HREF TDUP KNUM)
+LJFOLDF(fwd_href_tdup)
+{
+  TValue keyv;
+  lj_ir_kvalue(J->L, &keyv, fright);
+  if (lj_tab_get(J->L, ir_ktab(IR(fleft->op1)), &keyv) == niltvg(J2G(J)) &&
+      lj_opt_fwd_href_nokey(J))
+    return lj_ir_kkptr(J, niltvg(J2G(J)));
+  return NEXTFOLD;
+}
+
+/* We can safely FOLD/CSE array/hash refs and field loads, since there
+** are no corresponding stores. But we need to check for any NEWREF with
+** an aliased table, as it may invalidate all of the pointers and fields.
+** Only HREF needs the NEWREF check -- AREF and HREFK already depend on
+** FLOADs. And NEWREF itself is treated like a store (see below).
+** LREF is constant (per trace) since coroutine switches are not inlined.
+*/
+LJFOLD(FLOAD TNEW IRFL_TAB_ASIZE)
+LJFOLDF(fload_tab_tnew_asize)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && lj_opt_fwd_tptr(J, fins->op1))
+    return INTFOLD(fleft->op1);
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD TNEW IRFL_TAB_HMASK)
+LJFOLDF(fload_tab_tnew_hmask)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && lj_opt_fwd_tptr(J, fins->op1))
+    return INTFOLD((1 << fleft->op2)-1);
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD TDUP IRFL_TAB_ASIZE)
+LJFOLDF(fload_tab_tdup_asize)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && lj_opt_fwd_tptr(J, fins->op1))
+    return INTFOLD((int32_t)ir_ktab(IR(fleft->op1))->asize);
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD TDUP IRFL_TAB_HMASK)
+LJFOLDF(fload_tab_tdup_hmask)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && lj_opt_fwd_tptr(J, fins->op1))
+    return INTFOLD((int32_t)ir_ktab(IR(fleft->op1))->hmask);
+  return NEXTFOLD;
+}
+
+LJFOLD(HREF any any)
+LJFOLD(FLOAD any IRFL_TAB_ARRAY)
+LJFOLD(FLOAD any IRFL_TAB_NODE)
+LJFOLD(FLOAD any IRFL_TAB_ASIZE)
+LJFOLD(FLOAD any IRFL_TAB_HMASK)
+LJFOLDF(fload_tab_ah)
+{
+  TRef tr = lj_opt_cse(J);
+  return lj_opt_fwd_tptr(J, tref_ref(tr)) ? tr : EMITFOLD;
+}
+
+/* Strings are immutable, so we can safely FOLD/CSE the related FLOAD. */
+LJFOLD(FLOAD KGC IRFL_STR_LEN)
+LJFOLDF(fload_str_len_kgc)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
+    return INTFOLD((int32_t)ir_kstr(fleft)->len);
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD SNEW IRFL_STR_LEN)
+LJFOLDF(fload_str_len_snew)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD)) {
+    PHIBARRIER(fleft);
+    return fleft->op2;
+  }
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD TOSTR IRFL_STR_LEN)
+LJFOLDF(fload_str_len_tostr)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && fleft->op2 == IRTOSTR_CHAR)
+    return INTFOLD(1);
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD any IRFL_SBUF_W)
+LJFOLD(FLOAD any IRFL_SBUF_E)
+LJFOLD(FLOAD any IRFL_SBUF_B)
+LJFOLD(FLOAD any IRFL_SBUF_L)
+LJFOLD(FLOAD any IRFL_SBUF_REF)
+LJFOLD(FLOAD any IRFL_SBUF_R)
+LJFOLDF(fload_sbuf)
+{
+  TRef tr = lj_opt_fwd_fload(J);
+  return lj_opt_fwd_sbuf(J, tref_ref(tr)) ? tr : EMITFOLD;
+}
+
+/* The fast function ID of function objects is immutable. */
+LJFOLD(FLOAD KGC IRFL_FUNC_FFID)
+LJFOLDF(fload_func_ffid_kgc)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
+    return INTFOLD((int32_t)ir_kfunc(fleft)->c.ffid);
+  return NEXTFOLD;
+}
+
+/* The C type ID of cdata objects is immutable. */
+LJFOLD(FLOAD KGC IRFL_CDATA_CTYPEID)
+LJFOLDF(fload_cdata_typeid_kgc)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
+    return INTFOLD((int32_t)ir_kcdata(fleft)->ctypeid);
+  return NEXTFOLD;
+}
+
+/* Get the contents of immutable cdata objects. */
+LJFOLD(FLOAD KGC IRFL_CDATA_PTR)
+LJFOLD(FLOAD KGC IRFL_CDATA_INT)
+LJFOLD(FLOAD KGC IRFL_CDATA_INT64)
+LJFOLDF(fload_cdata_int64_kgc)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD)) {
+    void *p = cdataptr(ir_kcdata(fleft));
+    if (irt_is64(fins->t))
+      return INT64FOLD(*(uint64_t *)p);
+    else
+      return INTFOLD(*(int32_t *)p);
+  }
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD CNEW IRFL_CDATA_CTYPEID)
+LJFOLD(FLOAD CNEWI IRFL_CDATA_CTYPEID)
+LJFOLDF(fload_cdata_typeid_cnew)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
+    return fleft->op1;  /* No PHI barrier needed. CNEW/CNEWI op1 is const. */
+  return NEXTFOLD;
+}
+
+/* Pointer, int and int64 cdata objects are immutable. */
+LJFOLD(FLOAD CNEWI IRFL_CDATA_PTR)
+LJFOLD(FLOAD CNEWI IRFL_CDATA_INT)
+LJFOLD(FLOAD CNEWI IRFL_CDATA_INT64)
+LJFOLDF(fload_cdata_ptr_int64_cnew)
+{
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
+    return fleft->op2;  /* Fold even across PHI to avoid allocations. */
+  return NEXTFOLD;
+}
+
+LJFOLD(FLOAD any IRFL_STR_LEN)
+LJFOLD(FLOAD any IRFL_FUNC_ENV)
+LJFOLD(FLOAD any IRFL_THREAD_ENV)
+LJFOLD(FLOAD any IRFL_CDATA_CTYPEID)
+LJFOLD(FLOAD any IRFL_CDATA_PTR)
+LJFOLD(FLOAD any IRFL_CDATA_INT)
+LJFOLD(FLOAD any IRFL_CDATA_INT64)
+LJFOLD(VLOAD any any)  /* Vararg loads have no corresponding stores. */
+LJFOLDX(lj_opt_cse)
+
+/* All other field loads need alias analysis. */
+LJFOLD(FLOAD any any)
+LJFOLDX(lj_opt_fwd_fload)
+
+/* This is for LOOP only. Recording handles SLOADs internally. */
+LJFOLD(SLOAD any any)
+LJFOLDF(fwd_sload)
+{
+  if ((fins->op2 & IRSLOAD_FRAME)) {
+    TRef tr = lj_opt_cse(J);
+    return tref_ref(tr) < J->chain[IR_RETF] ? EMITFOLD : tr;
+  } else {
+    lj_assertJ(J->slot[fins->op1] != 0, "uninitialized slot accessed");
+    return J->slot[fins->op1];
+  }
+}
+
+/* Only fold for KKPTR. The pointer _and_ the contents must be const. */
+LJFOLD(XLOAD KKPTR any)
+LJFOLDF(xload_kptr)
+{
+  TRef tr = kfold_xload(J, fins, ir_kptr(fleft));
+  return tr ? tr : NEXTFOLD;
+}
+
+LJFOLD(XLOAD any any)
+LJFOLDX(lj_opt_fwd_xload)
+
+/* -- Frame handling ------------------------------------------------------ */
+
+/* Prevent CSE of a REF_BASE operand across IR_RETF. */
+LJFOLD(SUB any BASE)
+LJFOLD(SUB BASE any)
+LJFOLD(EQ any BASE)
+LJFOLDF(fold_base)
+{
+  return lj_opt_cselim(J, J->chain[IR_RETF]);
+}
+
+/* -- Write barriers ------------------------------------------------------ */
+
+/* Write barriers are amenable to CSE, but not across any incremental
+** GC steps.
+**
+** The same logic applies to open upvalue references, because a stack
+** may be resized during a GC step (not the current stack, but maybe that
+** of a coroutine).
+*/
+LJFOLD(TBAR any)
+LJFOLD(OBAR any any)
+LJFOLD(UREFO any any)
+LJFOLDF(barrier_tab)
+{
+  TRef tr = lj_opt_cse(J);
+  if (gcstep_barrier(J, tref_ref(tr)))  /* CSE across GC step? */
+    return EMITFOLD;  /* Raw emit. Assumes fins is left intact by CSE. */
+  return tr;
+}
+
+LJFOLD(TBAR TNEW)
+LJFOLD(TBAR TDUP)
+LJFOLDF(barrier_tnew_tdup)
+{
+  /* New tables are always white and never need a barrier. */
+  if (fins->op1 < J->chain[IR_LOOP])  /* Except across a GC step. */
+    return NEXTFOLD;
+  return DROPFOLD;
+}
+
+/* -- Profiling ----------------------------------------------------------- */
+
+LJFOLD(PROF any any)
+LJFOLDF(prof)
+{
+  IRRef ref = J->chain[IR_PROF];
+  if (ref+1 == J->cur.nins)  /* Drop neighbouring IR_PROF. */
+    return ref;
+  return EMITFOLD;
+}
+
+/* -- Stores and allocations ---------------------------------------------- */
+
+/* Stores and allocations cannot be folded or passed on to CSE in general.
+** But some stores can be eliminated with dead-store elimination (DSE).
+**
+** Caveat: *all* stores and allocs must be listed here or they end up at CSE!
+*/
+
+LJFOLD(ASTORE any any)
+LJFOLD(HSTORE any any)
+LJFOLDX(lj_opt_dse_ahstore)
+
+LJFOLD(USTORE any any)
+LJFOLDX(lj_opt_dse_ustore)
+
+LJFOLD(FSTORE any any)
+LJFOLDX(lj_opt_dse_fstore)
+
+LJFOLD(XSTORE any any)
+LJFOLDX(lj_opt_dse_xstore)
+
+LJFOLD(NEWREF any any)  /* Treated like a store. */
+LJFOLD(TMPREF any any)
+LJFOLD(CALLA any any)
+LJFOLD(CALLL any any)  /* Safeguard fallback. */
+LJFOLD(CALLS any any)
+LJFOLD(CALLXS any any)
+LJFOLD(XBAR)
+LJFOLD(RETF any any)  /* Modifies BASE. */
+LJFOLD(TNEW any any)
+LJFOLD(TDUP any)
+LJFOLD(CNEW any any)
+LJFOLD(XSNEW any any)
+LJFOLDX(lj_ir_emit)
+
+/* ------------------------------------------------------------------------ */
+
+/* Every entry in the generated hash table is a 32 bit pattern:
+**
+** xxxxxxxx iiiiiii lllllll rrrrrrrrrr
+**
+**   xxxxxxxx = 8 bit index into fold function table
+**    iiiiiii = 7 bit folded instruction opcode
+**    lllllll = 7 bit left instruction opcode
+** rrrrrrrrrr = 8 bit right instruction opcode or 10 bits from literal field
+*/
+
+#include "lj_folddef.h"
+
+/* ------------------------------------------------------------------------ */
+
+/* Fold IR instruction. */
+TRef LJ_FASTCALL lj_opt_fold(jit_State *J)
+{
+  uint32_t key, any;
+  IRRef ref;
+
+  if (LJ_UNLIKELY((J->flags & JIT_F_OPT_MASK) != JIT_F_OPT_DEFAULT)) {
+    lj_assertJ(((JIT_F_OPT_FOLD|JIT_F_OPT_FWD|JIT_F_OPT_CSE|JIT_F_OPT_DSE) |
+		JIT_F_OPT_DEFAULT) == JIT_F_OPT_DEFAULT,
+	       "bad JIT_F_OPT_DEFAULT");
+    /* Folding disabled? Chain to CSE, but not for loads/stores/allocs. */
+    if (!(J->flags & JIT_F_OPT_FOLD) && irm_kind(lj_ir_mode[fins->o]) == IRM_N)
+      return lj_opt_cse(J);
+
+    /* No FOLD, forwarding or CSE? Emit raw IR for loads, except for SLOAD. */
+    if ((J->flags & (JIT_F_OPT_FOLD|JIT_F_OPT_FWD|JIT_F_OPT_CSE)) !=
+		    (JIT_F_OPT_FOLD|JIT_F_OPT_FWD|JIT_F_OPT_CSE) &&
+	irm_kind(lj_ir_mode[fins->o]) == IRM_L && fins->o != IR_SLOAD)
+      return lj_ir_emit(J);
+
+    /* No FOLD or DSE? Emit raw IR for stores. */
+    if ((J->flags & (JIT_F_OPT_FOLD|JIT_F_OPT_DSE)) !=
+		    (JIT_F_OPT_FOLD|JIT_F_OPT_DSE) &&
+	irm_kind(lj_ir_mode[fins->o]) == IRM_S)
+      return lj_ir_emit(J);
+  }
+
+  /* Fold engine start/retry point. */
+retry:
+  /* Construct key from opcode and operand opcodes (unless literal/none). */
+  key = ((uint32_t)fins->o << 17);
+  if (fins->op1 >= J->cur.nk) {
+    key += (uint32_t)IR(fins->op1)->o << 10;
+    *fleft = *IR(fins->op1);
+    if (fins->op1 < REF_TRUE)
+      fleft[1] = IR(fins->op1)[1];
+  }
+  if (fins->op2 >= J->cur.nk) {
+    key += (uint32_t)IR(fins->op2)->o;
+    *fright = *IR(fins->op2);
+    if (fins->op2 < REF_TRUE)
+      fright[1] = IR(fins->op2)[1];
+  } else {
+    key += (fins->op2 & 0x3ffu);  /* Literal mask. Must include IRCONV_*MASK. */
+  }
+
+  /* Check for a match in order from most specific to least specific. */
+  any = 0;
+  for (;;) {
+    uint32_t k = key | (any & 0x1ffff);
+    uint32_t h = fold_hashkey(k);
+    uint32_t fh = fold_hash[h];  /* Lookup key in semi-perfect hash table. */
+    if ((fh & 0xffffff) == k || (fh = fold_hash[h+1], (fh & 0xffffff) == k)) {
+      ref = (IRRef)tref_ref(fold_func[fh >> 24](J));
+      if (ref != NEXTFOLD)
+	break;
+    }
+    if (any == 0xfffff)  /* Exhausted folding. Pass on to CSE. */
+      return lj_opt_cse(J);
+    any = (any | (any >> 10)) ^ 0xffc00;
+  }
+
+  /* Return value processing, ordered by frequency. */
+  if (LJ_LIKELY(ref >= MAX_FOLD))
+    return TREF(ref, irt_t(IR(ref)->t));
+  if (ref == RETRYFOLD)
+    goto retry;
+  if (ref == KINTFOLD)
+    return lj_ir_kint(J, fins->i);
+  if (ref == FAILFOLD)
+    lj_trace_err(J, LJ_TRERR_GFAIL);
+  lj_assertJ(ref == DROPFOLD, "bad fold result");
+  return REF_DROP;
+}
+
+/* -- Common-Subexpression Elimination ------------------------------------ */
+
+/* CSE an IR instruction. This is very fast due to the skip-list chains. */
+TRef LJ_FASTCALL lj_opt_cse(jit_State *J)
+{
+  /* Avoid narrow to wide store-to-load forwarding stall */
+  IRRef2 op12 = (IRRef2)fins->op1 + ((IRRef2)fins->op2 << 16);
+  IROp op = fins->o;
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_CSE)) {
+    /* Limited search for same operands in per-opcode chain. */
+    IRRef ref = J->chain[op];
+    IRRef lim = fins->op1;
+    if (fins->op2 > lim) lim = fins->op2;  /* Relies on lit < REF_BIAS. */
+    while (ref > lim) {
+      if (IR(ref)->op12 == op12)
+	return TREF(ref, irt_t(IR(ref)->t));  /* Common subexpression found. */
+      ref = IR(ref)->prev;
+    }
+  }
+  /* Otherwise emit IR (inlined for speed). */
+  {
+    IRRef ref = lj_ir_nextins(J);
+    IRIns *ir = IR(ref);
+    ir->prev = J->chain[op];
+    ir->op12 = op12;
+    J->chain[op] = (IRRef1)ref;
+    ir->o = fins->o;
+    J->guardemit.irt |= fins->t.irt;
+    return TREF(ref, irt_t((ir->t = fins->t)));
+  }
+}
+
+/* CSE with explicit search limit. */
+TRef LJ_FASTCALL lj_opt_cselim(jit_State *J, IRRef lim)
+{
+  IRRef ref = J->chain[fins->o];
+  IRRef2 op12 = (IRRef2)fins->op1 + ((IRRef2)fins->op2 << 16);
+  while (ref > lim) {
+    if (IR(ref)->op12 == op12)
+      return ref;
+    ref = IR(ref)->prev;
+  }
+  return lj_ir_emit(J);
+}
+
+/* ------------------------------------------------------------------------ */
+
+#undef IR
+#undef fins
+#undef fleft
+#undef fright
+#undef knumleft
+#undef knumright
+#undef emitir
+
+#endif
