@@ -70,4 +70,46 @@ typedef struct ExpDesc {
 /* Macros for expressions. */
 #define expr_hasjump(e)		((e)->t != (e)->f)
 
-#
+#define expr_isk(e)		((e)->k <= VKLAST)
+#define expr_isk_nojump(e)	(expr_isk(e) && !expr_hasjump(e))
+#define expr_isnumk(e)		((e)->k == VKNUM)
+#define expr_isnumk_nojump(e)	(expr_isnumk(e) && !expr_hasjump(e))
+#define expr_isstrk(e)		((e)->k == VKSTR)
+
+#define expr_numtv(e)		check_exp(expr_isnumk((e)), &(e)->u.nval)
+#define expr_numberV(e)		numberVnum(expr_numtv((e)))
+
+/* Initialize expression. */
+static LJ_AINLINE void expr_init(ExpDesc *e, ExpKind k, uint32_t info)
+{
+  e->k = k;
+  e->u.s.info = info;
+  e->f = e->t = NO_JMP;
+}
+
+/* Check number constant for +-0. */
+static int expr_numiszero(ExpDesc *e)
+{
+  TValue *o = expr_numtv(e);
+  return tvisint(o) ? (intV(o) == 0) : tviszero(o);
+}
+
+/* Per-function linked list of scope blocks. */
+typedef struct FuncScope {
+  struct FuncScope *prev;	/* Link to outer scope. */
+  MSize vstart;			/* Start of block-local variables. */
+  uint8_t nactvar;		/* Number of active vars outside the scope. */
+  uint8_t flags;		/* Scope flags. */
+} FuncScope;
+
+#define FSCOPE_LOOP		0x01	/* Scope is a (breakable) loop. */
+#define FSCOPE_BREAK		0x02	/* Break used in scope. */
+#define FSCOPE_GOLA		0x04	/* Goto or label used in scope. */
+#define FSCOPE_UPVAL		0x08	/* Upvalue in scope. */
+#define FSCOPE_NOCLOSE		0x10	/* Do not close upvalues. */
+
+#define NAME_BREAK		((GCstr *)(uintptr_t)1)
+
+/* Index into variable stack. */
+typedef uint16_t VarIndex;
+#define LJ_M
