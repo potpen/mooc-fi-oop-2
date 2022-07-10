@@ -112,4 +112,34 @@ typedef struct FuncScope {
 
 /* Index into variable stack. */
 typedef uint16_t VarIndex;
-#define LJ_M
+#define LJ_MAX_VSTACK		(65536 - LJ_MAX_UPVAL)
+
+/* Variable/goto/label info. */
+#define VSTACK_VAR_RW		0x01	/* R/W variable. */
+#define VSTACK_GOTO		0x02	/* Pending goto. */
+#define VSTACK_LABEL		0x04	/* Label. */
+
+/* Per-function state. */
+typedef struct FuncState {
+  GCtab *kt;			/* Hash table for constants. */
+  LexState *ls;			/* Lexer state. */
+  lua_State *L;			/* Lua state. */
+  FuncScope *bl;		/* Current scope. */
+  struct FuncState *prev;	/* Enclosing function. */
+  BCPos pc;			/* Next bytecode position. */
+  BCPos lasttarget;		/* Bytecode position of last jump target. */
+  BCPos jpc;			/* Pending jump list to next bytecode. */
+  BCReg freereg;		/* First free register. */
+  BCReg nactvar;		/* Number of active local variables. */
+  BCReg nkn, nkgc;		/* Number of lua_Number/GCobj constants */
+  BCLine linedefined;		/* First line of the function definition. */
+  BCInsLine *bcbase;		/* Base of bytecode stack. */
+  BCPos bclim;			/* Limit of bytecode stack. */
+  MSize vbase;			/* Base of variable stack for this function. */
+  uint8_t flags;		/* Prototype flags. */
+  uint8_t numparams;		/* Number of parameters. */
+  uint8_t framesize;		/* Fixed frame size. */
+  uint8_t nuv;			/* Number of upvalues */
+  VarIndex varmap[LJ_MAX_LOCVAR];  /* Map from register to variable idx. */
+  VarIndex uvmap[LJ_MAX_UPVAL];	/* Map from upvalue to variable idx. */
+  VarIndex uvtmp[LJ_MAX_UPVAL];	
