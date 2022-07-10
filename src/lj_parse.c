@@ -184,4 +184,53 @@ LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
 {
   if (fs->linedefined == 0)
-    lj_lex_error(fs->ls, 0
+    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMM, limit, what);
+  else
+    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMF, fs->linedefined, limit, what);
+}
+
+#define checklimit(fs, v, l, m)		if ((v) >= (l)) err_limit(fs, l, m)
+#define checklimitgt(fs, v, l, m)	if ((v) > (l)) err_limit(fs, l, m)
+#define checkcond(ls, c, em)		{ if (!(c)) err_syntax(ls, em); }
+
+/* -- Management of constants --------------------------------------------- */
+
+/* Return bytecode encoding for primitive constant. */
+#define const_pri(e)		check_exp((e)->k <= VKTRUE, (e)->k)
+
+#define tvhaskslot(o)	((o)->u32.hi == 0)
+#define tvkslot(o)	((o)->u32.lo)
+
+/* Add a number constant. */
+static BCReg const_num(FuncState *fs, ExpDesc *e)
+{
+  lua_State *L = fs->L;
+  TValue *o;
+  lj_assertFS(expr_isnumk(e), "bad usage");
+  o = lj_tab_set(L, fs->kt, &e->u.nval);
+  if (tvhaskslot(o))
+    return tvkslot(o);
+  o->u64 = fs->nkn;
+  return fs->nkn++;
+}
+
+/* Add a GC object constant. */
+static BCReg const_gc(FuncState *fs, GCobj *gc, uint32_t itype)
+{
+  lua_State *L = fs->L;
+  TValue key, *o;
+  setgcV(L, &key, gc, itype);
+  /* NOBARRIER: the key is new or kept alive. */
+  o = lj_tab_set(L, fs->kt, &key);
+  if (tvhaskslot(o))
+    return tvkslot(o);
+  o->u64 = fs->nkgc;
+  return fs->nkgc++;
+}
+
+/* Add a string constant. */
+static BCReg const_str(FuncState *fs, ExpDesc *e)
+{
+  lj_assertFS(expr_isstrk(e) || e->k == VGLOBAL, "bad usage");
+  return const_gc(fs, obj2gco(e->u.sval), LJ_TSTR);
+}
