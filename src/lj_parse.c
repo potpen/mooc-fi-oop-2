@@ -142,4 +142,46 @@ typedef struct FuncState {
   uint8_t nuv;			/* Number of upvalues */
   VarIndex varmap[LJ_MAX_LOCVAR];  /* Map from register to variable idx. */
   VarIndex uvmap[LJ_MAX_UPVAL];	/* Map from upvalue to variable idx. */
-  VarIndex uvtmp[LJ_MAX_UPVAL];	
+  VarIndex uvtmp[LJ_MAX_UPVAL];	/* Temporary upvalue map. */
+} FuncState;
+
+/* Binary and unary operators. ORDER OPR */
+typedef enum BinOpr {
+  OPR_ADD, OPR_SUB, OPR_MUL, OPR_DIV, OPR_MOD, OPR_POW,  /* ORDER ARITH */
+  OPR_CONCAT,
+  OPR_NE, OPR_EQ,
+  OPR_LT, OPR_GE, OPR_LE, OPR_GT,
+  OPR_AND, OPR_OR,
+  OPR_NOBINOPR
+} BinOpr;
+
+LJ_STATIC_ASSERT((int)BC_ISGE-(int)BC_ISLT == (int)OPR_GE-(int)OPR_LT);
+LJ_STATIC_ASSERT((int)BC_ISLE-(int)BC_ISLT == (int)OPR_LE-(int)OPR_LT);
+LJ_STATIC_ASSERT((int)BC_ISGT-(int)BC_ISLT == (int)OPR_GT-(int)OPR_LT);
+LJ_STATIC_ASSERT((int)BC_SUBVV-(int)BC_ADDVV == (int)OPR_SUB-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_MULVV-(int)BC_ADDVV == (int)OPR_MUL-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_DIVVV-(int)BC_ADDVV == (int)OPR_DIV-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_MODVV-(int)BC_ADDVV == (int)OPR_MOD-(int)OPR_ADD);
+
+#ifdef LUA_USE_ASSERT
+#define lj_assertFS(c, ...)	(lj_assertG_(G(fs->L), (c), __VA_ARGS__))
+#else
+#define lj_assertFS(c, ...)	((void)fs)
+#endif
+
+/* -- Error handling ------------------------------------------------------ */
+
+LJ_NORET LJ_NOINLINE static void err_syntax(LexState *ls, ErrMsg em)
+{
+  lj_lex_error(ls, ls->tok, em);
+}
+
+LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
+{
+  lj_lex_error(ls, ls->tok, LJ_ERR_XTOKEN, lj_lex_token2str(ls, tok));
+}
+
+LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
+{
+  if (fs->linedefined == 0)
+    lj_lex_error(fs->ls, 0
