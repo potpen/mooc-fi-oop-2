@@ -234,3 +234,54 @@ static BCReg const_str(FuncState *fs, ExpDesc *e)
   lj_assertFS(expr_isstrk(e) || e->k == VGLOBAL, "bad usage");
   return const_gc(fs, obj2gco(e->u.sval), LJ_TSTR);
 }
+
+/* Anchor string constant to avoid GC. */
+GCstr *lj_parse_keepstr(LexState *ls, const char *str, size_t len)
+{
+  /* NOBARRIER: the key is new or kept alive. */
+  lua_State *L = ls->L;
+  GCstr *s = lj_str_new(L, str, len);
+  TValue *tv = lj_tab_setstr(L, ls->fs->kt, s);
+  if (tvisnil(tv)) setboolV(tv, 1);
+  lj_gc_check(L);
+  return s;
+}
+
+#if LJ_HASFFI
+/* Anchor cdata to avoid GC. */
+void lj_parse_keepcdata(LexState *ls, TValue *tv, GCcdata *cd)
+{
+  /* NOBARRIER: the key is new or kept alive. */
+  lua_State *L = ls->L;
+  setcdataV(L, tv, cd);
+  setboolV(lj_tab_set(L, ls->fs->kt, tv), 1);
+}
+#endif
+
+/* -- Jump list handling -------------------------------------------------- */
+
+/* Get next element in jump list. */
+static BCPos jmp_next(FuncState *fs, BCPos pc)
+{
+  ptrdiff_t delta = bc_j(fs->bcbase[pc].ins);
+  if ((BCPos)delta == NO_JMP)
+    return NO_JMP;
+  else
+    return (BCPos)(((ptrdiff_t)pc+1)+delta);
+}
+
+/* Check if any of the instructions on the jump list produce no value. */
+static int jmp_novalue(FuncState *fs, BCPos list)
+{
+  for (; list != NO_JMP; list = jmp_next(fs, list)) {
+    BCIns p = fs->bcbase[list >= 1 ? list-1 : list].ins;
+    if (!(bc_op(p) == BC_ISTC || bc_op(p) == BC_ISFC || bc_a(p) == NO_REG))
+      return 1;
+  }
+  return 0;
+}
+
+/* Patch register of test instructions. */
+static int jmp_patchtestreg(FuncState *fs, BCPos pc, BCReg reg)
+{
+  BCInsLine *ilp = &f
