@@ -335,4 +335,55 @@ static void jmp_append(FuncState *fs, BCPos *l1, BCPos l2)
   } else {
     BCPos list = *l1;
     BCPos next;
-    while 
+    while ((next = jmp_next(fs, list)) != NO_JMP)  /* Find last element. */
+      list = next;
+    jmp_patchins(fs, list, l2);
+  }
+}
+
+/* Patch jump list and preserve produced values. */
+static void jmp_patchval(FuncState *fs, BCPos list, BCPos vtarget,
+			 BCReg reg, BCPos dtarget)
+{
+  while (list != NO_JMP) {
+    BCPos next = jmp_next(fs, list);
+    if (jmp_patchtestreg(fs, list, reg))
+      jmp_patchins(fs, list, vtarget);  /* Jump to target with value. */
+    else
+      jmp_patchins(fs, list, dtarget);  /* Jump to default target. */
+    list = next;
+  }
+}
+
+/* Jump to following instruction. Append to list of pending jumps. */
+static void jmp_tohere(FuncState *fs, BCPos list)
+{
+  fs->lasttarget = fs->pc;
+  jmp_append(fs, &fs->jpc, list);
+}
+
+/* Patch jump list to target. */
+static void jmp_patch(FuncState *fs, BCPos list, BCPos target)
+{
+  if (target == fs->pc) {
+    jmp_tohere(fs, list);
+  } else {
+    lj_assertFS(target < fs->pc, "bad jump target");
+    jmp_patchval(fs, list, target, NO_REG, target);
+  }
+}
+
+/* -- Bytecode register allocator ----------------------------------------- */
+
+/* Bump frame size. */
+static void bcreg_bump(FuncState *fs, BCReg n)
+{
+  BCReg sz = fs->freereg + n;
+  if (sz > fs->framesize) {
+    if (sz >= LJ_MAX_SLOTS)
+      err_syntax(fs->ls, LJ_ERR_XSLOTS);
+    fs->framesize = (uint8_t)sz;
+  }
+}
+
+/* Reserve registers. *
