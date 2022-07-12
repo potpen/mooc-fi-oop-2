@@ -284,4 +284,55 @@ static int jmp_novalue(FuncState *fs, BCPos list)
 /* Patch register of test instructions. */
 static int jmp_patchtestreg(FuncState *fs, BCPos pc, BCReg reg)
 {
-  BCInsLine *ilp = &f
+  BCInsLine *ilp = &fs->bcbase[pc >= 1 ? pc-1 : pc];
+  BCOp op = bc_op(ilp->ins);
+  if (op == BC_ISTC || op == BC_ISFC) {
+    if (reg != NO_REG && reg != bc_d(ilp->ins)) {
+      setbc_a(&ilp->ins, reg);
+    } else {  /* Nothing to store or already in the right register. */
+      setbc_op(&ilp->ins, op+(BC_IST-BC_ISTC));
+      setbc_a(&ilp->ins, 0);
+    }
+  } else if (bc_a(ilp->ins) == NO_REG) {
+    if (reg == NO_REG) {
+      ilp->ins = BCINS_AJ(BC_JMP, bc_a(fs->bcbase[pc].ins), 0);
+    } else {
+      setbc_a(&ilp->ins, reg);
+      if (reg >= bc_a(ilp[1].ins))
+	setbc_a(&ilp[1].ins, reg+1);
+    }
+  } else {
+    return 0;  /* Cannot patch other instructions. */
+  }
+  return 1;
+}
+
+/* Drop values for all instructions on jump list. */
+static void jmp_dropval(FuncState *fs, BCPos list)
+{
+  for (; list != NO_JMP; list = jmp_next(fs, list))
+    jmp_patchtestreg(fs, list, NO_REG);
+}
+
+/* Patch jump instruction to target. */
+static void jmp_patchins(FuncState *fs, BCPos pc, BCPos dest)
+{
+  BCIns *jmp = &fs->bcbase[pc].ins;
+  BCPos offset = dest-(pc+1)+BCBIAS_J;
+  lj_assertFS(dest != NO_JMP, "uninitialized jump target");
+  if (offset > BCMAX_D)
+    err_syntax(fs->ls, LJ_ERR_XJUMP);
+  setbc_d(jmp, offset);
+}
+
+/* Append to jump list. */
+static void jmp_append(FuncState *fs, BCPos *l1, BCPos l2)
+{
+  if (l2 == NO_JMP) {
+    return;
+  } else if (*l1 == NO_JMP) {
+    *l1 = l2;
+  } else {
+    BCPos list = *l1;
+    BCPos next;
+    while 
