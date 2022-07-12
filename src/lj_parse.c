@@ -386,4 +386,55 @@ static void bcreg_bump(FuncState *fs, BCReg n)
   }
 }
 
-/* Reserve registers. *
+/* Reserve registers. */
+static void bcreg_reserve(FuncState *fs, BCReg n)
+{
+  bcreg_bump(fs, n);
+  fs->freereg += n;
+}
+
+/* Free register. */
+static void bcreg_free(FuncState *fs, BCReg reg)
+{
+  if (reg >= fs->nactvar) {
+    fs->freereg--;
+    lj_assertFS(reg == fs->freereg, "bad regfree");
+  }
+}
+
+/* Free register for expression. */
+static void expr_free(FuncState *fs, ExpDesc *e)
+{
+  if (e->k == VNONRELOC)
+    bcreg_free(fs, e->u.s.info);
+}
+
+/* -- Bytecode emitter ---------------------------------------------------- */
+
+/* Emit bytecode instruction. */
+static BCPos bcemit_INS(FuncState *fs, BCIns ins)
+{
+  BCPos pc = fs->pc;
+  LexState *ls = fs->ls;
+  jmp_patchval(fs, fs->jpc, pc, NO_REG, pc);
+  fs->jpc = NO_JMP;
+  if (LJ_UNLIKELY(pc >= fs->bclim)) {
+    ptrdiff_t base = fs->bcbase - ls->bcstack;
+    checklimit(fs, ls->sizebcstack, LJ_MAX_BCINS, "bytecode instructions");
+    lj_mem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,BCInsLine);
+    fs->bclim = (BCPos)(ls->sizebcstack - base);
+    fs->bcbase = ls->bcstack + base;
+  }
+  fs->bcbase[pc].ins = ins;
+  fs->bcbase[pc].line = ls->lastline;
+  fs->pc = pc+1;
+  return pc;
+}
+
+#define bcemit_ABC(fs, o, a, b, c)	bcemit_INS(fs, BCINS_ABC(o, a, b, c))
+#define bcemit_AD(fs, o, a, d)		bcemit_INS(fs, BCINS_AD(o, a, d))
+#define bcemit_AJ(fs, o, a, j)		bcemit_INS(fs, BCINS_AJ(o, a, j))
+
+#define bcptr(fs, e)			(&(fs)->bcbase[(e)->u.s.info].ins)
+
+/* -- Bytecode emitter for expressions -
