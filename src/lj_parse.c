@@ -437,4 +437,50 @@ static BCPos bcemit_INS(FuncState *fs, BCIns ins)
 
 #define bcptr(fs, e)			(&(fs)->bcbase[(e)->u.s.info].ins)
 
-/* -- Bytecode emitter for expressions -
+/* -- Bytecode emitter for expressions ------------------------------------ */
+
+/* Discharge non-constant expression to any register. */
+static void expr_discharge(FuncState *fs, ExpDesc *e)
+{
+  BCIns ins;
+  if (e->k == VUPVAL) {
+    ins = BCINS_AD(BC_UGET, 0, e->u.s.info);
+  } else if (e->k == VGLOBAL) {
+    ins = BCINS_AD(BC_GGET, 0, const_str(fs, e));
+  } else if (e->k == VINDEXED) {
+    BCReg rc = e->u.s.aux;
+    if ((int32_t)rc < 0) {
+      ins = BCINS_ABC(BC_TGETS, 0, e->u.s.info, ~rc);
+    } else if (rc > BCMAX_C) {
+      ins = BCINS_ABC(BC_TGETB, 0, e->u.s.info, rc-(BCMAX_C+1));
+    } else {
+      bcreg_free(fs, rc);
+      ins = BCINS_ABC(BC_TGETV, 0, e->u.s.info, rc);
+    }
+    bcreg_free(fs, e->u.s.info);
+  } else if (e->k == VCALL) {
+    e->u.s.info = e->u.s.aux;
+    e->k = VNONRELOC;
+    return;
+  } else if (e->k == VLOCAL) {
+    e->k = VNONRELOC;
+    return;
+  } else {
+    return;
+  }
+  e->u.s.info = bcemit_INS(fs, ins);
+  e->k = VRELOCABLE;
+}
+
+/* Emit bytecode to set a range of registers to nil. */
+static void bcemit_nil(FuncState *fs, BCReg from, BCReg n)
+{
+  if (fs->pc > fs->lasttarget) {  /* No jumps to current position? */
+    BCIns *ip = &fs->bcbase[fs->pc-1].ins;
+    BCReg pto, pfrom = bc_a(*ip);
+    switch (bc_op(*ip)) {  /* Try to merge with the previous instruction. */
+    case BC_KPRI:
+      if (bc_d(*ip) != ~LJ_TNIL) break;
+      if (from == pfrom) {
+	if (n == 1) return;
+      } else if (from == pfrom+1)
