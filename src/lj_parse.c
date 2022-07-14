@@ -483,4 +483,54 @@ static void bcemit_nil(FuncState *fs, BCReg from, BCReg n)
       if (bc_d(*ip) != ~LJ_TNIL) break;
       if (from == pfrom) {
 	if (n == 1) return;
-      } else if (from == pfrom+1)
+      } else if (from == pfrom+1) {
+	from = pfrom;
+	n++;
+      } else {
+	break;
+      }
+      *ip = BCINS_AD(BC_KNIL, from, from+n-1);  /* Replace KPRI. */
+      return;
+    case BC_KNIL:
+      pto = bc_d(*ip);
+      if (pfrom <= from && from <= pto+1) {  /* Can we connect both ranges? */
+	if (from+n-1 > pto)
+	  setbc_d(ip, from+n-1);  /* Patch previous instruction range. */
+	return;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  /* Emit new instruction or replace old instruction. */
+  bcemit_INS(fs, n == 1 ? BCINS_AD(BC_KPRI, from, VKNIL) :
+			  BCINS_AD(BC_KNIL, from, from+n-1));
+}
+
+/* Discharge an expression to a specific register. Ignore branches. */
+static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
+{
+  BCIns ins;
+  expr_discharge(fs, e);
+  if (e->k == VKSTR) {
+    ins = BCINS_AD(BC_KSTR, reg, const_str(fs, e));
+  } else if (e->k == VKNUM) {
+#if LJ_DUALNUM
+    cTValue *tv = expr_numtv(e);
+    if (tvisint(tv) && checki16(intV(tv)))
+      ins = BCINS_AD(BC_KSHORT, reg, (BCReg)(uint16_t)intV(tv));
+    else
+#else
+    lua_Number n = expr_numberV(e);
+    int32_t k = lj_num2int(n);
+    if (checki16(k) && n == (lua_Number)k)
+      ins = BCINS_AD(BC_KSHORT, reg, (BCReg)(uint16_t)k);
+    else
+#endif
+      ins = BCINS_AD(BC_KNUM, reg, const_num(fs, e));
+#if LJ_HASFFI
+  } else if (e->k == VKCDATA) {
+    fs->flags |= PROTO_FFI;
+    ins = BCINS_AD(BC_KCDATA, reg,
+		   const_gc(fs, obj2gco(cdataV(&e->u.nval)
