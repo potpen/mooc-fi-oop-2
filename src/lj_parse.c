@@ -533,4 +533,49 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
   } else if (e->k == VKCDATA) {
     fs->flags |= PROTO_FFI;
     ins = BCINS_AD(BC_KCDATA, reg,
-		   const_gc(fs, obj2gco(cdataV(&e->u.nval)
+		   const_gc(fs, obj2gco(cdataV(&e->u.nval)), LJ_TCDATA));
+#endif
+  } else if (e->k == VRELOCABLE) {
+    setbc_a(bcptr(fs, e), reg);
+    goto noins;
+  } else if (e->k == VNONRELOC) {
+    if (reg == e->u.s.info)
+      goto noins;
+    ins = BCINS_AD(BC_MOV, reg, e->u.s.info);
+  } else if (e->k == VKNIL) {
+    bcemit_nil(fs, reg, 1);
+    goto noins;
+  } else if (e->k <= VKTRUE) {
+    ins = BCINS_AD(BC_KPRI, reg, const_pri(e));
+  } else {
+    lj_assertFS(e->k == VVOID || e->k == VJMP, "bad expr type %d", e->k);
+    return;
+  }
+  bcemit_INS(fs, ins);
+noins:
+  e->u.s.info = reg;
+  e->k = VNONRELOC;
+}
+
+/* Forward declaration. */
+static BCPos bcemit_jmp(FuncState *fs);
+
+/* Discharge an expression to a specific register. */
+static void expr_toreg(FuncState *fs, ExpDesc *e, BCReg reg)
+{
+  expr_toreg_nobranch(fs, e, reg);
+  if (e->k == VJMP)
+    jmp_append(fs, &e->t, e->u.s.info);  /* Add it to the true jump list. */
+  if (expr_hasjump(e)) {  /* Discharge expression with branches. */
+    BCPos jend, jfalse = NO_JMP, jtrue = NO_JMP;
+    if (jmp_novalue(fs, e->t) || jmp_novalue(fs, e->f)) {
+      BCPos jval = (e->k == VJMP) ? NO_JMP : bcemit_jmp(fs);
+      jfalse = bcemit_AD(fs, BC_KPRI, reg, VKFALSE);
+      bcemit_AJ(fs, BC_JMP, fs->freereg, 1);
+      jtrue = bcemit_AD(fs, BC_KPRI, reg, VKTRUE);
+      jmp_tohere(fs, jval);
+    }
+    jend = fs->pc;
+    fs->lasttarget = jend;
+    jmp_patchval(fs, e->f, jend, reg, jfalse);
+    jmp_patchval(fs, e->t, jend, reg
