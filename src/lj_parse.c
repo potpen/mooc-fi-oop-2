@@ -633,4 +633,44 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
     if (e->k <= VKTRUE)
       ins = BCINS_AD(BC_USETP, var->u.s.info, const_pri(e));
     else if (e->k == VKSTR)
-      ins = BCINS_AD(BC_
+      ins = BCINS_AD(BC_USETS, var->u.s.info, const_str(fs, e));
+    else if (e->k == VKNUM)
+      ins = BCINS_AD(BC_USETN, var->u.s.info, const_num(fs, e));
+    else
+      ins = BCINS_AD(BC_USETV, var->u.s.info, expr_toanyreg(fs, e));
+  } else if (var->k == VGLOBAL) {
+    BCReg ra = expr_toanyreg(fs, e);
+    ins = BCINS_AD(BC_GSET, ra, const_str(fs, var));
+  } else {
+    BCReg ra, rc;
+    lj_assertFS(var->k == VINDEXED, "bad expr type %d", var->k);
+    ra = expr_toanyreg(fs, e);
+    rc = var->u.s.aux;
+    if ((int32_t)rc < 0) {
+      ins = BCINS_ABC(BC_TSETS, ra, var->u.s.info, ~rc);
+    } else if (rc > BCMAX_C) {
+      ins = BCINS_ABC(BC_TSETB, ra, var->u.s.info, rc-(BCMAX_C+1));
+    } else {
+#ifdef LUA_USE_ASSERT
+      /* Free late alloced key reg to avoid assert on free of value reg. */
+      /* This can only happen when called from expr_table(). */
+      if (e->k == VNONRELOC && ra >= fs->nactvar && rc >= ra)
+	bcreg_free(fs, rc);
+#endif
+      ins = BCINS_ABC(BC_TSETV, ra, var->u.s.info, rc);
+    }
+  }
+  bcemit_INS(fs, ins);
+  expr_free(fs, e);
+}
+
+/* Emit method lookup expression. */
+static void bcemit_method(FuncState *fs, ExpDesc *e, ExpDesc *key)
+{
+  BCReg idx, func, obj = expr_toanyreg(fs, e);
+  expr_free(fs, e);
+  func = fs->freereg;
+  bcemit_AD(fs, BC_MOV, func+1+LJ_FR2, obj);  /* Copy object to 1st argument. */
+  lj_assertFS(expr_isstrk(key), "bad usage");
+  idx = const_str(fs, key);
+  if (idx <= BCMAX
