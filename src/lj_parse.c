@@ -673,4 +673,58 @@ static void bcemit_method(FuncState *fs, ExpDesc *e, ExpDesc *key)
   bcemit_AD(fs, BC_MOV, func+1+LJ_FR2, obj);  /* Copy object to 1st argument. */
   lj_assertFS(expr_isstrk(key), "bad usage");
   idx = const_str(fs, key);
-  if (idx <= BCMAX
+  if (idx <= BCMAX_C) {
+    bcreg_reserve(fs, 2+LJ_FR2);
+    bcemit_ABC(fs, BC_TGETS, func, obj, idx);
+  } else {
+    bcreg_reserve(fs, 3+LJ_FR2);
+    bcemit_AD(fs, BC_KSTR, func+2+LJ_FR2, idx);
+    bcemit_ABC(fs, BC_TGETV, func, obj, func+2+LJ_FR2);
+    fs->freereg--;
+  }
+  e->u.s.info = func;
+  e->k = VNONRELOC;
+}
+
+/* -- Bytecode emitter for branches --------------------------------------- */
+
+/* Emit unconditional branch. */
+static BCPos bcemit_jmp(FuncState *fs)
+{
+  BCPos jpc = fs->jpc;
+  BCPos j = fs->pc - 1;
+  BCIns *ip = &fs->bcbase[j].ins;
+  fs->jpc = NO_JMP;
+  if ((int32_t)j >= (int32_t)fs->lasttarget && bc_op(*ip) == BC_UCLO) {
+    setbc_j(ip, NO_JMP);
+    fs->lasttarget = j+1;
+  } else {
+    j = bcemit_AJ(fs, BC_JMP, fs->freereg, NO_JMP);
+  }
+  jmp_append(fs, &j, jpc);
+  return j;
+}
+
+/* Invert branch condition of bytecode instruction. */
+static void invertcond(FuncState *fs, ExpDesc *e)
+{
+  BCIns *ip = &fs->bcbase[e->u.s.info - 1].ins;
+  setbc_op(ip, bc_op(*ip)^1);
+}
+
+/* Emit conditional branch. */
+static BCPos bcemit_branch(FuncState *fs, ExpDesc *e, int cond)
+{
+  BCPos pc;
+  if (e->k == VRELOCABLE) {
+    BCIns *ip = bcptr(fs, e);
+    if (bc_op(*ip) == BC_NOT) {
+      *ip = BCINS_AD(cond ? BC_ISF : BC_IST, 0, bc_d(*ip));
+      return bcemit_jmp(fs);
+    }
+  }
+  if (e->k != VNONRELOC) {
+    bcreg_reserve(fs, 1);
+    expr_toreg_nobranch(fs, e, fs->freereg-1);
+  }
+  bcemit_AD(fs, cond ? BC_ISTC : BC_ISFC,
