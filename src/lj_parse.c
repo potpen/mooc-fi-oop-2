@@ -578,4 +578,59 @@ static void expr_toreg(FuncState *fs, ExpDesc *e, BCReg reg)
     jend = fs->pc;
     fs->lasttarget = jend;
     jmp_patchval(fs, e->f, jend, reg, jfalse);
-    jmp_patchval(fs, e->t, jend, reg
+    jmp_patchval(fs, e->t, jend, reg, jtrue);
+  }
+  e->f = e->t = NO_JMP;
+  e->u.s.info = reg;
+  e->k = VNONRELOC;
+}
+
+/* Discharge an expression to the next free register. */
+static void expr_tonextreg(FuncState *fs, ExpDesc *e)
+{
+  expr_discharge(fs, e);
+  expr_free(fs, e);
+  bcreg_reserve(fs, 1);
+  expr_toreg(fs, e, fs->freereg - 1);
+}
+
+/* Discharge an expression to any register. */
+static BCReg expr_toanyreg(FuncState *fs, ExpDesc *e)
+{
+  expr_discharge(fs, e);
+  if (e->k == VNONRELOC) {
+    if (!expr_hasjump(e)) return e->u.s.info;  /* Already in a register. */
+    if (e->u.s.info >= fs->nactvar) {
+      expr_toreg(fs, e, e->u.s.info);  /* Discharge to temp. register. */
+      return e->u.s.info;
+    }
+  }
+  expr_tonextreg(fs, e);  /* Discharge to next register. */
+  return e->u.s.info;
+}
+
+/* Partially discharge expression to a value. */
+static void expr_toval(FuncState *fs, ExpDesc *e)
+{
+  if (expr_hasjump(e))
+    expr_toanyreg(fs, e);
+  else
+    expr_discharge(fs, e);
+}
+
+/* Emit store for LHS expression. */
+static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
+{
+  BCIns ins;
+  if (var->k == VLOCAL) {
+    fs->ls->vstack[var->u.s.aux].info |= VSTACK_VAR_RW;
+    expr_free(fs, e);
+    expr_toreg(fs, e, var->u.s.info);
+    return;
+  } else if (var->k == VUPVAL) {
+    fs->ls->vstack[var->u.s.aux].info |= VSTACK_VAR_RW;
+    expr_toval(fs, e);
+    if (e->k <= VKTRUE)
+      ins = BCINS_AD(BC_USETP, var->u.s.info, const_pri(e));
+    else if (e->k == VKSTR)
+      ins = BCINS_AD(BC_
