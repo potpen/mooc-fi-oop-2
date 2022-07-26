@@ -822,4 +822,46 @@ static void bcemit_arith(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
       rb = expr_toanyreg(fs, e1);
     }
   }
-  /* Using expr_free might ca
+  /* Using expr_free might cause asserts if the order is wrong. */
+  if (e1->k == VNONRELOC && e1->u.s.info >= fs->nactvar) fs->freereg--;
+  if (e2->k == VNONRELOC && e2->u.s.info >= fs->nactvar) fs->freereg--;
+  e1->u.s.info = bcemit_ABC(fs, op, 0, rb, rc);
+  e1->k = VRELOCABLE;
+}
+
+/* Emit comparison operator. */
+static void bcemit_comp(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
+{
+  ExpDesc *eret = e1;
+  BCIns ins;
+  expr_toval(fs, e1);
+  if (opr == OPR_EQ || opr == OPR_NE) {
+    BCOp op = opr == OPR_EQ ? BC_ISEQV : BC_ISNEV;
+    BCReg ra;
+    if (expr_isk(e1)) { e1 = e2; e2 = eret; }  /* Need constant in 2nd arg. */
+    ra = expr_toanyreg(fs, e1);  /* First arg must be in a reg. */
+    expr_toval(fs, e2);
+    switch (e2->k) {
+    case VKNIL: case VKFALSE: case VKTRUE:
+      ins = BCINS_AD(op+(BC_ISEQP-BC_ISEQV), ra, const_pri(e2));
+      break;
+    case VKSTR:
+      ins = BCINS_AD(op+(BC_ISEQS-BC_ISEQV), ra, const_str(fs, e2));
+      break;
+    case VKNUM:
+      ins = BCINS_AD(op+(BC_ISEQN-BC_ISEQV), ra, const_num(fs, e2));
+      break;
+    default:
+      ins = BCINS_AD(op, ra, expr_toanyreg(fs, e2));
+      break;
+    }
+  } else {
+    uint32_t op = opr-OPR_LT+BC_ISLT;
+    BCReg ra, rd;
+    if ((op-BC_ISLT) & 1) {  /* GT -> LT, GE -> LE */
+      e1 = e2; e2 = eret;  /* Swap operands. */
+      op = ((op-BC_ISLT)^3)+BC_ISLT;
+      expr_toval(fs, e1);
+      ra = expr_toanyreg(fs, e1);
+      rd = expr_toanyreg(fs, e2);
+    } els
