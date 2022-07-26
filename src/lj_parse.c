@@ -864,4 +864,51 @@ static void bcemit_comp(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
       expr_toval(fs, e1);
       ra = expr_toanyreg(fs, e1);
       rd = expr_toanyreg(fs, e2);
-    } els
+    } else {
+      rd = expr_toanyreg(fs, e2);
+      ra = expr_toanyreg(fs, e1);
+    }
+    ins = BCINS_AD(op, ra, rd);
+  }
+  /* Using expr_free might cause asserts if the order is wrong. */
+  if (e1->k == VNONRELOC && e1->u.s.info >= fs->nactvar) fs->freereg--;
+  if (e2->k == VNONRELOC && e2->u.s.info >= fs->nactvar) fs->freereg--;
+  bcemit_INS(fs, ins);
+  eret->u.s.info = bcemit_jmp(fs);
+  eret->k = VJMP;
+}
+
+/* Fixup left side of binary operator. */
+static void bcemit_binop_left(FuncState *fs, BinOpr op, ExpDesc *e)
+{
+  if (op == OPR_AND) {
+    bcemit_branch_t(fs, e);
+  } else if (op == OPR_OR) {
+    bcemit_branch_f(fs, e);
+  } else if (op == OPR_CONCAT) {
+    expr_tonextreg(fs, e);
+  } else if (op == OPR_EQ || op == OPR_NE) {
+    if (!expr_isk_nojump(e)) expr_toanyreg(fs, e);
+  } else {
+    if (!expr_isnumk_nojump(e)) expr_toanyreg(fs, e);
+  }
+}
+
+/* Emit binary operator. */
+static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
+{
+  if (op <= OPR_POW) {
+    bcemit_arith(fs, op, e1, e2);
+  } else if (op == OPR_AND) {
+    lj_assertFS(e1->t == NO_JMP, "jump list not closed");
+    expr_discharge(fs, e2);
+    jmp_append(fs, &e2->f, e1->f);
+    *e1 = *e2;
+  } else if (op == OPR_OR) {
+    lj_assertFS(e1->f == NO_JMP, "jump list not closed");
+    expr_discharge(fs, e2);
+    jmp_append(fs, &e2->t, e1->t);
+    *e1 = *e2;
+  } else if (op == OPR_CONCAT) {
+    expr_toval(fs, e2);
+    if 
