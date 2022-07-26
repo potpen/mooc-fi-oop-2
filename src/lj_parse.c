@@ -777,4 +777,49 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
   TValue o;
   lua_Number n;
   if (!expr_isnumk_nojump(e1) || !expr_isnumk_nojump(e2)) return 0;
- 
+  n = lj_vm_foldarith(expr_numberV(e1), expr_numberV(e2), (int)opr-OPR_ADD);
+  setnumV(&o, n);
+  if (tvisnan(&o) || tvismzero(&o)) return 0;  /* Avoid NaN and -0 as consts. */
+  if (LJ_DUALNUM) {
+    int32_t k = lj_num2int(n);
+    if ((lua_Number)k == n) {
+      setintV(&e1->u.nval, k);
+      return 1;
+    }
+  }
+  setnumV(&e1->u.nval, n);
+  return 1;
+}
+
+/* Emit arithmetic operator. */
+static void bcemit_arith(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
+{
+  BCReg rb, rc, t;
+  uint32_t op;
+  if (foldarith(opr, e1, e2))
+    return;
+  if (opr == OPR_POW) {
+    op = BC_POW;
+    rc = expr_toanyreg(fs, e2);
+    rb = expr_toanyreg(fs, e1);
+  } else {
+    op = opr-OPR_ADD+BC_ADDVV;
+    /* Must discharge 2nd operand first since VINDEXED might free regs. */
+    expr_toval(fs, e2);
+    if (expr_isnumk(e2) && (rc = const_num(fs, e2)) <= BCMAX_C)
+      op -= BC_ADDVV-BC_ADDVN;
+    else
+      rc = expr_toanyreg(fs, e2);
+    /* 1st operand discharged by bcemit_binop_left, but need KNUM/KSHORT. */
+    lj_assertFS(expr_isnumk(e1) || e1->k == VNONRELOC,
+		"bad expr type %d", e1->k);
+    expr_toval(fs, e1);
+    /* Avoid two consts to satisfy bytecode constraints. */
+    if (expr_isnumk(e1) && !expr_isnumk(e2) &&
+	(t = const_num(fs, e1)) <= BCMAX_B) {
+      rb = rc; rc = t; op -= BC_ADDVV-BC_ADDNV;
+    } else {
+      rb = expr_toanyreg(fs, e1);
+    }
+  }
+  /* Using expr_free might ca
