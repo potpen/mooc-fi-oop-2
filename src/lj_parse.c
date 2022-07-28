@@ -1057,4 +1057,58 @@ static void var_new(LexState *ls, BCReg n, GCstr *name)
   lj_assertFS((uintptr_t)name < VARNAME__MAX ||
 	      lj_tab_getstr(fs->kt, name) != NULL,
 	      "unanchored variable name");
-  /* NOBARRIER: name is anchored in fs->kt 
+  /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
+  setgcref(ls->vstack[vtop].name, obj2gco(name));
+  fs->varmap[fs->nactvar+n] = (uint16_t)vtop;
+  ls->vtop = vtop+1;
+}
+
+#define var_new_lit(ls, n, v) \
+  var_new(ls, (n), lj_parse_keepstr(ls, "" v, sizeof(v)-1))
+
+#define var_new_fixed(ls, n, vn) \
+  var_new(ls, (n), (GCstr *)(uintptr_t)(vn))
+
+/* Add local variables. */
+static void var_add(LexState *ls, BCReg nvars)
+{
+  FuncState *fs = ls->fs;
+  BCReg nactvar = fs->nactvar;
+  while (nvars--) {
+    VarInfo *v = &var_get(ls, fs, nactvar);
+    v->startpc = fs->pc;
+    v->slot = nactvar++;
+    v->info = 0;
+  }
+  fs->nactvar = nactvar;
+}
+
+/* Remove local variables. */
+static void var_remove(LexState *ls, BCReg tolevel)
+{
+  FuncState *fs = ls->fs;
+  while (fs->nactvar > tolevel)
+    var_get(ls, fs, --fs->nactvar).endpc = fs->pc;
+}
+
+/* Lookup local variable name. */
+static BCReg var_lookup_local(FuncState *fs, GCstr *n)
+{
+  int i;
+  for (i = fs->nactvar-1; i >= 0; i--) {
+    if (n == strref(var_get(fs->ls, fs, i).name))
+      return (BCReg)i;
+  }
+  return (BCReg)-1;  /* Not found. */
+}
+
+/* Lookup or add upvalue index. */
+static MSize var_lookup_uv(FuncState *fs, MSize vidx, ExpDesc *e)
+{
+  MSize i, n = fs->nuv;
+  for (i = 0; i < n; i++)
+    if (fs->uvmap[i] == vidx)
+      return i;  /* Already exists. */
+  /* Otherwise create a new one. */
+  checklimit(fs, fs->nuv, LJ_MAX_UPVAL, "upvalues");
+  lj_assertFS(e->k == VLOCAL || e->k == VUPVAL, "bad expr ty
