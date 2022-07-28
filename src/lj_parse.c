@@ -1014,4 +1014,47 @@ static void lex_check(LexState *ls, LexToken tok)
   lj_lex_next(ls);
 }
 
-/* Ch
+/* Check for matching token. */
+static void lex_match(LexState *ls, LexToken what, LexToken who, BCLine line)
+{
+  if (!lex_opt(ls, what)) {
+    if (line == ls->linenumber) {
+      err_token(ls, what);
+    } else {
+      const char *swhat = lj_lex_token2str(ls, what);
+      const char *swho = lj_lex_token2str(ls, who);
+      lj_lex_error(ls, ls->tok, LJ_ERR_XMATCH, swhat, swho, line);
+    }
+  }
+}
+
+/* Check for string token. */
+static GCstr *lex_str(LexState *ls)
+{
+  GCstr *s;
+  if (ls->tok != TK_name && (LJ_52 || ls->tok != TK_goto))
+    err_token(ls, TK_name);
+  s = strV(&ls->tokval);
+  lj_lex_next(ls);
+  return s;
+}
+
+/* -- Variable handling --------------------------------------------------- */
+
+#define var_get(ls, fs, i)	((ls)->vstack[(fs)->varmap[(i)]])
+
+/* Define a new local variable. */
+static void var_new(LexState *ls, BCReg n, GCstr *name)
+{
+  FuncState *fs = ls->fs;
+  MSize vtop = ls->vtop;
+  checklimit(fs, fs->nactvar+n, LJ_MAX_LOCVAR, "local variables");
+  if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
+    if (ls->sizevstack >= LJ_MAX_VSTACK)
+      lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
+    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+  }
+  lj_assertFS((uintptr_t)name < VARNAME__MAX ||
+	      lj_tab_getstr(fs->kt, name) != NULL,
+	      "unanchored variable name");
+  /* NOBARRIER: name is anchored in fs->kt 
