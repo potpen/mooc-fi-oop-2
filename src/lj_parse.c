@@ -911,4 +911,48 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
     *e1 = *e2;
   } else if (op == OPR_CONCAT) {
     expr_toval(fs, e2);
-    if 
+    if (e2->k == VRELOCABLE && bc_op(*bcptr(fs, e2)) == BC_CAT) {
+      lj_assertFS(e1->u.s.info == bc_b(*bcptr(fs, e2))-1,
+		  "bad CAT stack layout");
+      expr_free(fs, e1);
+      setbc_b(bcptr(fs, e2), e1->u.s.info);
+      e1->u.s.info = e2->u.s.info;
+    } else {
+      expr_tonextreg(fs, e2);
+      expr_free(fs, e2);
+      expr_free(fs, e1);
+      e1->u.s.info = bcemit_ABC(fs, BC_CAT, 0, e1->u.s.info, e2->u.s.info);
+    }
+    e1->k = VRELOCABLE;
+  } else {
+    lj_assertFS(op == OPR_NE || op == OPR_EQ ||
+	       op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT,
+	       "bad binop %d", op);
+    bcemit_comp(fs, op, e1, e2);
+  }
+}
+
+/* Emit unary operator. */
+static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
+{
+  if (op == BC_NOT) {
+    /* Swap true and false lists. */
+    { BCPos temp = e->f; e->f = e->t; e->t = temp; }
+    jmp_dropval(fs, e->f);
+    jmp_dropval(fs, e->t);
+    expr_discharge(fs, e);
+    if (e->k == VKNIL || e->k == VKFALSE) {
+      e->k = VKTRUE;
+      return;
+    } else if (expr_isk(e) || (LJ_HASFFI && e->k == VKCDATA)) {
+      e->k = VKFALSE;
+      return;
+    } else if (e->k == VJMP) {
+      invertcond(fs, e);
+      return;
+    } else if (e->k == VRELOCABLE) {
+      bcreg_reserve(fs, 1);
+      setbc_a(bcptr(fs, e), fs->freereg-1);
+      e->u.s.info = fs->freereg-1;
+      e->k = VNONRELOC;
+    } el
