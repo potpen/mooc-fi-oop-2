@@ -955,4 +955,63 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
       setbc_a(bcptr(fs, e), fs->freereg-1);
       e->u.s.info = fs->freereg-1;
       e->k = VNONRELOC;
-    } el
+    } else {
+      lj_assertFS(e->k == VNONRELOC, "bad expr type %d", e->k);
+    }
+  } else {
+    lj_assertFS(op == BC_UNM || op == BC_LEN, "bad unop %d", op);
+    if (op == BC_UNM && !expr_hasjump(e)) {  /* Constant-fold negations. */
+#if LJ_HASFFI
+      if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
+	GCcdata *cd = cdataV(&e->u.nval);
+	uint64_t *p = (uint64_t *)cdataptr(cd);
+	if (cd->ctypeid == CTID_COMPLEX_DOUBLE)
+	  p[1] ^= U64x(80000000,00000000);
+	else
+	  *p = ~*p+1u;
+	return;
+      } else
+#endif
+      if (expr_isnumk(e) && !expr_numiszero(e)) {  /* Avoid folding to -0. */
+	TValue *o = expr_numtv(e);
+	if (tvisint(o)) {
+	  int32_t k = intV(o), negk = (int32_t)(~(uint32_t)k+1u);
+	  if (k == negk)
+	    setnumV(o, -(lua_Number)k);
+	  else
+	    setintV(o, negk);
+	  return;
+	} else {
+	  o->u64 ^= U64x(80000000,00000000);
+	  return;
+	}
+      }
+    }
+    expr_toanyreg(fs, e);
+  }
+  expr_free(fs, e);
+  e->u.s.info = bcemit_AD(fs, op, 0, e->u.s.info);
+  e->k = VRELOCABLE;
+}
+
+/* -- Lexer support ------------------------------------------------------- */
+
+/* Check and consume optional token. */
+static int lex_opt(LexState *ls, LexToken tok)
+{
+  if (ls->tok == tok) {
+    lj_lex_next(ls);
+    return 1;
+  }
+  return 0;
+}
+
+/* Check and consume token. */
+static void lex_check(LexState *ls, LexToken tok)
+{
+  if (ls->tok != tok)
+    err_token(ls, tok);
+  lj_lex_next(ls);
+}
+
+/* Ch
