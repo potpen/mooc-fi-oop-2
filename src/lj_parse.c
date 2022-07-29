@@ -1111,4 +1111,50 @@ static MSize var_lookup_uv(FuncState *fs, MSize vidx, ExpDesc *e)
       return i;  /* Already exists. */
   /* Otherwise create a new one. */
   checklimit(fs, fs->nuv, LJ_MAX_UPVAL, "upvalues");
-  lj_assertFS(e->k == VLOCAL || e->k == VUPVAL, "bad expr ty
+  lj_assertFS(e->k == VLOCAL || e->k == VUPVAL, "bad expr type %d", e->k);
+  fs->uvmap[n] = (uint16_t)vidx;
+  fs->uvtmp[n] = (uint16_t)(e->k == VLOCAL ? vidx : LJ_MAX_VSTACK+e->u.s.info);
+  fs->nuv = n+1;
+  return n;
+}
+
+/* Forward declaration. */
+static void fscope_uvmark(FuncState *fs, BCReg level);
+
+/* Recursively lookup variables in enclosing functions. */
+static MSize var_lookup_(FuncState *fs, GCstr *name, ExpDesc *e, int first)
+{
+  if (fs) {
+    BCReg reg = var_lookup_local(fs, name);
+    if ((int32_t)reg >= 0) {  /* Local in this function? */
+      expr_init(e, VLOCAL, reg);
+      if (!first)
+	fscope_uvmark(fs, reg);  /* Scope now has an upvalue. */
+      return (MSize)(e->u.s.aux = (uint32_t)fs->varmap[reg]);
+    } else {
+      MSize vidx = var_lookup_(fs->prev, name, e, 0);  /* Var in outer func? */
+      if ((int32_t)vidx >= 0) {  /* Yes, make it an upvalue here. */
+	e->u.s.info = (uint8_t)var_lookup_uv(fs, vidx, e);
+	e->k = VUPVAL;
+	return vidx;
+      }
+    }
+  } else {  /* Not found in any function, must be a global. */
+    expr_init(e, VGLOBAL, 0);
+    e->u.sval = name;
+  }
+  return (MSize)-1;  /* Global. */
+}
+
+/* Lookup variable name. */
+#define var_lookup(ls, e) \
+  var_lookup_((ls)->fs, lex_str(ls), (e), 1)
+
+/* -- Goto an label handling ---------------------------------------------- */
+
+/* Add a new goto or label. */
+static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
+{
+  FuncState *fs = ls->fs;
+  MSize vtop = ls->vtop;
+  if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
