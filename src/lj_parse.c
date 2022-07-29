@@ -1158,3 +1158,43 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   FuncState *fs = ls->fs;
   MSize vtop = ls->vtop;
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
+    if (ls->sizevstack >= LJ_MAX_VSTACK)
+      lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
+    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+  }
+  lj_assertFS(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL,
+	      "unanchored label name");
+  /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
+  setgcref(ls->vstack[vtop].name, obj2gco(name));
+  ls->vstack[vtop].startpc = pc;
+  ls->vstack[vtop].slot = (uint8_t)fs->nactvar;
+  ls->vstack[vtop].info = info;
+  ls->vtop = vtop+1;
+  return vtop;
+}
+
+#define gola_isgoto(v)		((v)->info & VSTACK_GOTO)
+#define gola_islabel(v)		((v)->info & VSTACK_LABEL)
+#define gola_isgotolabel(v)	((v)->info & (VSTACK_GOTO|VSTACK_LABEL))
+
+/* Patch goto to jump to label. */
+static void gola_patch(LexState *ls, VarInfo *vg, VarInfo *vl)
+{
+  FuncState *fs = ls->fs;
+  BCPos pc = vg->startpc;
+  setgcrefnull(vg->name);  /* Invalidate pending goto. */
+  setbc_a(&fs->bcbase[pc].ins, vl->slot);
+  jmp_patch(fs, pc, vl->startpc);
+}
+
+/* Patch goto to close upvalues. */
+static void gola_close(LexState *ls, VarInfo *vg)
+{
+  FuncState *fs = ls->fs;
+  BCPos pc = vg->startpc;
+  BCIns *ip = &fs->bcbase[pc].ins;
+  lj_assertFS(gola_isgoto(vg), "expected goto");
+  lj_assertFS(bc_op(*ip) == BC_JMP || bc_op(*ip) == BC_UCLO,
+	      "bad bytecode op %d", bc_op(*ip));
+  setbc_a(ip, vg->slot);
+  if (bc_
