@@ -1197,4 +1197,43 @@ static void gola_close(LexState *ls, VarInfo *vg)
   lj_assertFS(bc_op(*ip) == BC_JMP || bc_op(*ip) == BC_UCLO,
 	      "bad bytecode op %d", bc_op(*ip));
   setbc_a(ip, vg->slot);
-  if (bc_
+  if (bc_op(*ip) == BC_JMP) {
+    BCPos next = jmp_next(fs, pc);
+    if (next != NO_JMP) jmp_patch(fs, next, pc);  /* Jump to UCLO. */
+    setbc_op(ip, BC_UCLO);  /* Turn into UCLO. */
+    setbc_j(ip, NO_JMP);
+  }
+}
+
+/* Resolve pending forward gotos for label. */
+static void gola_resolve(LexState *ls, FuncScope *bl, MSize idx)
+{
+  VarInfo *vg = ls->vstack + bl->vstart;
+  VarInfo *vl = ls->vstack + idx;
+  for (; vg < vl; vg++)
+    if (gcrefeq(vg->name, vl->name) && gola_isgoto(vg)) {
+      if (vg->slot < vl->slot) {
+	GCstr *name = strref(var_get(ls, ls->fs, vg->slot).name);
+	lj_assertLS((uintptr_t)name >= VARNAME__MAX, "expected goto name");
+	ls->linenumber = ls->fs->bcbase[vg->startpc].line;
+	lj_assertLS(strref(vg->name) != NAME_BREAK, "unexpected break");
+	lj_lex_error(ls, 0, LJ_ERR_XGSCOPE,
+		     strdata(strref(vg->name)), strdata(name));
+      }
+      gola_patch(ls, vg, vl);
+    }
+}
+
+/* Fixup remaining gotos and labels for scope. */
+static void gola_fixup(LexState *ls, FuncScope *bl)
+{
+  VarInfo *v = ls->vstack + bl->vstart;
+  VarInfo *ve = ls->vstack + ls->vtop;
+  for (; v < ve; v++) {
+    GCstr *name = strref(v->name);
+    if (name != NULL) {  /* Only consider remaining valid gotos/labels. */
+      if (gola_islabel(v)) {
+	VarInfo *vg;
+	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
+	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
+	  if (strref(vg->name) == name && gola_isgo
