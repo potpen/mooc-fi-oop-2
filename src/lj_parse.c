@@ -1289,4 +1289,51 @@ static void fscope_end(FuncState *fs)
   FuncScope *bl = fs->bl;
   LexState *ls = fs->ls;
   fs->bl = bl->prev;
-  var_remov
+  var_remove(ls, bl->nactvar);
+  fs->freereg = fs->nactvar;
+  lj_assertFS(bl->nactvar == fs->nactvar, "bad regalloc");
+  if ((bl->flags & (FSCOPE_UPVAL|FSCOPE_NOCLOSE)) == FSCOPE_UPVAL)
+    bcemit_AJ(fs, BC_UCLO, bl->nactvar, 0);
+  if ((bl->flags & FSCOPE_BREAK)) {
+    if ((bl->flags & FSCOPE_LOOP)) {
+      MSize idx = gola_new(ls, NAME_BREAK, VSTACK_LABEL, fs->pc);
+      ls->vtop = idx;  /* Drop break label immediately. */
+      gola_resolve(ls, bl, idx);
+    } else {  /* Need the fixup step to propagate the breaks. */
+      gola_fixup(ls, bl);
+      return;
+    }
+  }
+  if ((bl->flags & FSCOPE_GOLA)) {
+    gola_fixup(ls, bl);
+  }
+}
+
+/* Mark scope as having an upvalue. */
+static void fscope_uvmark(FuncState *fs, BCReg level)
+{
+  FuncScope *bl;
+  for (bl = fs->bl; bl && bl->nactvar > level; bl = bl->prev)
+    ;
+  if (bl)
+    bl->flags |= FSCOPE_UPVAL;
+}
+
+/* -- Function state management ------------------------------------------- */
+
+/* Fixup bytecode for prototype. */
+static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, MSize n)
+{
+  BCInsLine *base = fs->bcbase;
+  MSize i;
+  pt->sizebc = n;
+  bc[0] = BCINS_AD((fs->flags & PROTO_VARARG) ? BC_FUNCV : BC_FUNCF,
+		   fs->framesize, 0);
+  for (i = 1; i < n; i++)
+    bc[i] = base[i].ins;
+}
+
+/* Fixup upvalues for child prototype, step #2. */
+static void fs_fixup_uv2(FuncState *fs, GCproto *pt)
+{
+  
