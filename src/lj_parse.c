@@ -1236,4 +1236,57 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
 	VarInfo *vg;
 	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
 	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
-	  if (strref(vg->name) == name && gola_isgo
+	  if (strref(vg->name) == name && gola_isgoto(vg)) {
+	    if ((bl->flags&FSCOPE_UPVAL) && vg->slot > v->slot)
+	      gola_close(ls, vg);
+	    gola_patch(ls, vg, v);
+	  }
+      } else if (gola_isgoto(v)) {
+	if (bl->prev) {  /* Propagate goto or break to outer scope. */
+	  bl->prev->flags |= name == NAME_BREAK ? FSCOPE_BREAK : FSCOPE_GOLA;
+	  v->slot = bl->nactvar;
+	  if ((bl->flags & FSCOPE_UPVAL))
+	    gola_close(ls, v);
+	} else {  /* No outer scope: undefined goto label or no loop. */
+	  ls->linenumber = ls->fs->bcbase[v->startpc].line;
+	  if (name == NAME_BREAK)
+	    lj_lex_error(ls, 0, LJ_ERR_XBREAK);
+	  else
+	    lj_lex_error(ls, 0, LJ_ERR_XLUNDEF, strdata(name));
+	}
+      }
+    }
+  }
+}
+
+/* Find existing label. */
+static VarInfo *gola_findlabel(LexState *ls, GCstr *name)
+{
+  VarInfo *v = ls->vstack + ls->fs->bl->vstart;
+  VarInfo *ve = ls->vstack + ls->vtop;
+  for (; v < ve; v++)
+    if (strref(v->name) == name && gola_islabel(v))
+      return v;
+  return NULL;
+}
+
+/* -- Scope handling ------------------------------------------------------ */
+
+/* Begin a scope. */
+static void fscope_begin(FuncState *fs, FuncScope *bl, int flags)
+{
+  bl->nactvar = (uint8_t)fs->nactvar;
+  bl->flags = flags;
+  bl->vstart = fs->ls->vtop;
+  bl->prev = fs->bl;
+  fs->bl = bl;
+  lj_assertFS(fs->freereg == fs->nactvar, "bad regalloc");
+}
+
+/* End a scope. */
+static void fscope_end(FuncState *fs)
+{
+  FuncScope *bl = fs->bl;
+  LexState *ls = fs->ls;
+  fs->bl = bl->prev;
+  var_remov
