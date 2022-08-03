@@ -1384,4 +1384,55 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
 	if (LJ_DUALNUM) {
 	  lua_Number nn = numV(&n->key);
 	  int32_t k = lj_num2int(nn);
-	  lj_assertFS(!tvismze
+	  lj_assertFS(!tvismzero(&n->key), "unexpected -0 key");
+	  if ((lua_Number)k == nn)
+	    setintV(tv, k);
+	  else
+	    *tv = n->key;
+	} else {
+	  *tv = n->key;
+	}
+      } else {
+	GCobj *o = gcV(&n->key);
+	setgcref(((GCRef *)kptr)[~kidx], o);
+	lj_gc_objbarrier(fs->L, pt, o);
+	if (tvisproto(&n->key))
+	  fs_fixup_uv2(fs, gco2pt(o));
+      }
+    }
+  }
+}
+
+/* Fixup upvalues for prototype, step #1. */
+static void fs_fixup_uv1(FuncState *fs, GCproto *pt, uint16_t *uv)
+{
+  setmref(pt->uv, uv);
+  pt->sizeuv = fs->nuv;
+  memcpy(uv, fs->uvtmp, fs->nuv*sizeof(VarIndex));
+}
+
+#ifndef LUAJIT_DISABLE_DEBUGINFO
+/* Prepare lineinfo for prototype. */
+static size_t fs_prep_line(FuncState *fs, BCLine numline)
+{
+  return (fs->pc-1) << (numline < 256 ? 0 : numline < 65536 ? 1 : 2);
+}
+
+/* Fixup lineinfo for prototype. */
+static void fs_fixup_line(FuncState *fs, GCproto *pt,
+			  void *lineinfo, BCLine numline)
+{
+  BCInsLine *base = fs->bcbase + 1;
+  BCLine first = fs->linedefined;
+  MSize i = 0, n = fs->pc-1;
+  pt->firstline = fs->linedefined;
+  pt->numline = numline;
+  setmref(pt->lineinfo, lineinfo);
+  if (LJ_LIKELY(numline < 256)) {
+    uint8_t *li = (uint8_t *)lineinfo;
+    do {
+      BCLine delta = base[i].line - first;
+      lj_assertFS(delta >= 0 && delta < 256, "bad line delta");
+      li[i] = (uint8_t)delta;
+    } while (++i < n);
+  } else if (LJ_LIKELY(numline < 65536))
