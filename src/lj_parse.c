@@ -1336,4 +1336,52 @@ static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, MSize n)
 /* Fixup upvalues for child prototype, step #2. */
 static void fs_fixup_uv2(FuncState *fs, GCproto *pt)
 {
-  
+  VarInfo *vstack = fs->ls->vstack;
+  uint16_t *uv = proto_uv(pt);
+  MSize i, n = pt->sizeuv;
+  for (i = 0; i < n; i++) {
+    VarIndex vidx = uv[i];
+    if (vidx >= LJ_MAX_VSTACK)
+      uv[i] = vidx - LJ_MAX_VSTACK;
+    else if ((vstack[vidx].info & VSTACK_VAR_RW))
+      uv[i] = vstack[vidx].slot | PROTO_UV_LOCAL;
+    else
+      uv[i] = vstack[vidx].slot | PROTO_UV_LOCAL | PROTO_UV_IMMUTABLE;
+  }
+}
+
+/* Fixup constants for prototype. */
+static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
+{
+  GCtab *kt;
+  TValue *array;
+  Node *node;
+  MSize i, hmask;
+  checklimitgt(fs, fs->nkn, BCMAX_D+1, "constants");
+  checklimitgt(fs, fs->nkgc, BCMAX_D+1, "constants");
+  setmref(pt->k, kptr);
+  pt->sizekn = fs->nkn;
+  pt->sizekgc = fs->nkgc;
+  kt = fs->kt;
+  array = tvref(kt->array);
+  for (i = 0; i < kt->asize; i++)
+    if (tvhaskslot(&array[i])) {
+      TValue *tv = &((TValue *)kptr)[tvkslot(&array[i])];
+      if (LJ_DUALNUM)
+	setintV(tv, (int32_t)i);
+      else
+	setnumV(tv, (lua_Number)i);
+    }
+  node = noderef(kt->node);
+  hmask = kt->hmask;
+  for (i = 0; i <= hmask; i++) {
+    Node *n = &node[i];
+    if (tvhaskslot(&n->val)) {
+      ptrdiff_t kidx = (ptrdiff_t)tvkslot(&n->val);
+      lj_assertFS(!tvisint(&n->key), "unexpected integer key");
+      if (tvisnum(&n->key)) {
+	TValue *tv = &((TValue *)kptr)[kidx];
+	if (LJ_DUALNUM) {
+	  lua_Number nn = numV(&n->key);
+	  int32_t k = lj_num2int(nn);
+	  lj_assertFS(!tvismze
