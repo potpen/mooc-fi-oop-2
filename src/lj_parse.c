@@ -1435,4 +1435,52 @@ static void fs_fixup_line(FuncState *fs, GCproto *pt,
       lj_assertFS(delta >= 0 && delta < 256, "bad line delta");
       li[i] = (uint8_t)delta;
     } while (++i < n);
-  } else if (LJ_LIKELY(numline < 65536))
+  } else if (LJ_LIKELY(numline < 65536)) {
+    uint16_t *li = (uint16_t *)lineinfo;
+    do {
+      BCLine delta = base[i].line - first;
+      lj_assertFS(delta >= 0 && delta < 65536, "bad line delta");
+      li[i] = (uint16_t)delta;
+    } while (++i < n);
+  } else {
+    uint32_t *li = (uint32_t *)lineinfo;
+    do {
+      BCLine delta = base[i].line - first;
+      lj_assertFS(delta >= 0, "bad line delta");
+      li[i] = (uint32_t)delta;
+    } while (++i < n);
+  }
+}
+
+/* Prepare variable info for prototype. */
+static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar)
+{
+  VarInfo *vs =ls->vstack, *ve;
+  MSize i, n;
+  BCPos lastpc;
+  lj_buf_reset(&ls->sb);  /* Copy to temp. string buffer. */
+  /* Store upvalue names. */
+  for (i = 0, n = fs->nuv; i < n; i++) {
+    GCstr *s = strref(vs[fs->uvmap[i]].name);
+    MSize len = s->len+1;
+    char *p = lj_buf_more(&ls->sb, len);
+    p = lj_buf_wmem(p, strdata(s), len);
+    ls->sb.w = p;
+  }
+  *ofsvar = sbuflen(&ls->sb);
+  lastpc = 0;
+  /* Store local variable names and compressed ranges. */
+  for (ve = vs + ls->vtop, vs += fs->vbase; vs < ve; vs++) {
+    if (!gola_isgotolabel(vs)) {
+      GCstr *s = strref(vs->name);
+      BCPos startpc;
+      char *p;
+      if ((uintptr_t)s < VARNAME__MAX) {
+	p = lj_buf_more(&ls->sb, 1 + 2*5);
+	*p++ = (char)(uintptr_t)s;
+      } else {
+	MSize len = s->len+1;
+	p = lj_buf_more(&ls->sb, len + 2*5);
+	p = lj_buf_wmem(p, strdata(s), len);
+      }
+     
