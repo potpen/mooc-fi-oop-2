@@ -1483,4 +1483,53 @@ static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar)
 	p = lj_buf_more(&ls->sb, len + 2*5);
 	p = lj_buf_wmem(p, strdata(s), len);
       }
-     
+      startpc = vs->startpc;
+      p = lj_strfmt_wuleb128(p, startpc-lastpc);
+      p = lj_strfmt_wuleb128(p, vs->endpc-startpc);
+      ls->sb.w = p;
+      lastpc = startpc;
+    }
+  }
+  lj_buf_putb(&ls->sb, '\0');  /* Terminator for varinfo. */
+  return sbuflen(&ls->sb);
+}
+
+/* Fixup variable info for prototype. */
+static void fs_fixup_var(LexState *ls, GCproto *pt, uint8_t *p, size_t ofsvar)
+{
+  setmref(pt->uvinfo, p);
+  setmref(pt->varinfo, (char *)p + ofsvar);
+  memcpy(p, ls->sb.b, sbuflen(&ls->sb));  /* Copy from temp. buffer. */
+}
+#else
+
+/* Initialize with empty debug info, if disabled. */
+#define fs_prep_line(fs, numline)		(UNUSED(numline), 0)
+#define fs_fixup_line(fs, pt, li, numline) \
+  pt->firstline = pt->numline = 0, setmref((pt)->lineinfo, NULL)
+#define fs_prep_var(ls, fs, ofsvar)		(UNUSED(ofsvar), 0)
+#define fs_fixup_var(ls, pt, p, ofsvar) \
+  setmref((pt)->uvinfo, NULL), setmref((pt)->varinfo, NULL)
+
+#endif
+
+/* Check if bytecode op returns. */
+static int bcopisret(BCOp op)
+{
+  switch (op) {
+  case BC_CALLMT: case BC_CALLT:
+  case BC_RETM: case BC_RET: case BC_RET0: case BC_RET1:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+/* Fixup return instruction for prototype. */
+static void fs_fixup_ret(FuncState *fs)
+{
+  BCPos lastpc = fs->pc;
+  if (lastpc <= fs->lasttarget || !bcopisret(bc_op(fs->bcbase[lastpc-1].ins))) {
+    if ((fs->bl->flags & FSCOPE_UPVAL))
+      bcemit_AJ(fs, BC_UCLO, 0, 0);
+    bcemit_
