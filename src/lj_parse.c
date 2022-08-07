@@ -1576,4 +1576,41 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   fs_fixup_ret(fs);
 
   /* Calculate total size of prototype including all colocated arrays. */
-  sizept = sizeof(GCproto) + fs->pc*size
+  sizept = sizeof(GCproto) + fs->pc*sizeof(BCIns) + fs->nkgc*sizeof(GCRef);
+  sizept = (sizept + sizeof(TValue)-1) & ~(sizeof(TValue)-1);
+  ofsk = sizept; sizept += fs->nkn*sizeof(TValue);
+  ofsuv = sizept; sizept += ((fs->nuv+1)&~1)*2;
+  ofsli = sizept; sizept += fs_prep_line(fs, numline);
+  ofsdbg = sizept; sizept += fs_prep_var(ls, fs, &ofsvar);
+
+  /* Allocate prototype and initialize its fields. */
+  pt = (GCproto *)lj_mem_newgco(L, (MSize)sizept);
+  pt->gct = ~LJ_TPROTO;
+  pt->sizept = (MSize)sizept;
+  pt->trace = 0;
+  pt->flags = (uint8_t)(fs->flags & ~(PROTO_HAS_RETURN|PROTO_FIXUP_RETURN));
+  pt->numparams = fs->numparams;
+  pt->framesize = fs->framesize;
+  setgcref(pt->chunkname, obj2gco(ls->chunkname));
+
+  /* Close potentially uninitialized gap between bc and kgc. */
+  *(uint32_t *)((char *)pt + ofsk - sizeof(GCRef)*(fs->nkgc+1)) = 0;
+  fs_fixup_bc(fs, pt, (BCIns *)((char *)pt + sizeof(GCproto)), fs->pc);
+  fs_fixup_k(fs, pt, (void *)((char *)pt + ofsk));
+  fs_fixup_uv1(fs, pt, (uint16_t *)((char *)pt + ofsuv));
+  fs_fixup_line(fs, pt, (void *)((char *)pt + ofsli), numline);
+  fs_fixup_var(ls, pt, (uint8_t *)((char *)pt + ofsdbg), ofsvar);
+
+  lj_vmevent_send(L, BC,
+    setprotoV(L, L->top++, pt);
+  );
+
+  L->top--;  /* Pop table of constants. */
+  ls->vtop = fs->vbase;  /* Reset variable stack. */
+  ls->fs = fs->prev;
+  lj_assertL(ls->fs != NULL || ls->tok == TK_eof, "bad parser state");
+  return pt;
+}
+
+/* Initialize a new FuncState. */
+static void
