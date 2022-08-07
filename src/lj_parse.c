@@ -1532,4 +1532,48 @@ static void fs_fixup_ret(FuncState *fs)
   if (lastpc <= fs->lasttarget || !bcopisret(bc_op(fs->bcbase[lastpc-1].ins))) {
     if ((fs->bl->flags & FSCOPE_UPVAL))
       bcemit_AJ(fs, BC_UCLO, 0, 0);
-    bcemit_
+    bcemit_AD(fs, BC_RET0, 0, 1);  /* Need final return. */
+  }
+  fs->bl->flags |= FSCOPE_NOCLOSE;  /* Handled above. */
+  fscope_end(fs);
+  lj_assertFS(fs->bl == NULL, "bad scope nesting");
+  /* May need to fixup returns encoded before first function was created. */
+  if (fs->flags & PROTO_FIXUP_RETURN) {
+    BCPos pc;
+    for (pc = 1; pc < lastpc; pc++) {
+      BCIns ins = fs->bcbase[pc].ins;
+      BCPos offset;
+      switch (bc_op(ins)) {
+      case BC_CALLMT: case BC_CALLT:
+      case BC_RETM: case BC_RET: case BC_RET0: case BC_RET1:
+	offset = bcemit_INS(fs, ins);  /* Copy original instruction. */
+	fs->bcbase[offset].line = fs->bcbase[pc].line;
+	offset = offset-(pc+1)+BCBIAS_J;
+	if (offset > BCMAX_D)
+	  err_syntax(fs->ls, LJ_ERR_XFIXUP);
+	/* Replace with UCLO plus branch. */
+	fs->bcbase[pc].ins = BCINS_AD(BC_UCLO, 0, offset);
+	break;
+      case BC_FNEW:
+	return;  /* We're done. */
+      default:
+	break;
+      }
+    }
+  }
+}
+
+/* Finish a FuncState and return the new prototype. */
+static GCproto *fs_finish(LexState *ls, BCLine line)
+{
+  lua_State *L = ls->L;
+  FuncState *fs = ls->fs;
+  BCLine numline = line - fs->linedefined;
+  size_t sizept, ofsk, ofsuv, ofsli, ofsdbg, ofsvar;
+  GCproto *pt;
+
+  /* Apply final fixups. */
+  fs_fixup_ret(fs);
+
+  /* Calculate total size of prototype including all colocated arrays. */
+  sizept = sizeof(GCproto) + fs->pc*size
