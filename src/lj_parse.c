@@ -1613,4 +1613,58 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
 }
 
 /* Initialize a new FuncState. */
-static void
+static void fs_init(LexState *ls, FuncState *fs)
+{
+  lua_State *L = ls->L;
+  fs->prev = ls->fs; ls->fs = fs;  /* Append to list. */
+  fs->ls = ls;
+  fs->vbase = ls->vtop;
+  fs->L = L;
+  fs->pc = 0;
+  fs->lasttarget = 0;
+  fs->jpc = NO_JMP;
+  fs->freereg = 0;
+  fs->nkgc = 0;
+  fs->nkn = 0;
+  fs->nactvar = 0;
+  fs->nuv = 0;
+  fs->bl = NULL;
+  fs->flags = 0;
+  fs->framesize = 1;  /* Minimum frame size. */
+  fs->kt = lj_tab_new(L, 0, 0);
+  /* Anchor table of constants in stack to avoid being collected. */
+  settabV(L, L->top, fs->kt);
+  incr_top(L);
+}
+
+/* -- Expressions --------------------------------------------------------- */
+
+/* Forward declaration. */
+static void expr(LexState *ls, ExpDesc *v);
+
+/* Return string expression. */
+static void expr_str(LexState *ls, ExpDesc *e)
+{
+  expr_init(e, VKSTR, 0);
+  e->u.sval = lex_str(ls);
+}
+
+/* Return index expression. */
+static void expr_index(FuncState *fs, ExpDesc *t, ExpDesc *e)
+{
+  /* Already called: expr_toval(fs, e). */
+  t->k = VINDEXED;
+  if (expr_isnumk(e)) {
+#if LJ_DUALNUM
+    if (tvisint(expr_numtv(e))) {
+      int32_t k = intV(expr_numtv(e));
+      if (checku8(k)) {
+	t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
+	return;
+      }
+    }
+#else
+    lua_Number n = expr_numberV(e);
+    int32_t k = lj_num2int(n);
+    if (checku8(k) && n == (lua_Number)k) {
+      t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
