@@ -1668,3 +1668,61 @@ static void expr_index(FuncState *fs, ExpDesc *t, ExpDesc *e)
     int32_t k = lj_num2int(n);
     if (checku8(k) && n == (lua_Number)k) {
       t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
+      return;
+    }
+#endif
+  } else if (expr_isstrk(e)) {
+    BCReg idx = const_str(fs, e);
+    if (idx <= BCMAX_C) {
+      t->u.s.aux = ~idx;  /* -256..-1: const string key */
+      return;
+    }
+  }
+  t->u.s.aux = expr_toanyreg(fs, e);  /* 0..255: register */
+}
+
+/* Parse index expression with named field. */
+static void expr_field(LexState *ls, ExpDesc *v)
+{
+  FuncState *fs = ls->fs;
+  ExpDesc key;
+  expr_toanyreg(fs, v);
+  lj_lex_next(ls);  /* Skip dot or colon. */
+  expr_str(ls, &key);
+  expr_index(fs, v, &key);
+}
+
+/* Parse index expression with brackets. */
+static void expr_bracket(LexState *ls, ExpDesc *v)
+{
+  lj_lex_next(ls);  /* Skip '['. */
+  expr(ls, v);
+  expr_toval(ls->fs, v);
+  lex_check(ls, ']');
+}
+
+/* Get value of constant expression. */
+static void expr_kvalue(FuncState *fs, TValue *v, ExpDesc *e)
+{
+  UNUSED(fs);
+  if (e->k <= VKTRUE) {
+    setpriV(v, ~(uint32_t)e->k);
+  } else if (e->k == VKSTR) {
+    setgcVraw(v, obj2gco(e->u.sval), LJ_TSTR);
+  } else {
+    lj_assertFS(tvisnumber(expr_numtv(e)), "bad number constant");
+    *v = *expr_numtv(e);
+  }
+}
+
+/* Parse table constructor expression. */
+static void expr_table(LexState *ls, ExpDesc *e)
+{
+  FuncState *fs = ls->fs;
+  BCLine line = ls->linenumber;
+  GCtab *t = NULL;
+  int vcall = 0, needarr = 0, fixt = 0;
+  uint32_t narr = 1;  /* First array index. */
+  uint32_t nhash = 0;  /* Number of hash entries. */
+  BCReg freg = fs->freereg;
+  BCPo
