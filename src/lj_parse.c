@@ -1725,4 +1725,44 @@ static void expr_table(LexState *ls, ExpDesc *e)
   uint32_t narr = 1;  /* First array index. */
   uint32_t nhash = 0;  /* Number of hash entries. */
   BCReg freg = fs->freereg;
-  BCPo
+  BCPos pc = bcemit_AD(fs, BC_TNEW, freg, 0);
+  expr_init(e, VNONRELOC, freg);
+  bcreg_reserve(fs, 1);
+  freg++;
+  lex_check(ls, '{');
+  while (ls->tok != '}') {
+    ExpDesc key, val;
+    vcall = 0;
+    if (ls->tok == '[') {
+      expr_bracket(ls, &key);  /* Already calls expr_toval. */
+      if (!expr_isk(&key)) expr_index(fs, e, &key);
+      if (expr_isnumk(&key) && expr_numiszero(&key)) needarr = 1; else nhash++;
+      lex_check(ls, '=');
+    } else if ((ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) &&
+	       lj_lex_lookahead(ls) == '=') {
+      expr_str(ls, &key);
+      lex_check(ls, '=');
+      nhash++;
+    } else {
+      expr_init(&key, VKNUM, 0);
+      setintV(&key.u.nval, (int)narr);
+      narr++;
+      needarr = vcall = 1;
+    }
+    expr(ls, &val);
+    if (expr_isk(&key) && key.k != VKNIL &&
+	(key.k == VKSTR || expr_isk_nojump(&val))) {
+      TValue k, *v;
+      if (!t) {  /* Create template table on demand. */
+	BCReg kidx;
+	t = lj_tab_new(fs->L, needarr ? narr : 0, hsize2hbits(nhash));
+	kidx = const_gc(fs, obj2gco(t), LJ_TTAB);
+	fs->bcbase[pc].ins = BCINS_AD(BC_TDUP, freg-1, kidx);
+      }
+      vcall = 0;
+      expr_kvalue(fs, &k, &key);
+      v = lj_tab_set(fs->L, t, &k);
+      lj_gc_anybarriert(fs->L, t);
+      if (expr_isk_nojump(&val)) {  /* Add const key/value to template table. */
+	expr_kvalue(fs, v, &val);
+      } else {  /* Otherwise create dummy string key 
