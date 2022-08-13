@@ -1765,4 +1765,47 @@ static void expr_table(LexState *ls, ExpDesc *e)
       lj_gc_anybarriert(fs->L, t);
       if (expr_isk_nojump(&val)) {  /* Add const key/value to template table. */
 	expr_kvalue(fs, v, &val);
-      } else {  /* Otherwise create dummy string key 
+      } else {  /* Otherwise create dummy string key (avoids lj_tab_newkey). */
+	settabV(fs->L, v, t);  /* Preserve key with table itself as value. */
+	fixt = 1;   /* Fix this later, after all resizes. */
+	goto nonconst;
+      }
+    } else {
+    nonconst:
+      if (val.k != VCALL) { expr_toanyreg(fs, &val); vcall = 0; }
+      if (expr_isk(&key)) expr_index(fs, e, &key);
+      bcemit_store(fs, e, &val);
+    }
+    fs->freereg = freg;
+    if (!lex_opt(ls, ',') && !lex_opt(ls, ';')) break;
+  }
+  lex_match(ls, '}', '{', line);
+  if (vcall) {
+    BCInsLine *ilp = &fs->bcbase[fs->pc-1];
+    ExpDesc en;
+    lj_assertFS(bc_a(ilp->ins) == freg &&
+		bc_op(ilp->ins) == (narr > 256 ? BC_TSETV : BC_TSETB),
+		"bad CALL code generation");
+    expr_init(&en, VKNUM, 0);
+    en.u.nval.u32.lo = narr-1;
+    en.u.nval.u32.hi = 0x43300000;  /* Biased integer to avoid denormals. */
+    if (narr > 256) { fs->pc--; ilp--; }
+    ilp->ins = BCINS_AD(BC_TSETM, freg, const_num(fs, &en));
+    setbc_b(&ilp[-1].ins, 0);
+  }
+  if (pc == fs->pc-1) {  /* Make expr relocable if possible. */
+    e->u.s.info = pc;
+    fs->freereg--;
+    e->k = VRELOCABLE;
+  } else {
+    e->k = VNONRELOC;  /* May have been changed by expr_index. */
+  }
+  if (!t) {  /* Construct TNEW RD: hhhhhaaaaaaaaaaa. */
+    BCIns *ip = &fs->bcbase[pc].ins;
+    if (!needarr) narr = 0;
+    else if (narr < 3) narr = 3;
+    else if (narr > 0x7ff) narr = 0x7ff;
+    setbc_d(ip, narr|(hsize2hbits(nhash)<<11));
+  } else {
+    if (needarr && t->asize < narr)
+      
