@@ -1862,4 +1862,54 @@ static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
   FuncScope bl;
   GCproto *pt;
   ptrdiff_t oldbase = pfs->bcbase - ls->bcstack;
-  fs_in
+  fs_init(ls, &fs);
+  fscope_begin(&fs, &bl, 0);
+  fs.linedefined = line;
+  fs.numparams = (uint8_t)parse_params(ls, needself);
+  fs.bcbase = pfs->bcbase + pfs->pc;
+  fs.bclim = pfs->bclim - pfs->pc;
+  bcemit_AD(&fs, BC_FUNCF, 0, 0);  /* Placeholder. */
+  parse_chunk(ls);
+  if (ls->tok != TK_end) lex_match(ls, TK_end, TK_function, line);
+  pt = fs_finish(ls, (ls->lastline = ls->linenumber));
+  pfs->bcbase = ls->bcstack + oldbase;  /* May have been reallocated. */
+  pfs->bclim = (BCPos)(ls->sizebcstack - oldbase);
+  /* Store new prototype in the constant array of the parent. */
+  expr_init(e, VRELOCABLE,
+	    bcemit_AD(pfs, BC_FNEW, 0, const_gc(pfs, obj2gco(pt), LJ_TPROTO)));
+#if LJ_HASFFI
+  pfs->flags |= (fs.flags & PROTO_FFI);
+#endif
+  if (!(pfs->flags & PROTO_CHILD)) {
+    if (pfs->flags & PROTO_HAS_RETURN)
+      pfs->flags |= PROTO_FIXUP_RETURN;
+    pfs->flags |= PROTO_CHILD;
+  }
+  lj_lex_next(ls);
+}
+
+/* Parse expression list. Last expression is left open. */
+static BCReg expr_list(LexState *ls, ExpDesc *v)
+{
+  BCReg n = 1;
+  expr(ls, v);
+  while (lex_opt(ls, ',')) {
+    expr_tonextreg(ls->fs, v);
+    expr(ls, v);
+    n++;
+  }
+  return n;
+}
+
+/* Parse function argument list. */
+static void parse_args(LexState *ls, ExpDesc *e)
+{
+  FuncState *fs = ls->fs;
+  ExpDesc args;
+  BCIns ins;
+  BCReg base;
+  BCLine line = ls->linenumber;
+  if (ls->tok == '(') {
+#if !LJ_52
+    if (line != ls->lastline)
+      err_syntax(ls, LJ_ERR_XA
