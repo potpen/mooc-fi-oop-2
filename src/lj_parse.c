@@ -1959,4 +1959,60 @@ static void expr_primary(LexState *ls, ExpDesc *v)
     expr(ls, v);
     lex_match(ls, ')', '(', line);
     expr_discharge(ls->fs, v);
-  } else if (ls->tok == TK_name || (!LJ_52
+  } else if (ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) {
+    var_lookup(ls, v);
+  } else {
+    err_syntax(ls, LJ_ERR_XSYMBOL);
+  }
+  for (;;) {  /* Parse multiple expression suffixes. */
+    if (ls->tok == '.') {
+      expr_field(ls, v);
+    } else if (ls->tok == '[') {
+      ExpDesc key;
+      expr_toanyreg(fs, v);
+      expr_bracket(ls, &key);
+      expr_index(fs, v, &key);
+    } else if (ls->tok == ':') {
+      ExpDesc key;
+      lj_lex_next(ls);
+      expr_str(ls, &key);
+      bcemit_method(fs, v, &key);
+      parse_args(ls, v);
+    } else if (ls->tok == '(' || ls->tok == TK_string || ls->tok == '{') {
+      expr_tonextreg(fs, v);
+      if (LJ_FR2) bcreg_reserve(fs, 1);
+      parse_args(ls, v);
+    } else {
+      break;
+    }
+  }
+}
+
+/* Parse simple expression. */
+static void expr_simple(LexState *ls, ExpDesc *v)
+{
+  switch (ls->tok) {
+  case TK_number:
+    expr_init(v, (LJ_HASFFI && tviscdata(&ls->tokval)) ? VKCDATA : VKNUM, 0);
+    copyTV(ls->L, &v->u.nval, &ls->tokval);
+    break;
+  case TK_string:
+    expr_init(v, VKSTR, 0);
+    v->u.sval = strV(&ls->tokval);
+    break;
+  case TK_nil:
+    expr_init(v, VKNIL, 0);
+    break;
+  case TK_true:
+    expr_init(v, VKTRUE, 0);
+    break;
+  case TK_false:
+    expr_init(v, VKFALSE, 0);
+    break;
+  case TK_dots: {  /* Vararg. */
+    FuncState *fs = ls->fs;
+    BCReg base;
+    checkcond(ls, fs->flags & PROTO_VARARG, LJ_ERR_XDOTS);
+    bcreg_reserve(fs, 1);
+    base = fs->freereg-1;
+    expr_init(v,
