@@ -1808,4 +1808,58 @@ static void expr_table(LexState *ls, ExpDesc *e)
     setbc_d(ip, narr|(hsize2hbits(nhash)<<11));
   } else {
     if (needarr && t->asize < narr)
-      
+      lj_tab_reasize(fs->L, t, narr-1);
+    if (fixt) {  /* Fix value for dummy keys in template table. */
+      Node *node = noderef(t->node);
+      uint32_t i, hmask = t->hmask;
+      for (i = 0; i <= hmask; i++) {
+	Node *n = &node[i];
+	if (tvistab(&n->val)) {
+	  lj_assertFS(tabV(&n->val) == t, "bad dummy key in template table");
+	  setnilV(&n->val);  /* Turn value into nil. */
+	}
+      }
+    }
+    lj_gc_check(fs->L);
+  }
+}
+
+/* Parse function parameters. */
+static BCReg parse_params(LexState *ls, int needself)
+{
+  FuncState *fs = ls->fs;
+  BCReg nparams = 0;
+  lex_check(ls, '(');
+  if (needself)
+    var_new_lit(ls, nparams++, "self");
+  if (ls->tok != ')') {
+    do {
+      if (ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) {
+	var_new(ls, nparams++, lex_str(ls));
+      } else if (ls->tok == TK_dots) {
+	lj_lex_next(ls);
+	fs->flags |= PROTO_VARARG;
+	break;
+      } else {
+	err_syntax(ls, LJ_ERR_XPARAM);
+      }
+    } while (lex_opt(ls, ','));
+  }
+  var_add(ls, nparams);
+  lj_assertFS(fs->nactvar == nparams, "bad regalloc");
+  bcreg_reserve(fs, nparams);
+  lex_check(ls, ')');
+  return nparams;
+}
+
+/* Forward declaration. */
+static void parse_chunk(LexState *ls);
+
+/* Parse body of a function. */
+static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
+{
+  FuncState fs, *pfs = ls->fs;
+  FuncScope bl;
+  GCproto *pt;
+  ptrdiff_t oldbase = pfs->bcbase - ls->bcstack;
+  fs_in
