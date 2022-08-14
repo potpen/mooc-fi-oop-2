@@ -1912,4 +1912,51 @@ static void parse_args(LexState *ls, ExpDesc *e)
   if (ls->tok == '(') {
 #if !LJ_52
     if (line != ls->lastline)
-      err_syntax(ls, LJ_ERR_XA
+      err_syntax(ls, LJ_ERR_XAMBIG);
+#endif
+    lj_lex_next(ls);
+    if (ls->tok == ')') {  /* f(). */
+      args.k = VVOID;
+    } else {
+      expr_list(ls, &args);
+      if (args.k == VCALL)  /* f(a, b, g()) or f(a, b, ...). */
+	setbc_b(bcptr(fs, &args), 0);  /* Pass on multiple results. */
+    }
+    lex_match(ls, ')', '(', line);
+  } else if (ls->tok == '{') {
+    expr_table(ls, &args);
+  } else if (ls->tok == TK_string) {
+    expr_init(&args, VKSTR, 0);
+    args.u.sval = strV(&ls->tokval);
+    lj_lex_next(ls);
+  } else {
+    err_syntax(ls, LJ_ERR_XFUNARG);
+    return;  /* Silence compiler. */
+  }
+  lj_assertFS(e->k == VNONRELOC, "bad expr type %d", e->k);
+  base = e->u.s.info;  /* Base register for call. */
+  if (args.k == VCALL) {
+    ins = BCINS_ABC(BC_CALLM, base, 2, args.u.s.aux - base - 1 - LJ_FR2);
+  } else {
+    if (args.k != VVOID)
+      expr_tonextreg(fs, &args);
+    ins = BCINS_ABC(BC_CALL, base, 2, fs->freereg - base - LJ_FR2);
+  }
+  expr_init(e, VCALL, bcemit_INS(fs, ins));
+  e->u.s.aux = base;
+  fs->bcbase[fs->pc - 1].line = line;
+  fs->freereg = base+1;  /* Leave one result by default. */
+}
+
+/* Parse primary expression. */
+static void expr_primary(LexState *ls, ExpDesc *v)
+{
+  FuncState *fs = ls->fs;
+  /* Parse prefix expression. */
+  if (ls->tok == '(') {
+    BCLine line = ls->linenumber;
+    lj_lex_next(ls);
+    expr(ls, v);
+    lex_match(ls, ')', '(', line);
+    expr_discharge(ls->fs, v);
+  } else if (ls->tok == TK_name || (!LJ_52
