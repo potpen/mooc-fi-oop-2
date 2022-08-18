@@ -2015,4 +2015,60 @@ static void expr_simple(LexState *ls, ExpDesc *v)
     checkcond(ls, fs->flags & PROTO_VARARG, LJ_ERR_XDOTS);
     bcreg_reserve(fs, 1);
     base = fs->freereg-1;
-    expr_init(v,
+    expr_init(v, VCALL, bcemit_ABC(fs, BC_VARG, base, 2, fs->numparams));
+    v->u.s.aux = base;
+    break;
+  }
+  case '{':  /* Table constructor. */
+    expr_table(ls, v);
+    return;
+  case TK_function:
+    lj_lex_next(ls);
+    parse_body(ls, v, 0, ls->linenumber);
+    return;
+  default:
+    expr_primary(ls, v);
+    return;
+  }
+  lj_lex_next(ls);
+}
+
+/* Manage syntactic levels to avoid blowing up the stack. */
+static void synlevel_begin(LexState *ls)
+{
+  if (++ls->level >= LJ_MAX_XLEVEL)
+    lj_lex_error(ls, 0, LJ_ERR_XLEVELS);
+}
+
+#define synlevel_end(ls)	((ls)->level--)
+
+/* Convert token to binary operator. */
+static BinOpr token2binop(LexToken tok)
+{
+  switch (tok) {
+  case '+':	return OPR_ADD;
+  case '-':	return OPR_SUB;
+  case '*':	return OPR_MUL;
+  case '/':	return OPR_DIV;
+  case '%':	return OPR_MOD;
+  case '^':	return OPR_POW;
+  case TK_concat: return OPR_CONCAT;
+  case TK_ne:	return OPR_NE;
+  case TK_eq:	return OPR_EQ;
+  case '<':	return OPR_LT;
+  case TK_le:	return OPR_LE;
+  case '>':	return OPR_GT;
+  case TK_ge:	return OPR_GE;
+  case TK_and:	return OPR_AND;
+  case TK_or:	return OPR_OR;
+  default:	return OPR_NOBINOPR;
+  }
+}
+
+/* Priorities for each binary operator. ORDER OPR. */
+static const struct {
+  uint8_t left;		/* Left priority. */
+  uint8_t right;	/* Right priority. */
+} priority[] = {
+  {6,6}, {6,6}, {7,7}, {7,7}, {7,7},	/* ADD SUB MUL DIV MOD */
+  {10,9}, {5,4},			/* POW CONCAT (right associative) *
