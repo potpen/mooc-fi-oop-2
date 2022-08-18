@@ -2180,3 +2180,45 @@ static void assign_hazard(LexState *ls, LHSVarList *lh, const ExpDesc *v)
 }
 
 /* Adjust LHS/RHS of an assignment. */
+static void assign_adjust(LexState *ls, BCReg nvars, BCReg nexps, ExpDesc *e)
+{
+  FuncState *fs = ls->fs;
+  int32_t extra = (int32_t)nvars - (int32_t)nexps;
+  if (e->k == VCALL) {
+    extra++;  /* Compensate for the VCALL itself. */
+    if (extra < 0) extra = 0;
+    setbc_b(bcptr(fs, e), extra+1);  /* Fixup call results. */
+    if (extra > 1) bcreg_reserve(fs, (BCReg)extra-1);
+  } else {
+    if (e->k != VVOID)
+      expr_tonextreg(fs, e);  /* Close last expression. */
+    if (extra > 0) {  /* Leftover LHS are set to nil. */
+      BCReg reg = fs->freereg;
+      bcreg_reserve(fs, (BCReg)extra);
+      bcemit_nil(fs, reg, (BCReg)extra);
+    }
+  }
+  if (nexps > nvars)
+    ls->fs->freereg -= nexps - nvars;  /* Drop leftover regs. */
+}
+
+/* Recursively parse assignment statement. */
+static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
+{
+  ExpDesc e;
+  checkcond(ls, VLOCAL <= lh->v.k && lh->v.k <= VINDEXED, LJ_ERR_XSYNTAX);
+  if (lex_opt(ls, ',')) {  /* Collect LHS list and recurse upwards. */
+    LHSVarList vl;
+    vl.prev = lh;
+    expr_primary(ls, &vl.v);
+    if (vl.v.k == VLOCAL)
+      assign_hazard(ls, lh, &vl.v);
+    checklimit(ls->fs, ls->level + nvars, LJ_MAX_XLEVEL, "variable names");
+    parse_assignment(ls, &vl, nvars+1);
+  } else {  /* Parse RHS. */
+    BCReg nexps;
+    lex_check(ls, '=');
+    nexps = expr_list(ls, &e);
+    if (nexps == nvars) {
+      if (e.k == VCALL) {
+	if (bc_op(*bcptr(ls->fs, &e)) == BC_VARG) {
