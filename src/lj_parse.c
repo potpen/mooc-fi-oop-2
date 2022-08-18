@@ -2071,4 +2071,58 @@ static const struct {
   uint8_t right;	/* Right priority. */
 } priority[] = {
   {6,6}, {6,6}, {7,7}, {7,7}, {7,7},	/* ADD SUB MUL DIV MOD */
-  {10,9}, {5,4},			/* POW CONCAT (right associative) *
+  {10,9}, {5,4},			/* POW CONCAT (right associative) */
+  {3,3}, {3,3},				/* EQ NE */
+  {3,3}, {3,3}, {3,3}, {3,3},		/* LT GE GT LE */
+  {2,2}, {1,1}				/* AND OR */
+};
+
+#define UNARY_PRIORITY		8  /* Priority for unary operators. */
+
+/* Forward declaration. */
+static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit);
+
+/* Parse unary expression. */
+static void expr_unop(LexState *ls, ExpDesc *v)
+{
+  BCOp op;
+  if (ls->tok == TK_not) {
+    op = BC_NOT;
+  } else if (ls->tok == '-') {
+    op = BC_UNM;
+  } else if (ls->tok == '#') {
+    op = BC_LEN;
+  } else {
+    expr_simple(ls, v);
+    return;
+  }
+  lj_lex_next(ls);
+  expr_binop(ls, v, UNARY_PRIORITY);
+  bcemit_unop(ls->fs, op, v);
+}
+
+/* Parse binary expressions with priority higher than the limit. */
+static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit)
+{
+  BinOpr op;
+  synlevel_begin(ls);
+  expr_unop(ls, v);
+  op = token2binop(ls->tok);
+  while (op != OPR_NOBINOPR && priority[op].left > limit) {
+    ExpDesc v2;
+    BinOpr nextop;
+    lj_lex_next(ls);
+    bcemit_binop_left(ls->fs, op, v);
+    /* Parse binary expression with higher priority. */
+    nextop = expr_binop(ls, &v2, priority[op].right);
+    bcemit_binop(ls->fs, op, v, &v2);
+    op = nextop;
+  }
+  synlevel_end(ls);
+  return op;  /* Return unconsumed binary operator (if any). */
+}
+
+/* Parse expression. */
+static void expr(LexState *ls, ExpDesc *v)
+{
+  expr_binop(ls, v, 0);  /* Priorit
