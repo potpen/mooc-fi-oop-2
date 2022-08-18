@@ -2125,4 +2125,58 @@ static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit)
 /* Parse expression. */
 static void expr(LexState *ls, ExpDesc *v)
 {
-  expr_binop(ls, v, 0);  /* Priorit
+  expr_binop(ls, v, 0);  /* Priority 0: parse whole expression. */
+}
+
+/* Assign expression to the next register. */
+static void expr_next(LexState *ls)
+{
+  ExpDesc e;
+  expr(ls, &e);
+  expr_tonextreg(ls->fs, &e);
+}
+
+/* Parse conditional expression. */
+static BCPos expr_cond(LexState *ls)
+{
+  ExpDesc v;
+  expr(ls, &v);
+  if (v.k == VKNIL) v.k = VKFALSE;
+  bcemit_branch_t(ls->fs, &v);
+  return v.f;
+}
+
+/* -- Assignments --------------------------------------------------------- */
+
+/* List of LHS variables. */
+typedef struct LHSVarList {
+  ExpDesc v;			/* LHS variable. */
+  struct LHSVarList *prev;	/* Link to previous LHS variable. */
+} LHSVarList;
+
+/* Eliminate write-after-read hazards for local variable assignment. */
+static void assign_hazard(LexState *ls, LHSVarList *lh, const ExpDesc *v)
+{
+  FuncState *fs = ls->fs;
+  BCReg reg = v->u.s.info;  /* Check against this variable. */
+  BCReg tmp = fs->freereg;  /* Rename to this temp. register (if needed). */
+  int hazard = 0;
+  for (; lh; lh = lh->prev) {
+    if (lh->v.k == VINDEXED) {
+      if (lh->v.u.s.info == reg) {  /* t[i], t = 1, 2 */
+	hazard = 1;
+	lh->v.u.s.info = tmp;
+      }
+      if (lh->v.u.s.aux == reg) {  /* t[i], i = 1, 2 */
+	hazard = 1;
+	lh->v.u.s.aux = tmp;
+      }
+    }
+  }
+  if (hazard) {
+    bcemit_AD(fs, BC_MOV, tmp, reg);  /* Rename conflicting variable. */
+    bcreg_reserve(fs, 1);
+  }
+}
+
+/* Adjust LHS/RHS of an assignment. */
