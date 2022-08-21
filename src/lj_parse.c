@@ -2221,4 +2221,52 @@ static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
     nexps = expr_list(ls, &e);
     if (nexps == nvars) {
       if (e.k == VCALL) {
-	if (bc_op(*bcptr(ls->fs, &e)) == BC_VARG) {
+	if (bc_op(*bcptr(ls->fs, &e)) == BC_VARG) {  /* Vararg assignment. */
+	  ls->fs->freereg--;
+	  e.k = VRELOCABLE;
+	} else {  /* Multiple call results. */
+	  e.u.s.info = e.u.s.aux;  /* Base of call is not relocatable. */
+	  e.k = VNONRELOC;
+	}
+      }
+      bcemit_store(ls->fs, &lh->v, &e);
+      return;
+    }
+    assign_adjust(ls, nvars, nexps, &e);
+  }
+  /* Assign RHS to LHS and recurse downwards. */
+  expr_init(&e, VNONRELOC, ls->fs->freereg-1);
+  bcemit_store(ls->fs, &lh->v, &e);
+}
+
+/* Parse call statement or assignment. */
+static void parse_call_assign(LexState *ls)
+{
+  FuncState *fs = ls->fs;
+  LHSVarList vl;
+  expr_primary(ls, &vl.v);
+  if (vl.v.k == VCALL) {  /* Function call statement. */
+    setbc_b(bcptr(fs, &vl.v), 1);  /* No results. */
+  } else {  /* Start of an assignment. */
+    vl.prev = NULL;
+    parse_assignment(ls, &vl, 1);
+  }
+}
+
+/* Parse 'local' statement. */
+static void parse_local(LexState *ls)
+{
+  if (lex_opt(ls, TK_function)) {  /* Local function declaration. */
+    ExpDesc v, b;
+    FuncState *fs = ls->fs;
+    var_new(ls, 0, lex_str(ls));
+    expr_init(&v, VLOCAL, fs->freereg);
+    v.u.s.aux = fs->varmap[fs->freereg];
+    bcreg_reserve(fs, 1);
+    var_add(ls, 1);
+    parse_body(ls, &b, 0, ls->linenumber);
+    /* bcemit_store(fs, &v, &b) without setting VSTACK_VAR_RW. */
+    expr_free(fs, &b);
+    expr_toreg(fs, &b, v.u.s.info);
+    /* The upvalue is in scope, but the local is only valid after the store. */
+    var_get(ls, fs, fs->nactvar - 1).startpc = fs->p
