@@ -2269,4 +2269,63 @@ static void parse_local(LexState *ls)
     expr_free(fs, &b);
     expr_toreg(fs, &b, v.u.s.info);
     /* The upvalue is in scope, but the local is only valid after the store. */
-    var_get(ls, fs, fs->nactvar - 1).startpc = fs->p
+    var_get(ls, fs, fs->nactvar - 1).startpc = fs->pc;
+  } else {  /* Local variable declaration. */
+    ExpDesc e;
+    BCReg nexps, nvars = 0;
+    do {  /* Collect LHS. */
+      var_new(ls, nvars++, lex_str(ls));
+    } while (lex_opt(ls, ','));
+    if (lex_opt(ls, '=')) {  /* Optional RHS. */
+      nexps = expr_list(ls, &e);
+    } else {  /* Or implicitly set to nil. */
+      e.k = VVOID;
+      nexps = 0;
+    }
+    assign_adjust(ls, nvars, nexps, &e);
+    var_add(ls, nvars);
+  }
+}
+
+/* Parse 'function' statement. */
+static void parse_func(LexState *ls, BCLine line)
+{
+  FuncState *fs;
+  ExpDesc v, b;
+  int needself = 0;
+  lj_lex_next(ls);  /* Skip 'function'. */
+  /* Parse function name. */
+  var_lookup(ls, &v);
+  while (ls->tok == '.')  /* Multiple dot-separated fields. */
+    expr_field(ls, &v);
+  if (ls->tok == ':') {  /* Optional colon to signify method call. */
+    needself = 1;
+    expr_field(ls, &v);
+  }
+  parse_body(ls, &b, needself, line);
+  fs = ls->fs;
+  bcemit_store(fs, &v, &b);
+  fs->bcbase[fs->pc - 1].line = line;  /* Set line for the store. */
+}
+
+/* -- Control transfer statements ----------------------------------------- */
+
+/* Check for end of block. */
+static int parse_isend(LexToken tok)
+{
+  switch (tok) {
+  case TK_else: case TK_elseif: case TK_end: case TK_until: case TK_eof:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+/* Parse 'return' statement. */
+static void parse_return(LexState *ls)
+{
+  BCIns ins;
+  FuncState *fs = ls->fs;
+  lj_lex_next(ls);  /* Skip 'return'. */
+  fs->flags |= PROTO_HAS_RETURN;
+  if (p
