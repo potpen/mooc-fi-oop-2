@@ -2370,4 +2370,56 @@ static void parse_break(LexState *ls)
 static void parse_goto(LexState *ls)
 {
   FuncState *fs = ls->fs;
-  GCstr *na
+  GCstr *name = lex_str(ls);
+  VarInfo *vl = gola_findlabel(ls, name);
+  if (vl)  /* Treat backwards goto within same scope like a loop. */
+    bcemit_AJ(fs, BC_LOOP, vl->slot, -1);  /* No BC range check. */
+  fs->bl->flags |= FSCOPE_GOLA;
+  gola_new(ls, name, VSTACK_GOTO, bcemit_jmp(fs));
+}
+
+/* Parse label. */
+static void parse_label(LexState *ls)
+{
+  FuncState *fs = ls->fs;
+  GCstr *name;
+  MSize idx;
+  fs->lasttarget = fs->pc;
+  fs->bl->flags |= FSCOPE_GOLA;
+  lj_lex_next(ls);  /* Skip '::'. */
+  name = lex_str(ls);
+  if (gola_findlabel(ls, name))
+    lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name));
+  idx = gola_new(ls, name, VSTACK_LABEL, fs->pc);
+  lex_check(ls, TK_label);
+  /* Recursively parse trailing statements: labels and ';' (Lua 5.2 only). */
+  for (;;) {
+    if (ls->tok == TK_label) {
+      synlevel_begin(ls);
+      parse_label(ls);
+      synlevel_end(ls);
+    } else if (LJ_52 && ls->tok == ';') {
+      lj_lex_next(ls);
+    } else {
+      break;
+    }
+  }
+  /* Trailing label is considered to be outside of scope. */
+  if (parse_isend(ls->tok) && ls->tok != TK_until)
+    ls->vstack[idx].slot = fs->bl->nactvar;
+  gola_resolve(ls, fs->bl, idx);
+}
+
+/* -- Blocks, loops and conditional statements ---------------------------- */
+
+/* Parse a block. */
+static void parse_block(LexState *ls)
+{
+  FuncState *fs = ls->fs;
+  FuncScope bl;
+  fscope_begin(fs, &bl, 0);
+  parse_chunk(ls);
+  fscope_end(fs);
+}
+
+/* Parse 'whil
