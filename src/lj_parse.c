@@ -2422,4 +2422,43 @@ static void parse_block(LexState *ls)
   fscope_end(fs);
 }
 
-/* Parse 'whil
+/* Parse 'while' statement. */
+static void parse_while(LexState *ls, BCLine line)
+{
+  FuncState *fs = ls->fs;
+  BCPos start, loop, condexit;
+  FuncScope bl;
+  lj_lex_next(ls);  /* Skip 'while'. */
+  start = fs->lasttarget = fs->pc;
+  condexit = expr_cond(ls);
+  fscope_begin(fs, &bl, FSCOPE_LOOP);
+  lex_check(ls, TK_do);
+  loop = bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
+  parse_block(ls);
+  jmp_patch(fs, bcemit_jmp(fs), start);
+  lex_match(ls, TK_end, TK_while, line);
+  fscope_end(fs);
+  jmp_tohere(fs, condexit);
+  jmp_patchins(fs, loop, fs->pc);
+}
+
+/* Parse 'repeat' statement. */
+static void parse_repeat(LexState *ls, BCLine line)
+{
+  FuncState *fs = ls->fs;
+  BCPos loop = fs->lasttarget = fs->pc;
+  BCPos condexit;
+  FuncScope bl1, bl2;
+  fscope_begin(fs, &bl1, FSCOPE_LOOP);  /* Breakable loop scope. */
+  fscope_begin(fs, &bl2, 0);  /* Inner scope. */
+  lj_lex_next(ls);  /* Skip 'repeat'. */
+  bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
+  parse_chunk(ls);
+  lex_match(ls, TK_until, TK_repeat, line);
+  condexit = expr_cond(ls);  /* Parse condition (still inside inner scope). */
+  if (!(bl2.flags & FSCOPE_UPVAL)) {  /* No upvalues? Just end inner scope. */
+    fscope_end(fs);
+  } else {  /* Otherwise generate: cond: UCLO+JMP out, !cond: UCLO+JMP loop. */
+    parse_break(ls);  /* Break from loop and close upvalues. */
+    jmp_tohere(fs, condexit);
+    fscope_end(fs);  /* End inner scope and close upvalues. */
