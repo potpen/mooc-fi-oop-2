@@ -2462,3 +2462,49 @@ static void parse_repeat(LexState *ls, BCLine line)
     parse_break(ls);  /* Break from loop and close upvalues. */
     jmp_tohere(fs, condexit);
     fscope_end(fs);  /* End inner scope and close upvalues. */
+    condexit = bcemit_jmp(fs);
+  }
+  jmp_patch(fs, condexit, loop);  /* Jump backwards if !cond. */
+  jmp_patchins(fs, loop, fs->pc);
+  fscope_end(fs);  /* End loop scope. */
+}
+
+/* Parse numeric 'for'. */
+static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
+{
+  FuncState *fs = ls->fs;
+  BCReg base = fs->freereg;
+  FuncScope bl;
+  BCPos loop, loopend;
+  /* Hidden control variables. */
+  var_new_fixed(ls, FORL_IDX, VARNAME_FOR_IDX);
+  var_new_fixed(ls, FORL_STOP, VARNAME_FOR_STOP);
+  var_new_fixed(ls, FORL_STEP, VARNAME_FOR_STEP);
+  /* Visible copy of index variable. */
+  var_new(ls, FORL_EXT, varname);
+  lex_check(ls, '=');
+  expr_next(ls);
+  lex_check(ls, ',');
+  expr_next(ls);
+  if (lex_opt(ls, ',')) {
+    expr_next(ls);
+  } else {
+    bcemit_AD(fs, BC_KSHORT, fs->freereg, 1);  /* Default step is 1. */
+    bcreg_reserve(fs, 1);
+  }
+  var_add(ls, 3);  /* Hidden control variables. */
+  lex_check(ls, TK_do);
+  loop = bcemit_AJ(fs, BC_FORI, base, NO_JMP);
+  fscope_begin(fs, &bl, 0);  /* Scope for visible variables. */
+  var_add(ls, 1);
+  bcreg_reserve(fs, 1);
+  parse_block(ls);
+  fscope_end(fs);
+  /* Perform loop inversion. Loop control instructions are at the end. */
+  loopend = bcemit_AJ(fs, BC_FORL, base, NO_JMP);
+  fs->bcbase[loopend].line = line;  /* Fix line for control ins. */
+  jmp_patchins(fs, loopend, loop+1);
+  jmp_patchins(fs, loop, fs->pc);
+}
+
+/* Try to predict whether the iterator is 
