@@ -2507,4 +2507,48 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
   jmp_patchins(fs, loop, fs->pc);
 }
 
-/* Try to predict whether the iterator is 
+/* Try to predict whether the iterator is next() and specialize the bytecode.
+** Detecting next() and pairs() by name is simplistic, but quite effective.
+** The interpreter backs off if the check for the closure fails at runtime.
+*/
+static int predict_next(LexState *ls, FuncState *fs, BCPos pc)
+{
+  BCIns ins = fs->bcbase[pc].ins;
+  GCstr *name;
+  cTValue *o;
+  switch (bc_op(ins)) {
+  case BC_MOV:
+    name = gco2str(gcref(var_get(ls, fs, bc_d(ins)).name));
+    break;
+  case BC_UGET:
+    name = gco2str(gcref(ls->vstack[fs->uvmap[bc_d(ins)]].name));
+    break;
+  case BC_GGET:
+    /* There's no inverse index (yet), so lookup the strings. */
+    o = lj_tab_getstr(fs->kt, lj_str_newlit(ls->L, "pairs"));
+    if (o && tvhaskslot(o) && tvkslot(o) == bc_d(ins))
+      return 1;
+    o = lj_tab_getstr(fs->kt, lj_str_newlit(ls->L, "next"));
+    if (o && tvhaskslot(o) && tvkslot(o) == bc_d(ins))
+      return 1;
+    return 0;
+  default:
+    return 0;
+  }
+  return (name->len == 5 && !strcmp(strdata(name), "pairs")) ||
+	 (name->len == 4 && !strcmp(strdata(name), "next"));
+}
+
+/* Parse 'for' iterator. */
+static void parse_for_iter(LexState *ls, GCstr *indexname)
+{
+  FuncState *fs = ls->fs;
+  ExpDesc e;
+  BCReg nvars = 0;
+  BCLine line;
+  BCReg base = fs->freereg + 3;
+  BCPos loop, loopend, exprpc = fs->pc;
+  FuncScope bl;
+  int isnext;
+  /* Hidden control variables. */
+  var_new_fixed(ls, nvars++, VARNAME_FOR_GEN);
