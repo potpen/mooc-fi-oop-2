@@ -2552,3 +2552,41 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   int isnext;
   /* Hidden control variables. */
   var_new_fixed(ls, nvars++, VARNAME_FOR_GEN);
+  var_new_fixed(ls, nvars++, VARNAME_FOR_STATE);
+  var_new_fixed(ls, nvars++, VARNAME_FOR_CTL);
+  /* Visible variables returned from iterator. */
+  var_new(ls, nvars++, indexname);
+  while (lex_opt(ls, ','))
+    var_new(ls, nvars++, lex_str(ls));
+  lex_check(ls, TK_in);
+  line = ls->linenumber;
+  assign_adjust(ls, 3, expr_list(ls, &e), &e);
+  /* The iterator needs another 3 [4] slots (func [pc] | state ctl). */
+  bcreg_bump(fs, 3+LJ_FR2);
+  isnext = (nvars <= 5 && predict_next(ls, fs, exprpc));
+  var_add(ls, 3);  /* Hidden control variables. */
+  lex_check(ls, TK_do);
+  loop = bcemit_AJ(fs, isnext ? BC_ISNEXT : BC_JMP, base, NO_JMP);
+  fscope_begin(fs, &bl, 0);  /* Scope for visible variables. */
+  var_add(ls, nvars-3);
+  bcreg_reserve(fs, nvars-3);
+  parse_block(ls);
+  fscope_end(fs);
+  /* Perform loop inversion. Loop control instructions are at the end. */
+  jmp_patchins(fs, loop, fs->pc);
+  bcemit_ABC(fs, isnext ? BC_ITERN : BC_ITERC, base, nvars-3+1, 2+1);
+  loopend = bcemit_AJ(fs, BC_ITERL, base, NO_JMP);
+  fs->bcbase[loopend-1].line = line;  /* Fix line for control ins. */
+  fs->bcbase[loopend].line = line;
+  jmp_patchins(fs, loopend, loop+1);
+}
+
+/* Parse 'for' statement. */
+static void parse_for(LexState *ls, BCLine line)
+{
+  FuncState *fs = ls->fs;
+  GCstr *varname;
+  FuncScope bl;
+  fscope_begin(fs, &bl, FSCOPE_LOOP);
+  lj_lex_next(ls);  /* Skip 'for'. */
+  varname = lex_str(ls);  /* Get first variable nam
