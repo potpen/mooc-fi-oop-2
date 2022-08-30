@@ -2705,4 +2705,43 @@ static void parse_chunk(LexState *ls)
     lex_opt(ls, ';');
     lj_assertLS(ls->fs->framesize >= ls->fs->freereg &&
 		ls->fs->freereg >= ls->fs->nactvar,
-		"bad 
+		"bad regalloc");
+    ls->fs->freereg = ls->fs->nactvar;  /* Free registers after each stmt. */
+  }
+  synlevel_end(ls);
+}
+
+/* Entry point of bytecode parser. */
+GCproto *lj_parse(LexState *ls)
+{
+  FuncState fs;
+  FuncScope bl;
+  GCproto *pt;
+  lua_State *L = ls->L;
+#ifdef LUAJIT_DISABLE_DEBUGINFO
+  ls->chunkname = lj_str_newlit(L, "=");
+#else
+  ls->chunkname = lj_str_newz(L, ls->chunkarg);
+#endif
+  setstrV(L, L->top, ls->chunkname);  /* Anchor chunkname string. */
+  incr_top(L);
+  ls->level = 0;
+  fs_init(ls, &fs);
+  fs.linedefined = 0;
+  fs.numparams = 0;
+  fs.bcbase = NULL;
+  fs.bclim = 0;
+  fs.flags |= PROTO_VARARG;  /* Main chunk is always a vararg func. */
+  fscope_begin(&fs, &bl, 0);
+  bcemit_AD(&fs, BC_FUNCV, 0, 0);  /* Placeholder. */
+  lj_lex_next(ls);  /* Read-ahead first token. */
+  parse_chunk(ls);
+  if (ls->tok != TK_eof)
+    err_token(ls, TK_eof);
+  pt = fs_finish(ls, ls->linenumber);
+  L->top--;  /* Drop chunkname. */
+  lj_assertL(fs.prev == NULL && ls->fs == NULL, "mismatched frame nesting");
+  lj_assertL(pt->sizeuv == 0, "toplevel proto has upvalues");
+  return pt;
+}
+
