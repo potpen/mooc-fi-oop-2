@@ -2589,4 +2589,55 @@ static void parse_for(LexState *ls, BCLine line)
   FuncScope bl;
   fscope_begin(fs, &bl, FSCOPE_LOOP);
   lj_lex_next(ls);  /* Skip 'for'. */
-  varname = lex_str(ls);  /* Get first variable nam
+  varname = lex_str(ls);  /* Get first variable name. */
+  if (ls->tok == '=')
+    parse_for_num(ls, varname, line);
+  else if (ls->tok == ',' || ls->tok == TK_in)
+    parse_for_iter(ls, varname);
+  else
+    err_syntax(ls, LJ_ERR_XFOR);
+  lex_match(ls, TK_end, TK_for, line);
+  fscope_end(fs);  /* Resolve break list. */
+}
+
+/* Parse condition and 'then' block. */
+static BCPos parse_then(LexState *ls)
+{
+  BCPos condexit;
+  lj_lex_next(ls);  /* Skip 'if' or 'elseif'. */
+  condexit = expr_cond(ls);
+  lex_check(ls, TK_then);
+  parse_block(ls);
+  return condexit;
+}
+
+/* Parse 'if' statement. */
+static void parse_if(LexState *ls, BCLine line)
+{
+  FuncState *fs = ls->fs;
+  BCPos flist;
+  BCPos escapelist = NO_JMP;
+  flist = parse_then(ls);
+  while (ls->tok == TK_elseif) {  /* Parse multiple 'elseif' blocks. */
+    jmp_append(fs, &escapelist, bcemit_jmp(fs));
+    jmp_tohere(fs, flist);
+    flist = parse_then(ls);
+  }
+  if (ls->tok == TK_else) {  /* Parse optional 'else' block. */
+    jmp_append(fs, &escapelist, bcemit_jmp(fs));
+    jmp_tohere(fs, flist);
+    lj_lex_next(ls);  /* Skip 'else'. */
+    parse_block(ls);
+  } else {
+    jmp_append(fs, &escapelist, flist);
+  }
+  jmp_tohere(fs, escapelist);
+  lex_match(ls, TK_end, TK_if, line);
+}
+
+/* -- Parse statements ---------------------------------------------------- */
+
+/* Parse a statement. Returns 1 if it must be the last one in a chunk. */
+static int parse_stmt(LexState *ls)
+{
+  BCLine lin
