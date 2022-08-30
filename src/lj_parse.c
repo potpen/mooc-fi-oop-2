@@ -2640,4 +2640,69 @@ static void parse_if(LexState *ls, BCLine line)
 /* Parse a statement. Returns 1 if it must be the last one in a chunk. */
 static int parse_stmt(LexState *ls)
 {
-  BCLine lin
+  BCLine line = ls->linenumber;
+  switch (ls->tok) {
+  case TK_if:
+    parse_if(ls, line);
+    break;
+  case TK_while:
+    parse_while(ls, line);
+    break;
+  case TK_do:
+    lj_lex_next(ls);
+    parse_block(ls);
+    lex_match(ls, TK_end, TK_do, line);
+    break;
+  case TK_for:
+    parse_for(ls, line);
+    break;
+  case TK_repeat:
+    parse_repeat(ls, line);
+    break;
+  case TK_function:
+    parse_func(ls, line);
+    break;
+  case TK_local:
+    lj_lex_next(ls);
+    parse_local(ls);
+    break;
+  case TK_return:
+    parse_return(ls);
+    return 1;  /* Must be last. */
+  case TK_break:
+    lj_lex_next(ls);
+    parse_break(ls);
+    return !LJ_52;  /* Must be last in Lua 5.1. */
+#if LJ_52
+  case ';':
+    lj_lex_next(ls);
+    break;
+#endif
+  case TK_label:
+    parse_label(ls);
+    break;
+  case TK_goto:
+    if (LJ_52 || lj_lex_lookahead(ls) == TK_name) {
+      lj_lex_next(ls);
+      parse_goto(ls);
+      break;
+    }
+    /* fallthrough */
+  default:
+    parse_call_assign(ls);
+    break;
+  }
+  return 0;
+}
+
+/* A chunk is a list of statements optionally separated by semicolons. */
+static void parse_chunk(LexState *ls)
+{
+  int islast = 0;
+  synlevel_begin(ls);
+  while (!islast && !parse_isend(ls->tok)) {
+    islast = parse_stmt(ls);
+    lex_opt(ls, ';');
+    lj_assertLS(ls->fs->framesize >= ls->fs->freereg &&
+		ls->fs->freereg >= ls->fs->nactvar,
+		"bad 
