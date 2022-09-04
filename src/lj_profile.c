@@ -68,4 +68,58 @@ typedef struct ProfileState {
 #elif LJ_PROFILE_PTHREAD
   pthread_mutex_t lock;		/* g->hookmask update lock. */
   pthread_t thread;		/* Timer thread. */
-  int ab
+  int abort;			/* Abort timer thread. */
+#elif LJ_PROFILE_WTHREAD
+#if LJ_TARGET_WINDOWS
+  HINSTANCE wmm;		/* WinMM library handle. */
+  WMM_TPFUNC wmm_tbp;		/* WinMM timeBeginPeriod function. */
+  WMM_TPFUNC wmm_tep;		/* WinMM timeEndPeriod function. */
+#endif
+  CRITICAL_SECTION lock;	/* g->hookmask update lock. */
+  HANDLE thread;		/* Timer thread. */
+  int abort;			/* Abort timer thread. */
+#endif
+} ProfileState;
+
+/* Sadly, we have to use a static profiler state.
+**
+** The SIGPROF variant needs a static pointer to the global state, anyway.
+** And it would be hard to extend for multiple threads. You can still use
+** multiple VMs in multiple threads, but only profile one at a time.
+*/
+static ProfileState profile_state;
+
+/* Default sample interval in milliseconds. */
+#define LJ_PROFILE_INTERVAL_DEFAULT	10
+
+/* -- Profiler/hook interaction ------------------------------------------- */
+
+#if !LJ_PROFILE_SIGPROF
+void LJ_FASTCALL lj_profile_hook_enter(global_State *g)
+{
+  ProfileState *ps = &profile_state;
+  if (ps->g) {
+    profile_lock(ps);
+    hook_enter(g);
+    profile_unlock(ps);
+  } else {
+    hook_enter(g);
+  }
+}
+
+void LJ_FASTCALL lj_profile_hook_leave(global_State *g)
+{
+  ProfileState *ps = &profile_state;
+  if (ps->g) {
+    profile_lock(ps);
+    hook_leave(g);
+    profile_unlock(ps);
+  } else {
+    hook_leave(g);
+  }
+}
+#endif
+
+/* -- Profile callbacks --------------------------------------------------- */
+
+/* Callbac
