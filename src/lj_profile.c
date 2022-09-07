@@ -231,4 +231,60 @@ static void *profile_thread(ProfileState *ps)
 /* Start profiling timer thread. */
 static void profile_timer_start(ProfileState *ps)
 {
-  pthread_mutex_ini
+  pthread_mutex_init(&ps->lock, 0);
+  ps->abort = 0;
+  pthread_create(&ps->thread, NULL, (void *(*)(void *))profile_thread, ps);
+}
+
+/* Stop profiling timer thread. */
+static void profile_timer_stop(ProfileState *ps)
+{
+  ps->abort = 1;
+  pthread_join(ps->thread, NULL);
+  pthread_mutex_destroy(&ps->lock);
+}
+
+#elif LJ_PROFILE_WTHREAD
+
+/* Windows timer thread. */
+static DWORD WINAPI profile_thread(void *psx)
+{
+  ProfileState *ps = (ProfileState *)psx;
+  int interval = ps->interval;
+#if LJ_TARGET_WINDOWS && !LJ_TARGET_UWP
+  ps->wmm_tbp(interval);
+#endif
+  while (1) {
+    Sleep(interval);
+    if (ps->abort) break;
+    profile_trigger(ps);
+  }
+#if LJ_TARGET_WINDOWS && !LJ_TARGET_UWP
+  ps->wmm_tep(interval);
+#endif
+  return 0;
+}
+
+/* Start profiling timer thread. */
+static void profile_timer_start(ProfileState *ps)
+{
+#if LJ_TARGET_WINDOWS && !LJ_TARGET_UWP
+  if (!ps->wmm) {  /* Load WinMM library on-demand. */
+    ps->wmm = LJ_WIN_LOADLIBA("winmm.dll");
+    if (ps->wmm) {
+      ps->wmm_tbp = (WMM_TPFUNC)GetProcAddress(ps->wmm, "timeBeginPeriod");
+      ps->wmm_tep = (WMM_TPFUNC)GetProcAddress(ps->wmm, "timeEndPeriod");
+      if (!ps->wmm_tbp || !ps->wmm_tep) {
+	ps->wmm = NULL;
+	return;
+      }
+    }
+  }
+#endif
+  InitializeCriticalSection(&ps->lock);
+  ps->abort = 0;
+  ps->thread = CreateThread(NULL, 0, profile_thread, ps, 0, NULL);
+}
+
+/* Stop profiling timer thread. */
+static void prof
