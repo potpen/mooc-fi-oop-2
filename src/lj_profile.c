@@ -170,4 +170,65 @@ static void profile_trigger(ProfileState *ps)
 #if LJ_PROFILE_SIGPROF
 
 /* SIGPROF handler. */
-static void profile_signal(int si
+static void profile_signal(int sig)
+{
+  UNUSED(sig);
+  profile_trigger(&profile_state);
+}
+
+/* Start profiling timer. */
+static void profile_timer_start(ProfileState *ps)
+{
+  int interval = ps->interval;
+  struct itimerval tm;
+  struct sigaction sa;
+  tm.it_value.tv_sec = tm.it_interval.tv_sec = interval / 1000;
+  tm.it_value.tv_usec = tm.it_interval.tv_usec = (interval % 1000) * 1000;
+  setitimer(ITIMER_PROF, &tm, NULL);
+#if LJ_TARGET_QNX
+  sa.sa_flags = 0;
+#else
+  sa.sa_flags = SA_RESTART;
+#endif
+  sa.sa_handler = profile_signal;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGPROF, &sa, &ps->oldsa);
+}
+
+/* Stop profiling timer. */
+static void profile_timer_stop(ProfileState *ps)
+{
+  struct itimerval tm;
+  tm.it_value.tv_sec = tm.it_interval.tv_sec = 0;
+  tm.it_value.tv_usec = tm.it_interval.tv_usec = 0;
+  setitimer(ITIMER_PROF, &tm, NULL);
+  sigaction(SIGPROF, &ps->oldsa, NULL);
+}
+
+#elif LJ_PROFILE_PTHREAD
+
+/* POSIX timer thread. */
+static void *profile_thread(ProfileState *ps)
+{
+  int interval = ps->interval;
+#if !LJ_TARGET_PS3
+  struct timespec ts;
+  ts.tv_sec = interval / 1000;
+  ts.tv_nsec = (interval % 1000) * 1000000;
+#endif
+  while (1) {
+#if LJ_TARGET_PS3
+    sys_timer_usleep(interval * 1000);
+#else
+    nanosleep(&ts, NULL);
+#endif
+    if (ps->abort) break;
+    profile_trigger(ps);
+  }
+  return NULL;
+}
+
+/* Start profiling timer thread. */
+static void profile_timer_start(ProfileState *ps)
+{
+  pthread_mutex_ini
