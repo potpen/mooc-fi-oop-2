@@ -122,4 +122,52 @@ void LJ_FASTCALL lj_profile_hook_leave(global_State *g)
 
 /* -- Profile callbacks --------------------------------------------------- */
 
-/* Callbac
+/* Callback from profile hook (HOOK_PROFILE already cleared). */
+void LJ_FASTCALL lj_profile_interpreter(lua_State *L)
+{
+  ProfileState *ps = &profile_state;
+  global_State *g = G(L);
+  uint8_t mask;
+  profile_lock(ps);
+  mask = (g->hookmask & ~HOOK_PROFILE);
+  if (!(mask & HOOK_VMEVENT)) {
+    int samples = ps->samples;
+    ps->samples = 0;
+    g->hookmask = HOOK_VMEVENT;
+    lj_dispatch_update(g);
+    profile_unlock(ps);
+    ps->cb(ps->data, L, samples, ps->vmstate);  /* Invoke user callback. */
+    profile_lock(ps);
+    mask |= (g->hookmask & HOOK_PROFILE);
+  }
+  g->hookmask = mask;
+  lj_dispatch_update(g);
+  profile_unlock(ps);
+}
+
+/* Trigger profile hook. Asynchronous call from OS-specific profile timer. */
+static void profile_trigger(ProfileState *ps)
+{
+  global_State *g = ps->g;
+  uint8_t mask;
+  profile_lock(ps);
+  ps->samples++;  /* Always increment number of samples. */
+  mask = g->hookmask;
+  if (!(mask & (HOOK_PROFILE|HOOK_VMEVENT|HOOK_GC))) {  /* Set profile hook. */
+    int st = g->vmstate;
+    ps->vmstate = st >= 0 ? 'N' :
+		  st == ~LJ_VMST_INTERP ? 'I' :
+		  st == ~LJ_VMST_C ? 'C' :
+		  st == ~LJ_VMST_GC ? 'G' : 'J';
+    g->hookmask = (mask | HOOK_PROFILE);
+    lj_dispatch_update(g);
+  }
+  profile_unlock(ps);
+}
+
+/* -- OS-specific profile timer handling ---------------------------------- */
+
+#if LJ_PROFILE_SIGPROF
+
+/* SIGPROF handler. */
+static void profile_signal(int si
