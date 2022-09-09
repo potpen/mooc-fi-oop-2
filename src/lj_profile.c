@@ -287,4 +287,64 @@ static void profile_timer_start(ProfileState *ps)
 }
 
 /* Stop profiling timer thread. */
-static void prof
+static void profile_timer_stop(ProfileState *ps)
+{
+  ps->abort = 1;
+  WaitForSingleObject(ps->thread, INFINITE);
+  DeleteCriticalSection(&ps->lock);
+}
+
+#endif
+
+/* -- Public profiling API ------------------------------------------------ */
+
+/* Start profiling. */
+LUA_API void luaJIT_profile_start(lua_State *L, const char *mode,
+				  luaJIT_profile_callback cb, void *data)
+{
+  ProfileState *ps = &profile_state;
+  int interval = LJ_PROFILE_INTERVAL_DEFAULT;
+  while (*mode) {
+    int m = *mode++;
+    switch (m) {
+    case 'i':
+      interval = 0;
+      while (*mode >= '0' && *mode <= '9')
+	interval = interval * 10 + (*mode++ - '0');
+      if (interval <= 0) interval = 1;
+      break;
+#if LJ_HASJIT
+    case 'l': case 'f':
+      L2J(L)->prof_mode = m;
+      lj_trace_flushall(L);
+      break;
+#endif
+    default:  /* Ignore unknown mode chars. */
+      break;
+    }
+  }
+  if (ps->g) {
+    luaJIT_profile_stop(L);
+    if (ps->g) return;  /* Profiler in use by another VM. */
+  }
+  ps->g = G(L);
+  ps->interval = interval;
+  ps->cb = cb;
+  ps->data = data;
+  ps->samples = 0;
+  lj_buf_init(L, &ps->sb);
+  profile_timer_start(ps);
+}
+
+/* Stop profiling. */
+LUA_API void luaJIT_profile_stop(lua_State *L)
+{
+  ProfileState *ps = &profile_state;
+  global_State *g = ps->g;
+  if (G(L) == g) {  /* Only stop profiler if started by this VM. */
+    profile_timer_stop(ps);
+    g->hookmask &= ~HOOK_PROFILE;
+    lj_dispatch_update(g);
+#if LJ_HASJIT
+    G2J(g)->prof_mode = 0;
+    lj
