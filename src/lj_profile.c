@@ -347,4 +347,25 @@ LUA_API void luaJIT_profile_stop(lua_State *L)
     lj_dispatch_update(g);
 #if LJ_HASJIT
     G2J(g)->prof_mode = 0;
-    lj
+    lj_trace_flushall(L);
+#endif
+    lj_buf_free(g, &ps->sb);
+    ps->sb.w = ps->sb.e = NULL;
+    ps->g = NULL;
+  }
+}
+
+/* Return a compact stack dump. */
+LUA_API const char *luaJIT_profile_dumpstack(lua_State *L, const char *fmt,
+					     int depth, size_t *len)
+{
+  ProfileState *ps = &profile_state;
+  SBuf *sb = &ps->sb;
+  setsbufL(sb, L);
+  lj_buf_reset(sb);
+  lj_debug_dumpstack(L, sb, fmt, depth);
+  *len = (size_t)sbuflen(sb);
+  return sb->b;
+}
+
+#endif
