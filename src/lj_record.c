@@ -2389,3 +2389,451 @@ void lj_record_ins(jit_State *J)
 			       (int)mm - (int)MM_add + (int)IR_ADD);
     else
       rc = rec_mm_arith(J, &ix, mm);
+    break;
+    }
+
+  case BC_MODVN: case BC_MODVV:
+  recmod:
+    if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
+      rc = lj_opt_narrow_mod(J, rb, rc, rbv, rcv);
+    else
+      rc = rec_mm_arith(J, &ix, MM_mod);
+    break;
+
+  case BC_POW:
+    if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
+      rc = lj_opt_narrow_arith(J, rb, rc, rbv, rcv, IR_POW);
+    else
+      rc = rec_mm_arith(J, &ix, MM_pow);
+    break;
+
+  /* -- Miscellaneous ops ------------------------------------------------- */
+
+  case BC_CAT:
+    rc = rec_cat(J, rb, rc);
+    break;
+
+  /* -- Constant and move ops --------------------------------------------- */
+
+  case BC_MOV:
+    /* Clear gap of method call to avoid resurrecting previous refs. */
+    if (ra > J->maxslot) {
+#if LJ_FR2
+      memset(J->base + J->maxslot, 0, (ra - J->maxslot) * sizeof(TRef));
+#else
+      J->base[ra-1] = 0;
+#endif
+    }
+    break;
+  case BC_KSTR: case BC_KNUM: case BC_KPRI:
+    break;
+  case BC_KSHORT:
+    rc = lj_ir_kint(J, (int32_t)(int16_t)rc);
+    break;
+  case BC_KNIL:
+    if (LJ_FR2 && ra > J->maxslot)
+      J->base[ra-1] = 0;
+    while (ra <= rc)
+      J->base[ra++] = TREF_NIL;
+    if (rc >= J->maxslot) J->maxslot = rc+1;
+    break;
+#if LJ_HASFFI
+  case BC_KCDATA:
+    rc = lj_ir_kgc(J, proto_kgc(J->pt, ~(ptrdiff_t)rc), IRT_CDATA);
+    break;
+#endif
+
+  /* -- Upvalue and function ops ------------------------------------------ */
+
+  case BC_UGET:
+    rc = rec_upvalue(J, rc, 0);
+    break;
+  case BC_USETV: case BC_USETS: case BC_USETN: case BC_USETP:
+    rec_upvalue(J, ra, rc);
+    break;
+
+  /* -- Table ops --------------------------------------------------------- */
+
+  case BC_GGET: case BC_GSET:
+    settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
+    ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
+    ix.idxchain = LJ_MAX_IDXCHAIN;
+    rc = lj_record_idx(J, &ix);
+    break;
+
+  case BC_TGETB: case BC_TSETB:
+    setintV(&ix.keyv, (int32_t)rc);
+    ix.key = lj_ir_kint(J, (int32_t)rc);
+    /* fallthrough */
+  case BC_TGETV: case BC_TGETS: case BC_TSETV: case BC_TSETS:
+    ix.idxchain = LJ_MAX_IDXCHAIN;
+    rc = lj_record_idx(J, &ix);
+    break;
+  case BC_TGETR: case BC_TSETR:
+    ix.idxchain = 0;
+    rc = lj_record_idx(J, &ix);
+    break;
+
+  case BC_TSETM:
+    rec_tsetm(J, ra, (BCReg)(J->L->top - J->L->base), (int32_t)rcv->u32.lo);
+    break;
+
+  case BC_TNEW:
+    rc = rec_tnew(J, rc);
+    break;
+  case BC_TDUP:
+    rc = emitir(IRTG(IR_TDUP, IRT_TAB),
+		lj_ir_ktab(J, gco2tab(proto_kgc(J->pt, ~(ptrdiff_t)rc))), 0);
+#ifdef LUAJIT_ENABLE_TABLE_BUMP
+    J->rbchash[(rc & (RBCHASH_SLOTS-1))].ref = tref_ref(rc);
+    setmref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pc, pc);
+    setgcref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pt, obj2gco(J->pt));
+#endif
+    break;
+
+  /* -- Calls and vararg handling ----------------------------------------- */
+
+  case BC_ITERC:
+    J->base[ra] = getslot(J, ra-3);
+    J->base[ra+1+LJ_FR2] = getslot(J, ra-2);
+    J->base[ra+2+LJ_FR2] = getslot(J, ra-1);
+    { /* Do the actual copy now because lj_record_call needs the values. */
+      TValue *b = &J->L->base[ra];
+      copyTV(J->L, b, b-3);
+      copyTV(J->L, b+1+LJ_FR2, b-2);
+      copyTV(J->L, b+2+LJ_FR2, b-1);
+    }
+    lj_record_call(J, ra, (ptrdiff_t)rc-1);
+    break;
+
+  /* L->top is set to L->base+ra+rc+NARGS-1+1. See lj_dispatch_ins(). */
+  case BC_CALLM:
+    rc = (BCReg)(J->L->top - J->L->base) - ra - LJ_FR2;
+    /* fallthrough */
+  case BC_CALL:
+    lj_record_call(J, ra, (ptrdiff_t)rc-1);
+    break;
+
+  case BC_CALLMT:
+    rc = (BCReg)(J->L->top - J->L->base) - ra - LJ_FR2;
+    /* fallthrough */
+  case BC_CALLT:
+    lj_record_tailcall(J, ra, (ptrdiff_t)rc-1);
+    break;
+
+  case BC_VARG:
+    rec_varg(J, ra, (ptrdiff_t)rb-1);
+    break;
+
+  /* -- Returns ----------------------------------------------------------- */
+
+  case BC_RETM:
+    /* L->top is set to L->base+ra+rc+NRESULTS-1, see lj_dispatch_ins(). */
+    rc = (BCReg)(J->L->top - J->L->base) - ra + 1;
+    /* fallthrough */
+  case BC_RET: case BC_RET0: case BC_RET1:
+#if LJ_HASPROFILE
+    rec_profile_ret(J);
+#endif
+    lj_record_ret(J, ra, (ptrdiff_t)rc-1);
+    break;
+
+  /* -- Loops and branches ------------------------------------------------ */
+
+  case BC_FORI:
+    if (rec_for(J, pc, 0) != LOOPEV_LEAVE)
+      J->loopref = J->cur.nins;
+    break;
+  case BC_JFORI:
+    lj_assertJ(bc_op(pc[(ptrdiff_t)rc-BCBIAS_J]) == BC_JFORL,
+	       "JFORI does not point to JFORL");
+    if (rec_for(J, pc, 0) != LOOPEV_LEAVE)  /* Link to existing loop. */
+      lj_record_stop(J, LJ_TRLINK_ROOT, bc_d(pc[(ptrdiff_t)rc-BCBIAS_J]));
+    /* Continue tracing if the loop is not entered. */
+    break;
+
+  case BC_FORL:
+    rec_loop_interp(J, pc, rec_for(J, pc+((ptrdiff_t)rc-BCBIAS_J), 1));
+    break;
+  case BC_ITERL:
+    rec_loop_interp(J, pc, rec_iterl(J, *pc));
+    break;
+  case BC_ITERN:
+    rec_loop_interp(J, pc, rec_itern(J, ra, rb));
+    break;
+  case BC_LOOP:
+    rec_loop_interp(J, pc, rec_loop(J, ra, 1));
+    break;
+
+  case BC_JFORL:
+    rec_loop_jit(J, rc, rec_for(J, pc+bc_j(traceref(J, rc)->startins), 1));
+    break;
+  case BC_JITERL:
+    rec_loop_jit(J, rc, rec_iterl(J, traceref(J, rc)->startins));
+    break;
+  case BC_JLOOP:
+    rec_loop_jit(J, rc, rec_loop(J, ra,
+				 !bc_isret(bc_op(traceref(J, rc)->startins)) &&
+				 bc_op(traceref(J, rc)->startins) != BC_ITERN));
+    break;
+
+  case BC_IFORL:
+  case BC_IITERL:
+  case BC_ILOOP:
+  case BC_IFUNCF:
+  case BC_IFUNCV:
+    lj_trace_err(J, LJ_TRERR_BLACKL);
+    break;
+
+  case BC_JMP:
+    if (ra < J->maxslot)
+      J->maxslot = ra;  /* Shrink used slots. */
+    break;
+
+  case BC_ISNEXT:
+    rec_isnext(J, ra);
+    break;
+
+  /* -- Function headers -------------------------------------------------- */
+
+  case BC_FUNCF:
+    rec_func_lua(J);
+    break;
+  case BC_JFUNCF:
+    rec_func_jit(J, rc);
+    break;
+
+  case BC_FUNCV:
+    rec_func_vararg(J);
+    rec_func_lua(J);
+    break;
+  case BC_JFUNCV:
+    /* Cannot happen. No hotcall counting for varag funcs. */
+    lj_assertJ(0, "unsupported vararg hotcall");
+    break;
+
+  case BC_FUNCC:
+  case BC_FUNCCW:
+    lj_ffrecord_func(J);
+    break;
+
+  default:
+    if (op >= BC__MAX) {
+      lj_ffrecord_func(J);
+      break;
+    }
+    /* fallthrough */
+  case BC_UCLO:
+  case BC_FNEW:
+    setintV(&J->errinfo, (int32_t)op);
+    lj_trace_err_info(J, LJ_TRERR_NYIBC);
+    break;
+  }
+
+  /* rc == 0 if we have no result yet, e.g. pending __index metamethod call. */
+  if (bcmode_a(op) == BCMdst && rc) {
+    J->base[ra] = rc;
+    if (ra >= J->maxslot) {
+#if LJ_FR2
+      if (ra > J->maxslot) J->base[ra-1] = 0;
+#endif
+      J->maxslot = ra+1;
+    }
+  }
+
+#undef rav
+#undef rbv
+#undef rcv
+
+  /* Limit the number of recorded IR instructions and constants. */
+  if (J->cur.nins > REF_FIRST+(IRRef)J->param[JIT_P_maxrecord] ||
+      J->cur.nk < REF_BIAS-(IRRef)J->param[JIT_P_maxirconst])
+    lj_trace_err(J, LJ_TRERR_TRACEOV);
+}
+
+/* -- Recording setup ----------------------------------------------------- */
+
+/* Setup recording for a root trace started by a hot loop. */
+static const BCIns *rec_setup_root(jit_State *J)
+{
+  /* Determine the next PC and the bytecode range for the loop. */
+  const BCIns *pcj, *pc = J->pc;
+  BCIns ins = *pc;
+  BCReg ra = bc_a(ins);
+  switch (bc_op(ins)) {
+  case BC_FORL:
+    J->bc_extent = (MSize)(-bc_j(ins))*sizeof(BCIns);
+    pc += 1+bc_j(ins);
+    J->bc_min = pc;
+    break;
+  case BC_ITERL:
+    if (bc_op(pc[-1]) == BC_JLOOP)
+      lj_trace_err(J, LJ_TRERR_LINNER);
+    lj_assertJ(bc_op(pc[-1]) == BC_ITERC, "no ITERC before ITERL");
+    J->maxslot = ra + bc_b(pc[-1]) - 1;
+    J->bc_extent = (MSize)(-bc_j(ins))*sizeof(BCIns);
+    pc += 1+bc_j(ins);
+    lj_assertJ(bc_op(pc[-1]) == BC_JMP, "ITERL does not point to JMP+1");
+    J->bc_min = pc;
+    break;
+  case BC_ITERN:
+    lj_assertJ(bc_op(pc[1]) == BC_ITERL, "no ITERL after ITERN");
+    J->maxslot = ra;
+    J->bc_extent = (MSize)(-bc_j(pc[1]))*sizeof(BCIns);
+    J->bc_min = pc+2 + bc_j(pc[1]);
+    J->state = LJ_TRACE_RECORD_1ST;  /* Record the first ITERN, too. */
+    break;
+  case BC_LOOP:
+    /* Only check BC range for real loops, but not for "repeat until true". */
+    pcj = pc + bc_j(ins);
+    ins = *pcj;
+    if (bc_op(ins) == BC_JMP && bc_j(ins) < 0) {
+      J->bc_min = pcj+1 + bc_j(ins);
+      J->bc_extent = (MSize)(-bc_j(ins))*sizeof(BCIns);
+    }
+    J->maxslot = ra;
+    pc++;
+    break;
+  case BC_RET:
+  case BC_RET0:
+  case BC_RET1:
+    /* No bytecode range check for down-recursive root traces. */
+    J->maxslot = ra + bc_d(ins) - 1;
+    break;
+  case BC_FUNCF:
+    /* No bytecode range check for root traces started by a hot call. */
+    J->maxslot = J->pt->numparams;
+    pc++;
+    break;
+  case BC_CALLM:
+  case BC_CALL:
+  case BC_ITERC:
+    /* No bytecode range check for stitched traces. */
+    pc++;
+    break;
+  default:
+    lj_assertJ(0, "bad root trace start bytecode %d", bc_op(ins));
+    break;
+  }
+  return pc;
+}
+
+/* Setup for recording a new trace. */
+void lj_record_setup(jit_State *J)
+{
+  uint32_t i;
+
+  /* Initialize state related to current trace. */
+  memset(J->slot, 0, sizeof(J->slot));
+  memset(J->chain, 0, sizeof(J->chain));
+#ifdef LUAJIT_ENABLE_TABLE_BUMP
+  memset(J->rbchash, 0, sizeof(J->rbchash));
+#endif
+  memset(J->bpropcache, 0, sizeof(J->bpropcache));
+  J->scev.idx = REF_NIL;
+  setmref(J->scev.pc, NULL);
+
+  J->baseslot = 1+LJ_FR2;  /* Invoking function is at base[-1-LJ_FR2]. */
+  J->base = J->slot + J->baseslot;
+  J->maxslot = 0;
+  J->framedepth = 0;
+  J->retdepth = 0;
+
+  J->instunroll = J->param[JIT_P_instunroll];
+  J->loopunroll = J->param[JIT_P_loopunroll];
+  J->tailcalled = 0;
+  J->loopref = 0;
+
+  J->bc_min = NULL;  /* Means no limit. */
+  J->bc_extent = ~(MSize)0;
+
+  /* Emit instructions for fixed references. Also triggers initial IR alloc. */
+  emitir_raw(IRT(IR_BASE, IRT_PGC), J->parent, J->exitno);
+  for (i = 0; i <= 2; i++) {
+    IRIns *ir = IR(REF_NIL-i);
+    ir->i = 0;
+    ir->t.irt = (uint8_t)(IRT_NIL+i);
+    ir->o = IR_KPRI;
+    ir->prev = 0;
+  }
+  J->cur.nk = REF_TRUE;
+
+  J->startpc = J->pc;
+  setmref(J->cur.startpc, J->pc);
+  if (J->parent) {  /* Side trace. */
+    GCtrace *T = traceref(J, J->parent);
+    TraceNo root = T->root ? T->root : J->parent;
+    J->cur.root = (uint16_t)root;
+    J->cur.startins = BCINS_AD(BC_JMP, 0, 0);
+    /* Check whether we could at least potentially form an extra loop. */
+    if (J->exitno == 0 && T->snap[0].nent == 0) {
+      /* We can narrow a FORL for some side traces, too. */
+      if (J->pc > proto_bc(J->pt) && bc_op(J->pc[-1]) == BC_JFORI &&
+	  bc_d(J->pc[bc_j(J->pc[-1])-1]) == root) {
+	lj_snap_add(J);
+	rec_for_loop(J, J->pc-1, &J->scev, 1);
+	goto sidecheck;
+      }
+    } else {
+      J->startpc = NULL;  /* Prevent forming an extra loop. */
+    }
+    lj_snap_replay(J, T);
+  sidecheck:
+    if ((traceref(J, J->cur.root)->nchild >= J->param[JIT_P_maxside] ||
+	 T->snap[J->exitno].count >= J->param[JIT_P_hotexit] +
+				     J->param[JIT_P_tryside])) {
+      if (bc_op(*J->pc) == BC_JLOOP) {
+	BCIns startins = traceref(J, bc_d(*J->pc))->startins;
+	if (bc_op(startins) == BC_ITERN)
+	  rec_itern(J, bc_a(startins), bc_b(startins));
+      }
+      lj_record_stop(J, LJ_TRLINK_INTERP, 0);
+    }
+  } else {  /* Root trace. */
+    J->cur.root = 0;
+    J->cur.startins = *J->pc;
+    J->pc = rec_setup_root(J);
+    /* Note: the loop instruction itself is recorded at the end and not
+    ** at the start! So snapshot #0 needs to point to the *next* instruction.
+    ** The one exception is BC_ITERN, which sets LJ_TRACE_RECORD_1ST.
+    */
+    lj_snap_add(J);
+    if (bc_op(J->cur.startins) == BC_FORL)
+      rec_for_loop(J, J->pc-1, &J->scev, 1);
+    else if (bc_op(J->cur.startins) == BC_ITERC)
+      J->startpc = NULL;
+    if (1 + J->pt->framesize >= LJ_MAX_JSLOTS)
+      lj_trace_err(J, LJ_TRERR_STACKOV);
+  }
+#if LJ_HASPROFILE
+  J->prev_pt = NULL;
+  J->prev_line = -1;
+#endif
+#ifdef LUAJIT_ENABLE_CHECKHOOK
+  /* Regularly check for instruction/line hooks from compiled code and
+  ** exit to the interpreter if the hooks are set.
+  **
+  ** This is a compile-time option and disabled by default, since the
+  ** hook checks may be quite expensive in tight loops.
+  **
+  ** Note this is only useful if hooks are *not* set most of the time.
+  ** Use this only if you want to *asynchronously* interrupt the execution.
+  **
+  ** You can set the instruction hook via lua_sethook() with a count of 1
+  ** from a signal handler or another native thread. Please have a look
+  ** at the first few functions in luajit.c for an example (Ctrl-C handler).
+  */
+  {
+    TRef tr = emitir(IRT(IR_XLOAD, IRT_U8),
+		     lj_ir_kptr(J, &J2G(J)->hookmask), IRXLOAD_VOLATILE);
+    tr = emitir(IRTI(IR_BAND), tr, lj_ir_kint(J, (LUA_MASKLINE|LUA_MASKCOUNT)));
+    emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, 0));
+  }
+#endif
+}
+
+#undef IR
+#undef emitir_raw
+#undef emitir
+
+#endif
