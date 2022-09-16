@@ -412,3 +412,195 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
       case STRFMT_UINT:
 	if (tvisint(o)) {
 	  lj_strfmt_putfxint(sb, sf, intV(o));
+	  break;
+	}
+#if LJ_HASFFI
+	if (tviscdata(o)) {
+	  GCcdata *cd = cdataV(o);
+	  if (cd->ctypeid == CTID_INT64 || cd->ctypeid == CTID_UINT64) {
+	    lj_strfmt_putfxint(sb, sf, *(uint64_t *)cdataptr(cd));
+	    break;
+	  }
+	}
+#endif
+	lj_strfmt_putfnum_uint(sb, sf, lj_lib_checknum(L, arg));
+	break;
+      case STRFMT_NUM:
+	lj_strfmt_putfnum(sb, sf, lj_lib_checknum(L, arg));
+	break;
+      case STRFMT_STR: {
+	MSize len;
+	const char *s;
+	cTValue *mo;
+	if (LJ_UNLIKELY(!tvisstr(o) && !tvisbuf(o)) && retry >= 0 &&
+	    !tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
+	  /* Call __tostring metamethod once. */
+	  copyTV(L, L->top++, mo);
+	  copyTV(L, L->top++, o);
+	  lua_call(L, 1, 1);
+	  o = &L->base[arg-1];  /* Stack may have been reallocated. */
+	  copyTV(L, o, --L->top);  /* Replace inline for retry. */
+	  if (retry < 2) {  /* Global buffer may have been overwritten. */
+	    retry = 1;
+	    break;
+	  }
+	}
+	if (LJ_LIKELY(tvisstr(o))) {
+	  len = strV(o)->len;
+	  s = strVdata(o);
+#if LJ_HASBUFFER
+	} else if (tvisbuf(o)) {
+	  SBufExt *sbx = bufV(o);
+	  if (sbx == (SBufExt *)sb) lj_err_arg(L, arg+1, LJ_ERR_BUFFER_SELF);
+	  len = sbufxlen(sbx);
+	  s = sbx->r;
+#endif
+	} else {
+	  GCstr *str = lj_strfmt_obj(L, o);
+	  len = str->len;
+	  s = strdata(str);
+	}
+	if ((sf & STRFMT_T_QUOTED))
+	  strfmt_putquotedlen(sb, s, len);  /* No formatting. */
+	else
+	  strfmt_putfstrlen(sb, sf, s, len);
+	break;
+	}
+      case STRFMT_CHAR:
+	lj_strfmt_putfchar(sb, sf, lj_lib_checkint(L, arg));
+	break;
+      case STRFMT_PTR:  /* No formatting. */
+	lj_strfmt_putptr(sb, lj_obj_ptr(G(L), o));
+	break;
+      default:
+	lj_assertL(0, "bad string format type");
+	break;
+      }
+    }
+  }
+  return retry;
+}
+
+/* -- Conversions to strings ---------------------------------------------- */
+
+/* Convert integer to string. */
+GCstr * LJ_FASTCALL lj_strfmt_int(lua_State *L, int32_t k)
+{
+  char buf[STRFMT_MAXBUF_INT];
+  MSize len = (MSize)(lj_strfmt_wint(buf, k) - buf);
+  return lj_str_new(L, buf, len);
+}
+
+/* Convert integer or number to string. */
+GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o)
+{
+  return tvisint(o) ? lj_strfmt_int(L, intV(o)) : lj_strfmt_num(L, o);
+}
+
+#if LJ_HASJIT
+/* Convert char value to string. */
+GCstr * LJ_FASTCALL lj_strfmt_char(lua_State *L, int c)
+{
+  char buf[1];
+  buf[0] = c;
+  return lj_str_new(L, buf, 1);
+}
+#endif
+
+/* Raw conversion of object to string. */
+GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o)
+{
+  if (tvisstr(o)) {
+    return strV(o);
+  } else if (tvisnumber(o)) {
+    return lj_strfmt_number(L, o);
+  } else if (tvisnil(o)) {
+    return lj_str_newlit(L, "nil");
+  } else if (tvisfalse(o)) {
+    return lj_str_newlit(L, "false");
+  } else if (tvistrue(o)) {
+    return lj_str_newlit(L, "true");
+  } else {
+    char buf[8+2+2+16], *p = buf;
+    p = lj_buf_wmem(p, lj_typename(o), (MSize)strlen(lj_typename(o)));
+    *p++ = ':'; *p++ = ' ';
+    if (tvisfunc(o) && isffunc(funcV(o))) {
+      p = lj_buf_wmem(p, "builtin#", 8);
+      p = lj_strfmt_wint(p, funcV(o)->c.ffid);
+    } else {
+      p = lj_strfmt_wptr(p, lj_obj_ptr(G(L), o));
+    }
+    return lj_str_new(L, buf, (size_t)(p - buf));
+  }
+}
+
+/* -- Internal string formatting ------------------------------------------ */
+
+/*
+** These functions are only used for lua_pushfstring(), lua_pushvfstring()
+** and for internal string formatting (e.g. error messages). Caveat: unlike
+** string.format(), only a limited subset of formats and flags are supported!
+**
+** LuaJIT has support for a couple more formats than Lua 5.1/5.2:
+** - %d %u %o %x with full formatting, 32 bit integers only.
+** - %f and other FP formats are really %.14g.
+** - %s %c %p without formatting.
+*/
+
+/* Push formatted message as a string object to Lua stack. va_list variant. */
+const char *lj_strfmt_pushvf(lua_State *L, const char *fmt, va_list argp)
+{
+  SBuf *sb = lj_buf_tmp_(L);
+  FormatState fs;
+  SFormat sf;
+  GCstr *str;
+  lj_strfmt_init(&fs, fmt, (MSize)strlen(fmt));
+  while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
+    switch (STRFMT_TYPE(sf)) {
+    case STRFMT_LIT:
+      lj_buf_putmem(sb, fs.str, fs.len);
+      break;
+    case STRFMT_INT:
+      lj_strfmt_putfxint(sb, sf, va_arg(argp, int32_t));
+      break;
+    case STRFMT_UINT:
+      lj_strfmt_putfxint(sb, sf, va_arg(argp, uint32_t));
+      break;
+    case STRFMT_NUM:
+      lj_strfmt_putfnum(sb, STRFMT_G14, va_arg(argp, lua_Number));
+      break;
+    case STRFMT_STR: {
+      const char *s = va_arg(argp, char *);
+      if (s == NULL) s = "(null)";
+      lj_buf_putmem(sb, s, (MSize)strlen(s));
+      break;
+      }
+    case STRFMT_CHAR:
+      lj_buf_putb(sb, va_arg(argp, int));
+      break;
+    case STRFMT_PTR:
+      lj_strfmt_putptr(sb, va_arg(argp, void *));
+      break;
+    case STRFMT_ERR:
+    default:
+      lj_buf_putb(sb, '?');
+      lj_assertL(0, "bad string format near offset %d", fs.len);
+      break;
+    }
+  }
+  str = lj_buf_str(L, sb);
+  setstrV(L, L->top, str);
+  incr_top(L);
+  return strdata(str);
+}
+
+/* Push formatted message as a string object to Lua stack. Vararg variant. */
+const char *lj_strfmt_pushf(lua_State *L, const char *fmt, ...)
+{
+  const char *msg;
+  va_list argp;
+  va_start(argp, fmt);
+  msg = lj_strfmt_pushvf(L, fmt, argp);
+  va_end(argp);
+  return msg;
+}
