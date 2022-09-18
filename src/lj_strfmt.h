@@ -108,4 +108,24 @@ LJ_FUNC SBuf *lj_strfmt_putfchar(SBuf *sb, SFormat, int32_t c);
 #if LJ_HASJIT
 LJ_FUNC SBuf *lj_strfmt_putfstr(SBuf *sb, SFormat, GCstr *str);
 #endif
-LJ_FUNC int lj_strfmt_putarg(lua_State *L, SBuf
+LJ_FUNC int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry);
+
+/* Conversions to strings. */
+LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_int(lua_State *L, int32_t k);
+LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o);
+LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o);
+#if LJ_HASJIT
+LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_char(lua_State *L, int c);
+#endif
+LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o);
+
+/* Internal string formatting. */
+LJ_FUNC const char *lj_strfmt_pushvf(lua_State *L, const char *fmt,
+				     va_list argp);
+LJ_FUNC const char *lj_strfmt_pushf(lua_State *L, const char *fmt, ...)
+#if defined(__GNUC__) || defined(__clang__)
+  __attribute__ ((format (printf, 2, 3)))
+#endif
+  ;
+
+#endif
