@@ -77,4 +77,35 @@ LJ_FUNC SFormat LJ_FASTCALL lj_strfmt_parse(FormatState *fs);
 
 static LJ_AINLINE void lj_strfmt_init(FormatState *fs, const char *p, MSize len)
 {
-  fs->p = (const uint8_t *)
+  fs->p = (const uint8_t *)p;
+  fs->e = (const uint8_t *)p + len;
+  /* Must be NUL-terminated. May have NULs inside, too. */
+  lj_assertX(*fs->e == 0, "format not NUL-terminated");
+}
+
+/* Raw conversions. */
+LJ_FUNC char * LJ_FASTCALL lj_strfmt_wint(char *p, int32_t k);
+LJ_FUNC char * LJ_FASTCALL lj_strfmt_wptr(char *p, const void *v);
+LJ_FUNC char * LJ_FASTCALL lj_strfmt_wuleb128(char *p, uint32_t v);
+LJ_FUNC const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp);
+
+/* Unformatted conversions to buffer. */
+LJ_FUNC SBuf * LJ_FASTCALL lj_strfmt_putint(SBuf *sb, int32_t k);
+#if LJ_HASJIT
+LJ_FUNC SBuf * LJ_FASTCALL lj_strfmt_putnum(SBuf *sb, cTValue *o);
+#endif
+LJ_FUNC SBuf * LJ_FASTCALL lj_strfmt_putptr(SBuf *sb, const void *v);
+#if LJ_HASJIT
+LJ_FUNC SBuf * LJ_FASTCALL lj_strfmt_putquoted(SBuf *sb, GCstr *str);
+#endif
+
+/* Formatted conversions to buffer. */
+LJ_FUNC SBuf *lj_strfmt_putfxint(SBuf *sb, SFormat sf, uint64_t k);
+LJ_FUNC SBuf *lj_strfmt_putfnum_int(SBuf *sb, SFormat sf, lua_Number n);
+LJ_FUNC SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n);
+LJ_FUNC SBuf *lj_strfmt_putfnum(SBuf *sb, SFormat, lua_Number n);
+LJ_FUNC SBuf *lj_strfmt_putfchar(SBuf *sb, SFormat, int32_t c);
+#if LJ_HASJIT
+LJ_FUNC SBuf *lj_strfmt_putfstr(SBuf *sb, SFormat, GCstr *str);
+#endif
+LJ_FUNC int lj_strfmt_putarg(lua_State *L, SBuf
