@@ -38,4 +38,33 @@
 ** c) it needs only around 600 bytes of stack space.
 **
 ** The builtin function is faster than strtod() for typical inputs, e.g.
-** 
+** "123", "1.5" or "1e6". Arguably, it's slower for very large exponents,
+** which are not very common (this could be fixed, if needed).
+**
+** And most importantly, the builtin function is equally precise on all
+** platforms. It correctly converts and rounds any input to a double.
+** If this is not the case, please send a bug report -- but PLEASE verify
+** that the implementation you're comparing to is not the culprit!
+**
+** The implementation quickly pre-scans the entire string first and
+** handles simple integers on-the-fly. Otherwise, it dispatches to the
+** base-specific parser. Hex and octal is straightforward.
+**
+** Decimal to binary conversion uses a fixed-length circular buffer in
+** base 100. Some simple cases are handled directly. For other cases, the
+** number in the buffer is up-scaled or down-scaled until the integer part
+** is in the proper range. Then the integer part is rounded and converted
+** to a double which is finally rescaled to the result. Denormals need
+** special treatment to prevent incorrect 'double rounding'.
+*/
+
+/* Definitions for circular decimal digit buffer (base 100 = 2 digits/byte). */
+#define STRSCAN_DIG	1024
+#define STRSCAN_MAXDIG	800		/* 772 + extra are sufficient. */
+#define STRSCAN_DDIG	(STRSCAN_DIG/2)
+#define STRSCAN_DMASK	(STRSCAN_DDIG-1)
+#define STRSCAN_MAXEXP	(1 << 20)
+
+/* Helpers for circular buffer. */
+#define DNEXT(a)	(((a)+1) & STRSCAN_DMASK)
+#define DPREV(a
