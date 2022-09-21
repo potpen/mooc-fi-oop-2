@@ -67,4 +67,47 @@
 
 /* Helpers for circular buffer. */
 #define DNEXT(a)	(((a)+1) & STRSCAN_DMASK)
-#define DPREV(a
+#define DPREV(a)	(((a)-1) & STRSCAN_DMASK)
+#define DLEN(lo, hi)	((int32_t)(((lo)-(hi)) & STRSCAN_DMASK))
+
+#define casecmp(c, k)	(((c) | 0x20) == k)
+
+/* Final conversion to double. */
+static void strscan_double(uint64_t x, TValue *o, int32_t ex2, int32_t neg)
+{
+  double n;
+
+  /* Avoid double rounding for denormals. */
+  if (LJ_UNLIKELY(ex2 <= -1075 && x != 0)) {
+    /* NYI: all of this generates way too much code on 32 bit CPUs. */
+#if (defined(__GNUC__) || defined(__clang__)) && LJ_64
+    int32_t b = (int32_t)(__builtin_clzll(x)^63);
+#else
+    int32_t b = (x>>32) ? 32+(int32_t)lj_fls((uint32_t)(x>>32)) :
+			  (int32_t)lj_fls((uint32_t)x);
+#endif
+    if ((int32_t)b + ex2 <= -1023 && (int32_t)b + ex2 >= -1075) {
+      uint64_t rb = (uint64_t)1 << (-1075-ex2);
+      if ((x & rb) && ((x & (rb+rb+rb-1)))) x += rb+rb;
+      x = (x & ~(rb+rb-1));
+    }
+  }
+
+  /* Convert to double using a signed int64_t conversion, then rescale. */
+  lj_assertX((int64_t)x >= 0, "bad double conversion");
+  n = (double)(int64_t)x;
+  if (neg) n = -n;
+  if (ex2) n = ldexp(n, ex2);
+  o->n = n;
+}
+
+/* Parse hexadecimal number. */
+static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
+			      StrScanFmt fmt, uint32_t opt,
+			      int32_t ex2, int32_t neg, uint32_t dig)
+{
+  uint64_t x = 0;
+  uint32_t i;
+
+  /* Scan hex digits. */
+  for (i = dig > 16 ? 16 : dig ; i; i-
