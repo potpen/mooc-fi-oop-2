@@ -164,3 +164,51 @@ static StrScanFmt strscan_oct(const uint8_t *p, TValue *o,
   /* Format-specific handling. */
   switch (fmt) {
   case STRSCAN_INT:
+    if (x >= 0x80000000u+neg) fmt = STRSCAN_U32;
+    /* fallthrough */
+  case STRSCAN_U32:
+    if ((x >> 32)) return STRSCAN_ERROR;
+    o->i = neg ? (int32_t)(~(uint32_t)x+1u) : (int32_t)x;
+    break;
+  default:
+  case STRSCAN_I64:
+  case STRSCAN_U64:
+    o->u64 = neg ? ~x+1u : x;
+    break;
+  }
+  return fmt;
+}
+
+/* Parse decimal number. */
+static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
+			      StrScanFmt fmt, uint32_t opt,
+			      int32_t ex10, int32_t neg, uint32_t dig)
+{
+  uint8_t xi[STRSCAN_DDIG], *xip = xi;
+
+  if (dig) {
+    uint32_t i = dig;
+    if (i > STRSCAN_MAXDIG) {
+      ex10 += (int32_t)(i - STRSCAN_MAXDIG);
+      i = STRSCAN_MAXDIG;
+    }
+    /* Scan unaligned leading digit. */
+    if (((ex10^i) & 1))
+      *xip++ = ((*p != '.' ? *p : *++p) & 15), i--, p++;
+    /* Scan aligned double-digits. */
+    for ( ; i > 1; i -= 2) {
+      uint32_t d = 10 * ((*p != '.' ? *p : *++p) & 15); p++;
+      *xip++ = d + ((*p != '.' ? *p : *++p) & 15); p++;
+    }
+    /* Scan and realign trailing digit. */
+    if (i) *xip++ = 10 * ((*p != '.' ? *p : *++p) & 15), ex10--, dig++, p++;
+
+    /* Summarize rounding-effect of excess digits. */
+    if (dig > STRSCAN_MAXDIG) {
+      do {
+	if ((*p != '.' ? *p : *++p) != '0') { xip[-1] |= 1; break; }
+	p++;
+      } while (--dig > STRSCAN_MAXDIG);
+      dig = STRSCAN_MAXDIG;
+    } else {  /* Simplify exponent. */
+      while (ex10 > 0 && dig <= 18) *xip++ = 0, ex10 -= 2, dig
