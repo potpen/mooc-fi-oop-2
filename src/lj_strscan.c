@@ -264,4 +264,51 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
     uint32_t hi = 0, lo = (uint32_t)(xip-xi);
     int32_t ex2 = 0, idig = (int32_t)lo + (ex10 >> 1);
 
-    lj_assertX(lo > 0 && (ex10 & 1) == 0, "bad lo %
+    lj_assertX(lo > 0 && (ex10 & 1) == 0, "bad lo %d ex10 %d", lo, ex10);
+
+    /* Handle simple overflow/underflow. */
+    if (idig > 310/2) { if (neg) setminfV(o); else setpinfV(o); return fmt; }
+    else if (idig < -326/2) { o->n = neg ? -0.0 : 0.0; return fmt; }
+
+    /* Scale up until we have at least 17 or 18 integer part digits. */
+    while (idig < 9 && idig < DLEN(lo, hi)) {
+      uint32_t i, cy = 0;
+      ex2 -= 6;
+      for (i = DPREV(lo); ; i = DPREV(i)) {
+	uint32_t d = (xi[i] << 6) + cy;
+	cy = (((d >> 2) * 5243) >> 17); d = d - cy * 100;  /* Div/mod 100. */
+	xi[i] = (uint8_t)d;
+	if (i == hi) break;
+	if (d == 0 && i == DPREV(lo)) lo = i;
+      }
+      if (cy) {
+	hi = DPREV(hi);
+	if (xi[DPREV(lo)] == 0) lo = DPREV(lo);
+	else if (hi == lo) { lo = DPREV(lo); xi[DPREV(lo)] |= xi[lo]; }
+	xi[hi] = (uint8_t)cy; idig++;
+      }
+    }
+
+    /* Scale down until no more than 17 or 18 integer part digits remain. */
+    while (idig > 9) {
+      uint32_t i = hi, cy = 0;
+      ex2 += 6;
+      do {
+	cy += xi[i];
+	xi[i] = (cy >> 6);
+	cy = 100 * (cy & 0x3f);
+	if (xi[i] == 0 && i == hi) hi = DNEXT(hi), idig--;
+	i = DNEXT(i);
+      } while (i != lo);
+      while (cy) {
+	if (hi == lo) { xi[DPREV(lo)] |= 1; break; }
+	xi[lo] = (cy >> 6); lo = DNEXT(lo);
+	cy = 100 * (cy & 0x3f);
+      }
+    }
+
+    /* Collect integer part digits and convert to rescaled double. */
+    {
+      uint64_t x = xi[hi];
+      uint32_t i;
+   
