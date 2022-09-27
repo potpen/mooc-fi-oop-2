@@ -311,4 +311,59 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
     {
       uint64_t x = xi[hi];
       uint32_t i;
-   
+      for (i = DNEXT(hi); --idig > 0 && i != lo; i = DNEXT(i))
+	x = x * 100 + xi[i];
+      if (i == lo) {
+	while (--idig >= 0) x = x * 100;
+      } else {  /* Gather round bit from remaining digits. */
+	x <<= 1; ex2--;
+	do {
+	  if (xi[i]) { x |= 1; break; }
+	  i = DNEXT(i);
+	} while (i != lo);
+      }
+      strscan_double(x, o, ex2, neg);
+    }
+  }
+  return fmt;
+}
+
+/* Parse binary number. */
+static StrScanFmt strscan_bin(const uint8_t *p, TValue *o,
+			      StrScanFmt fmt, uint32_t opt,
+			      int32_t ex2, int32_t neg, uint32_t dig)
+{
+  uint64_t x = 0;
+  uint32_t i;
+
+  if (ex2 || dig > 64) return STRSCAN_ERROR;
+
+  /* Scan binary digits. */
+  for (i = dig; i; i--, p++) {
+    if ((*p & ~1) != '0') return STRSCAN_ERROR;
+    x = (x << 1) | (*p & 1);
+  }
+
+  /* Format-specific handling. */
+  switch (fmt) {
+  case STRSCAN_INT:
+    if (!(opt & STRSCAN_OPT_TONUM) && x < 0x80000000u+neg) {
+      o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
+      return STRSCAN_INT;  /* Fast path for 32 bit integers. */
+    }
+    if (!(opt & STRSCAN_OPT_C)) { fmt = STRSCAN_NUM; break; }
+    /* fallthrough */
+  case STRSCAN_U32:
+    if (dig > 32) return STRSCAN_ERROR;
+    o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
+    return STRSCAN_U32;
+  case STRSCAN_I64:
+  case STRSCAN_U64:
+    o->u64 = neg ? ~x+1u : x;
+    return fmt;
+  default:
+    break;
+  }
+
+  /* Reduce range, then convert to double. */
+  if ((x & U64x(c0000000,0000
