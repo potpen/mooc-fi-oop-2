@@ -410,4 +410,62 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
     int32_t ex = 0;
 
     /* Determine base and skip leading zeros. */
-    if (LJ_UN
+    if (LJ_UNLIKELY(*p <= '0')) {
+      if (*p == '0') {
+	if (casecmp(p[1], 'x'))
+	  base = 16, cmask = LJ_CHAR_XDIGIT, p += 2;
+	else if (casecmp(p[1], 'b'))
+	  base = 2, cmask = LJ_CHAR_DIGIT, p += 2;
+      }
+      for ( ; ; p++) {
+	if (*p == '0') {
+	  hasdig = 1;
+	} else if (*p == '.') {
+	  if (dp) return STRSCAN_ERROR;
+	  dp = p;
+	} else {
+	  break;
+	}
+      }
+    }
+
+    /* Preliminary digit and decimal point scan. */
+    for (sp = p; ; p++) {
+      if (LJ_LIKELY(lj_char_isa(*p, cmask))) {
+	x = x * 10 + (*p & 15);  /* For fast path below. */
+	dig++;
+      } else if (*p == '.') {
+	if (dp) return STRSCAN_ERROR;
+	dp = p;
+      } else {
+	break;
+      }
+    }
+    if (!(hasdig | dig)) return STRSCAN_ERROR;
+
+    /* Handle decimal point. */
+    if (dp) {
+      if (base == 2) return STRSCAN_ERROR;
+      fmt = STRSCAN_NUM;
+      if (dig) {
+	ex = (int32_t)(dp-(p-1)); dp = p-1;
+	while (ex < 0 && *dp-- == '0') ex++, dig--;  /* Skip trailing zeros. */
+	if (ex <= -STRSCAN_MAXEXP) return STRSCAN_ERROR;
+	if (base == 16) ex *= 4;
+      }
+    }
+
+    /* Parse exponent. */
+    if (base >= 10 && casecmp(*p, (uint32_t)(base == 16 ? 'p' : 'e'))) {
+      uint32_t xx;
+      int negx = 0;
+      fmt = STRSCAN_NUM; p++;
+      if (*p == '+' || *p == '-') negx = (*p++ == '-');
+      if (!lj_char_isdigit(*p)) return STRSCAN_ERROR;
+      xx = (*p++ & 15);
+      while (lj_char_isdigit(*p)) {
+	xx = xx * 10 + (*p & 15);
+	if (xx >= STRSCAN_MAXEXP) return STRSCAN_ERROR;
+	p++;
+      }
+      ex 
