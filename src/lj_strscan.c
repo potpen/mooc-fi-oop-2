@@ -366,4 +366,48 @@ static StrScanFmt strscan_bin(const uint8_t *p, TValue *o,
   }
 
   /* Reduce range, then convert to double. */
-  if ((x & U64x(c0000000,0000
+  if ((x & U64x(c0000000,0000000))) { x = (x >> 2) | (x & 3); ex2 += 2; }
+  strscan_double(x, o, ex2, neg);
+  return fmt;
+}
+
+/* Scan string containing a number. Returns format. Returns value in o. */
+StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
+			   uint32_t opt)
+{
+  int32_t neg = 0;
+  const uint8_t *pe = p + len;
+
+  /* Remove leading space, parse sign and non-numbers. */
+  if (LJ_UNLIKELY(!lj_char_isdigit(*p))) {
+    while (lj_char_isspace(*p)) p++;
+    if (*p == '+' || *p == '-') neg = (*p++ == '-');
+    if (LJ_UNLIKELY(*p >= 'A')) {  /* Parse "inf", "infinity" or "nan". */
+      TValue tmp;
+      setnanV(&tmp);
+      if (casecmp(p[0],'i') && casecmp(p[1],'n') && casecmp(p[2],'f')) {
+	if (neg) setminfV(&tmp); else setpinfV(&tmp);
+	p += 3;
+	if (casecmp(p[0],'i') && casecmp(p[1],'n') && casecmp(p[2],'i') &&
+	    casecmp(p[3],'t') && casecmp(p[4],'y')) p += 5;
+      } else if (casecmp(p[0],'n') && casecmp(p[1],'a') && casecmp(p[2],'n')) {
+	p += 3;
+      }
+      while (lj_char_isspace(*p)) p++;
+      if (*p || p < pe) return STRSCAN_ERROR;
+      o->u64 = tmp.u64;
+      return STRSCAN_NUM;
+    }
+  }
+
+  /* Parse regular number. */
+  {
+    StrScanFmt fmt = STRSCAN_INT;
+    int cmask = LJ_CHAR_DIGIT;
+    int base = (opt & STRSCAN_OPT_C) && *p == '0' ? 0 : 10;
+    const uint8_t *sp, *dp = NULL;
+    uint32_t dig = 0, hasdig = 0, x = 0;
+    int32_t ex = 0;
+
+    /* Determine base and skip leading zeros. */
+    if (LJ_UN
