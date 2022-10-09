@@ -507,4 +507,52 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
 	o->n = -0.0;
 	return STRSCAN_NUM;
       } else {
-	o->i = neg ? (int32_t)(~x+1u
+	o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
+	return STRSCAN_INT;
+      }
+    }
+
+    /* Dispatch to base-specific parser. */
+    if (base == 0 && !(fmt == STRSCAN_NUM || fmt == STRSCAN_IMAG))
+      return strscan_oct(sp, o, fmt, neg, dig);
+    if (base == 16)
+      fmt = strscan_hex(sp, o, fmt, opt, ex, neg, dig);
+    else if (base == 2)
+      fmt = strscan_bin(sp, o, fmt, opt, ex, neg, dig);
+    else
+      fmt = strscan_dec(sp, o, fmt, opt, ex, neg, dig);
+
+    /* Try to convert number to integer, if requested. */
+    if (fmt == STRSCAN_NUM && (opt & STRSCAN_OPT_TOINT) && !tvismzero(o)) {
+      double n = o->n;
+      int32_t i = lj_num2int(n);
+      if (n == (lua_Number)i) { o->i = i; return STRSCAN_INT; }
+    }
+    return fmt;
+  }
+}
+
+int LJ_FASTCALL lj_strscan_num(GCstr *str, TValue *o)
+{
+  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), str->len, o,
+				   STRSCAN_OPT_TONUM);
+  lj_assertX(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM, "bad scan format");
+  return (fmt != STRSCAN_ERROR);
+}
+
+#if LJ_DUALNUM
+int LJ_FASTCALL lj_strscan_number(GCstr *str, TValue *o)
+{
+  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), str->len, o,
+				   STRSCAN_OPT_TOINT);
+  lj_assertX(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM || fmt == STRSCAN_INT,
+	     "bad scan format");
+  if (fmt == STRSCAN_INT) setitype(o, LJ_TISNUM);
+  return (fmt != STRSCAN_ERROR);
+}
+#endif
+
+#undef DNEXT
+#undef DPREV
+#undef DLEN
+
