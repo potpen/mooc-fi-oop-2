@@ -468,4 +468,43 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
 	if (xx >= STRSCAN_MAXEXP) return STRSCAN_ERROR;
 	p++;
       }
-      ex 
+      ex += negx ? (int32_t)(~xx+1u) : (int32_t)xx;
+    }
+
+    /* Parse suffix. */
+    if (*p) {
+      /* I (IMAG), U (U32), LL (I64), ULL/LLU (U64), L (long), UL/LU (ulong). */
+      /* NYI: f (float). Not needed until cp_number() handles non-integers. */
+      if (casecmp(*p, 'i')) {
+	if (!(opt & STRSCAN_OPT_IMAG)) return STRSCAN_ERROR;
+	p++; fmt = STRSCAN_IMAG;
+      } else if (fmt == STRSCAN_INT) {
+	if (casecmp(*p, 'u')) p++, fmt = STRSCAN_U32;
+	if (casecmp(*p, 'l')) {
+	  p++;
+	  if (casecmp(*p, 'l')) p++, fmt += STRSCAN_I64 - STRSCAN_INT;
+	  else if (!(opt & STRSCAN_OPT_C)) return STRSCAN_ERROR;
+	  else if (sizeof(long) == 8) fmt += STRSCAN_I64 - STRSCAN_INT;
+	}
+	if (casecmp(*p, 'u') && (fmt == STRSCAN_INT || fmt == STRSCAN_I64))
+	  p++, fmt += STRSCAN_U32 - STRSCAN_INT;
+	if ((fmt == STRSCAN_U32 && !(opt & STRSCAN_OPT_C)) ||
+	    (fmt >= STRSCAN_I64 && !(opt & STRSCAN_OPT_LL)))
+	  return STRSCAN_ERROR;
+      }
+      while (lj_char_isspace(*p)) p++;
+      if (*p) return STRSCAN_ERROR;
+    }
+    if (p < pe) return STRSCAN_ERROR;
+
+    /* Fast path for decimal 32 bit integers. */
+    if (fmt == STRSCAN_INT && base == 10 &&
+	(dig < 10 || (dig == 10 && *sp <= '2' && x < 0x80000000u+neg))) {
+      if ((opt & STRSCAN_OPT_TONUM)) {
+	o->n = neg ? -(double)x : (double)x;
+	return STRSCAN_NUM;
+      } else if (x == 0 && neg) {
+	o->n = -0.0;
+	return STRSCAN_NUM;
+      } else {
+	o->i = neg ? (int32_t)(~x+1u
