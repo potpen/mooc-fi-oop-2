@@ -75,3 +75,92 @@ typedef uint32_t RegSet;
 #define rset_pickbot(rs)	((Reg)__builtin_ctzll(rs))
 #else
 #define rset_picktop(rs)	((Reg)lj_fls(rs))
+#define rset_pickbot(rs)	((Reg)lj_ffs(rs))
+#endif
+
+/* -- Register allocation cost -------------------------------------------- */
+
+/* The register allocation heuristic keeps track of the cost for allocating
+** a specific register:
+**
+** A free register (obviously) has a cost of 0 and a 1-bit in the free mask.
+**
+** An already allocated register has the (non-zero) IR reference in the lowest
+** bits and the result of a blended cost-model in the higher bits.
+**
+** The allocator first checks the free mask for a hit. Otherwise an (unrolled)
+** linear search for the minimum cost is used. The search doesn't need to
+** keep track of the position of the minimum, which makes it very fast.
+** The lowest bits of the minimum cost show the desired IR reference whose
+** register is the one to evict.
+**
+** Without the cost-model this degenerates to the standard heuristics for
+** (reverse) linear-scan register allocation. Since code generation is done
+** in reverse, a live interval extends from the last use to the first def.
+** For an SSA IR the IR reference is the first (and only) def and thus
+** trivially marks the end of the interval. The LSRA heuristics says to pick
+** the register whose live interval has the furthest extent, i.e. the lowest
+** IR reference in our case.
+**
+** A cost-model should take into account other factors, like spill-cost and
+** restore- or rematerialization-cost, which depend on the kind of instruction.
+** E.g. constants have zero spill costs, variant instructions have higher
+** costs than invariants and PHIs should preferably never be spilled.
+**
+** Here's a first cut at simple, but effective blended cost-model for R-LSRA:
+** - Due to careful design of the IR, constants already have lower IR
+**   references than invariants and invariants have lower IR references
+**   than variants.
+** - The cost in the upper 16 bits is the sum of the IR reference and a
+**   weighted score. The score currently only takes into account whether
+**   the IRT_ISPHI bit is set in the instruction type.
+** - The PHI weight is the minimum distance (in IR instructions) a PHI
+**   reference has to be further apart from a non-PHI reference to be spilled.
+** - It should be a power of two (for speed) and must be between 2 and 32768.
+**   Good values for the PHI weight seem to be between 40 and 150.
+** - Further study is required.
+*/
+#define REGCOST_PHI_WEIGHT	64
+
+/* Cost for allocating a specific register. */
+typedef uint32_t RegCost;
+
+/* Note: assumes 16 bit IRRef1. */
+#define REGCOST(cost, ref)	((RegCost)(ref) + ((RegCost)(cost) << 16))
+#define regcost_ref(rc)		((IRRef1)(rc))
+
+#define REGCOST_T(t) \
+  ((RegCost)((t)&IRT_ISPHI) * (((RegCost)(REGCOST_PHI_WEIGHT)<<16)/IRT_ISPHI))
+#define REGCOST_REF_T(ref, t)	(REGCOST((ref), (ref)) + REGCOST_T((t)))
+
+/* -- Target-specific definitions ----------------------------------------- */
+
+#if LJ_TARGET_X86ORX64
+#include "lj_target_x86.h"
+#elif LJ_TARGET_ARM
+#include "lj_target_arm.h"
+#elif LJ_TARGET_ARM64
+#include "lj_target_arm64.h"
+#elif LJ_TARGET_PPC
+#include "lj_target_ppc.h"
+#elif LJ_TARGET_MIPS
+#include "lj_target_mips.h"
+#else
+#error "Missing include for target CPU"
+#endif
+
+#ifdef EXITSTUBS_PER_GROUP
+/* Return the address of an exit stub. */
+static LJ_AINLINE char *exitstub_addr_(char **group, uint32_t exitno)
+{
+  lj_assertX(group[exitno / EXITSTUBS_PER_GROUP] != NULL,
+	     "exit stub group for exit %d uninitialized", exitno);
+  return (char *)group[exitno / EXITSTUBS_PER_GROUP] +
+	 EXITSTUB_SPACING*(exitno % EXITSTUBS_PER_GROUP);
+}
+/* Avoid dependence on lj_jit.h if only including lj_target.h. */
+#define exitstub_addr(J, exitno) \
+  ((MCode *)exitstub_addr_((char **)((J)->exitstubgroup), (exitno)))
+#endif
+
+#endif
