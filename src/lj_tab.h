@@ -64,4 +64,33 @@ LJ_FUNC void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t);
 LJ_FUNC void lj_tab_rehash(lua_State *L, GCtab *t);
 #endif
 LJ_FUNC void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits);
-LJ_FUNCA void lj_tab_reasize(l
+LJ_FUNCA void lj_tab_reasize(lua_State *L, GCtab *t, uint32_t nasize);
+
+/* Caveat: all getters except lj_tab_get() can return NULL! */
+
+LJ_FUNCA cTValue * LJ_FASTCALL lj_tab_getinth(GCtab *t, int32_t key);
+LJ_FUNC cTValue *lj_tab_getstr(GCtab *t, const GCstr *key);
+LJ_FUNCA cTValue *lj_tab_get(lua_State *L, GCtab *t, cTValue *key);
+
+/* Caveat: all setters require a write barrier for the stored value. */
+
+LJ_FUNCA TValue *lj_tab_newkey(lua_State *L, GCtab *t, cTValue *key);
+LJ_FUNCA TValue *lj_tab_setinth(lua_State *L, GCtab *t, int32_t key);
+LJ_FUNC TValue *lj_tab_setstr(lua_State *L, GCtab *t, const GCstr *key);
+LJ_FUNC TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key);
+
+#define inarray(t, key)		((MSize)(key) < (MSize)(t)->asize)
+#define arrayslot(t, i)		(&tvref((t)->array)[(i)])
+#define lj_tab_getint(t, key) \
+  (inarray((t), (key)) ? arrayslot((t), (key)) : lj_tab_getinth((t), (key)))
+#define lj_tab_setint(L, t, key) \
+  (inarray((t), (key)) ? arrayslot((t), (key)) : lj_tab_setinth(L, (t), (key)))
+
+LJ_FUNC uint32_t LJ_FASTCALL lj_tab_keyindex(GCtab *t, cTValue *key);
+LJ_FUNCA int lj_tab_next(GCtab *t, cTValue *key, TValue *o);
+LJ_FUNCA MSize LJ_FASTCALL lj_tab_len(GCtab *t);
+#if LJ_HASJIT
+LJ_FUNC MSize LJ_FASTCALL lj_tab_len_hint(GCtab *t, size_t hint);
+#endif
+
+#endif
