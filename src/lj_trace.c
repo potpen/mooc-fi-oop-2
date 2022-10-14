@@ -49,4 +49,49 @@ void lj_trace_err_info(jit_State *J, TraceError e)
   lj_err_throw(J->L, LUA_ERRRUN);
 }
 
-/* -- Trace management ---------------
+/* -- Trace management ---------------------------------------------------- */
+
+/* The current trace is first assembled in J->cur. The variable length
+** arrays point to shared, growable buffers (J->irbuf etc.). When trace
+** recording ends successfully, the current trace and its data structures
+** are copied to a new (compact) GCtrace object.
+*/
+
+/* Find a free trace number. */
+static TraceNo trace_findfree(jit_State *J)
+{
+  MSize osz, lim;
+  if (J->freetrace == 0)
+    J->freetrace = 1;
+  for (; J->freetrace < J->sizetrace; J->freetrace++)
+    if (traceref(J, J->freetrace) == NULL)
+      return J->freetrace++;
+  /* Need to grow trace array. */
+  lim = (MSize)J->param[JIT_P_maxtrace] + 1;
+  if (lim < 2) lim = 2; else if (lim > 65535) lim = 65535;
+  osz = J->sizetrace;
+  if (osz >= lim)
+    return 0;  /* Too many traces. */
+  lj_mem_growvec(J->L, J->trace, J->sizetrace, lim, GCRef);
+  for (; osz < J->sizetrace; osz++)
+    setgcrefnull(J->trace[osz]);
+  return J->freetrace;
+}
+
+#define TRACE_APPENDVEC(field, szfield, tp) \
+  T->field = (tp *)p; \
+  memcpy(p, J->cur.field, J->cur.szfield*sizeof(tp)); \
+  p += J->cur.szfield*sizeof(tp);
+
+#ifdef LUAJIT_USE_PERFTOOLS
+/*
+** Create symbol table of JIT-compiled code. For use with Linux perf tools.
+** Example usage:
+**   perf record -f -e cycles luajit test.lua
+**   perf report -s symbol
+**   rm perf.data /tmp/perf-*.map
+*/
+#include <stdio.h>
+#include <unistd.h>
+
+st
