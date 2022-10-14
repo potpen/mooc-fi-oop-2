@@ -94,4 +94,47 @@ static TraceNo trace_findfree(jit_State *J)
 #include <stdio.h>
 #include <unistd.h>
 
-st
+static void perftools_addtrace(GCtrace *T)
+{
+  static FILE *fp;
+  GCproto *pt = &gcref(T->startpt)->pt;
+  const BCIns *startpc = mref(T->startpc, const BCIns);
+  const char *name = proto_chunknamestr(pt);
+  BCLine lineno;
+  if (name[0] == '@' || name[0] == '=')
+    name++;
+  else
+    name = "(string)";
+  lj_assertX(startpc >= proto_bc(pt) && startpc < proto_bc(pt) + pt->sizebc,
+	     "trace PC out of range");
+  lineno = lj_debug_line(pt, proto_bcpos(pt, startpc));
+  if (!fp) {
+    char fname[40];
+    sprintf(fname, "/tmp/perf-%d.map", getpid());
+    if (!(fp = fopen(fname, "w"))) return;
+    setlinebuf(fp);
+  }
+  fprintf(fp, "%lx %x TRACE_%d::%s:%u\n",
+	  (long)T->mcode, T->szmcode, T->traceno, name, lineno);
+}
+#endif
+
+/* Allocate space for copy of T. */
+GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
+{
+  size_t sztr = ((sizeof(GCtrace)+7)&~7);
+  size_t szins = (T->nins-T->nk)*sizeof(IRIns);
+  size_t sz = sztr + szins +
+	      T->nsnap*sizeof(SnapShot) +
+	      T->nsnapmap*sizeof(SnapEntry);
+  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace);
+  char *p = (char *)T2 + sztr;
+  T2->gct = ~LJ_TTRACE;
+  T2->marked = 0;
+  T2->traceno = 0;
+  T2->ir = (IRIns *)p - T->nk;
+  T2->nins = T->nins;
+  T2->nk = T->nk;
+  T2->nsnap = T->nsnap;
+  T2->nsnapmap = T->nsnapmap;
+  memcpy(p, T->ir + T->nk, sz
