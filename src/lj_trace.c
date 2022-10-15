@@ -137,4 +137,50 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
   T2->nk = T->nk;
   T2->nsnap = T->nsnap;
   T2->nsnapmap = T->nsnapmap;
-  memcpy(p, T->ir + T->nk, sz
+  memcpy(p, T->ir + T->nk, szins);
+  return T2;
+}
+
+/* Save current trace by copying and compacting it. */
+static void trace_save(jit_State *J, GCtrace *T)
+{
+  size_t sztr = ((sizeof(GCtrace)+7)&~7);
+  size_t szins = (J->cur.nins-J->cur.nk)*sizeof(IRIns);
+  char *p = (char *)T + sztr;
+  memcpy(T, &J->cur, sizeof(GCtrace));
+  setgcrefr(T->nextgc, J2G(J)->gc.root);
+  setgcrefp(J2G(J)->gc.root, T);
+  newwhite(J2G(J), T);
+  T->gct = ~LJ_TTRACE;
+  T->ir = (IRIns *)p - J->cur.nk;  /* The IR has already been copied above. */
+  p += szins;
+  TRACE_APPENDVEC(snap, nsnap, SnapShot)
+  TRACE_APPENDVEC(snapmap, nsnapmap, SnapEntry)
+  J->cur.traceno = 0;
+  J->curfinal = NULL;
+  setgcrefp(J->trace[T->traceno], T);
+  lj_gc_barriertrace(J2G(J), T->traceno);
+  lj_gdbjit_addtrace(J, T);
+#ifdef LUAJIT_USE_PERFTOOLS
+  perftools_addtrace(T);
+#endif
+}
+
+void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
+{
+  jit_State *J = G2J(g);
+  if (T->traceno) {
+    lj_gdbjit_deltrace(J, T);
+    if (T->traceno < J->freetrace)
+      J->freetrace = T->traceno;
+    setgcrefnull(J->trace[T->traceno]);
+  }
+  lj_mem_free(g, T,
+    ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
+    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
+}
+
+/* Re-enable compiling a prototype by unpatching any modified bytecode. */
+void lj_trace_reenableproto(GCproto *pt)
+{
+  if ((pt->flag
