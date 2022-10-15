@@ -183,4 +183,44 @@ void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
 /* Re-enable compiling a prototype by unpatching any modified bytecode. */
 void lj_trace_reenableproto(GCproto *pt)
 {
-  if ((pt->flag
+  if ((pt->flags & PROTO_ILOOP)) {
+    BCIns *bc = proto_bc(pt);
+    BCPos i, sizebc = pt->sizebc;
+    pt->flags &= ~PROTO_ILOOP;
+    if (bc_op(bc[0]) == BC_IFUNCF)
+      setbc_op(&bc[0], BC_FUNCF);
+    for (i = 1; i < sizebc; i++) {
+      BCOp op = bc_op(bc[i]);
+      if (op == BC_IFORL || op == BC_IITERL || op == BC_ILOOP)
+	setbc_op(&bc[i], (int)op+(int)BC_LOOP-(int)BC_ILOOP);
+    }
+  }
+}
+
+/* Unpatch the bytecode modified by a root trace. */
+static void trace_unpatch(jit_State *J, GCtrace *T)
+{
+  BCOp op = bc_op(T->startins);
+  BCIns *pc = mref(T->startpc, BCIns);
+  UNUSED(J);
+  if (op == BC_JMP)
+    return;  /* No need to unpatch branches in parent traces (yet). */
+  switch (bc_op(*pc)) {
+  case BC_JFORL:
+    lj_assertJ(traceref(J, bc_d(*pc)) == T, "JFORL references other trace");
+    *pc = T->startins;
+    pc += bc_j(T->startins);
+    lj_assertJ(bc_op(*pc) == BC_JFORI, "FORL does not point to JFORI");
+    setbc_op(pc, BC_FORI);
+    break;
+  case BC_JITERL:
+  case BC_JLOOP:
+    lj_assertJ(op == BC_ITERL || op == BC_ITERN || op == BC_LOOP ||
+	       bc_isret(op), "bad original bytecode %d", op);
+    *pc = T->startins;
+    break;
+  case BC_JMP:
+    lj_assertJ(op == BC_ITERL, "bad original bytecode %d", op);
+    pc += bc_j(*pc)+2;
+    if (bc_op(*pc) == BC_JITERL) {
+      lj_assertJ(traceref(J, bc_d(*pc)) == T, "JITERL references other tr
