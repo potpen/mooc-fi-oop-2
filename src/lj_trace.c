@@ -223,4 +223,54 @@ static void trace_unpatch(jit_State *J, GCtrace *T)
     lj_assertJ(op == BC_ITERL, "bad original bytecode %d", op);
     pc += bc_j(*pc)+2;
     if (bc_op(*pc) == BC_JITERL) {
-      lj_assertJ(traceref(J, bc_d(*pc)) == T, "JITERL references other tr
+      lj_assertJ(traceref(J, bc_d(*pc)) == T, "JITERL references other trace");
+      *pc = T->startins;
+    }
+    break;
+  case BC_JFUNCF:
+    lj_assertJ(op == BC_FUNCF, "bad original bytecode %d", op);
+    *pc = T->startins;
+    break;
+  default:  /* Already unpatched. */
+    break;
+  }
+}
+
+/* Flush a root trace. */
+static void trace_flushroot(jit_State *J, GCtrace *T)
+{
+  GCproto *pt = &gcref(T->startpt)->pt;
+  lj_assertJ(T->root == 0, "not a root trace");
+  lj_assertJ(pt != NULL, "trace has no prototype");
+  /* First unpatch any modified bytecode. */
+  trace_unpatch(J, T);
+  /* Unlink root trace from chain anchored in prototype. */
+  if (pt->trace == T->traceno) {  /* Trace is first in chain. Easy. */
+    pt->trace = T->nextroot;
+  } else if (pt->trace) {  /* Otherwise search in chain of root traces. */
+    GCtrace *T2 = traceref(J, pt->trace);
+    if (T2) {
+      for (; T2->nextroot; T2 = traceref(J, T2->nextroot))
+	if (T2->nextroot == T->traceno) {
+	  T2->nextroot = T->nextroot;  /* Unlink from chain. */
+	  break;
+	}
+    }
+  }
+}
+
+/* Flush a trace. Only root traces are considered. */
+void lj_trace_flush(jit_State *J, TraceNo traceno)
+{
+  if (traceno > 0 && traceno < J->sizetrace) {
+    GCtrace *T = traceref(J, traceno);
+    if (T && T->root == 0)
+      trace_flushroot(J, T);
+  }
+}
+
+/* Flush all traces associated with a prototype. */
+void lj_trace_flushproto(global_State *g, GCproto *pt)
+{
+  while (pt->trace != 0)
+    trace_flushroot(G2J(g), traceref(G2J(g)
