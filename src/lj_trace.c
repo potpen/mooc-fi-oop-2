@@ -371,4 +371,50 @@ void lj_trace_freestate(global_State *g)
 /* -- Penalties and blacklisting ------------------------------------------ */
 
 /* Blacklist a bytecode instruction. */
-static void blacklist_pc(GCpr
+static void blacklist_pc(GCproto *pt, BCIns *pc)
+{
+  if (bc_op(*pc) == BC_ITERN) {
+    setbc_op(pc, BC_ITERC);
+    setbc_op(pc+1+bc_j(pc[1]), BC_JMP);
+  } else {
+    setbc_op(pc, (int)bc_op(*pc)+(int)BC_ILOOP-(int)BC_LOOP);
+    pt->flags |= PROTO_ILOOP;
+  }
+}
+
+/* Penalize a bytecode instruction. */
+static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
+{
+  uint32_t i, val = PENALTY_MIN;
+  for (i = 0; i < PENALTY_SLOTS; i++)
+    if (mref(J->penalty[i].pc, const BCIns) == pc) {  /* Cache slot found? */
+      /* First try to bump its hotcount several times. */
+      val = ((uint32_t)J->penalty[i].val << 1) +
+	    (lj_prng_u64(&J2G(J)->prng) & ((1u<<PENALTY_RNDBITS)-1));
+      if (val > PENALTY_MAX) {
+	blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
+	return;
+      }
+      goto setpenalty;
+    }
+  /* Assign a new penalty cache slot. */
+  i = J->penaltyslot;
+  J->penaltyslot = (J->penaltyslot + 1) & (PENALTY_SLOTS-1);
+  setmref(J->penalty[i].pc, pc);
+setpenalty:
+  J->penalty[i].val = (uint16_t)val;
+  J->penalty[i].reason = e;
+  hotcount_set(J2GG(J), pc+1, val);
+}
+
+/* -- Trace compiler state machine ---------------------------------------- */
+
+/* Start tracing. */
+static void trace_start(jit_State *J)
+{
+  lua_State *L;
+  TraceNo traceno;
+
+  if ((J->pt->flags & PROTO_NOJIT)) {  /* JIT disabled for this proto? */
+    if (J->parent == 0 && J->exitno == 0 && bc_op(*J->pc) != BC_ITERN) {
+      /* La
