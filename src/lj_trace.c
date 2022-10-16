@@ -324,4 +324,51 @@ void lj_trace_initstate(global_State *g)
 #if LJ_TARGET_X86ORX64
   J->k64[LJ_K64_TOBIT].u64 = U64x(43380000,00000000);
 #if LJ_32
-  J->k64[LJ_K64_M2P64_31].u64 = U64x(c1e00000,000000
+  J->k64[LJ_K64_M2P64_31].u64 = U64x(c1e00000,00000000);
+#endif
+  J->k64[LJ_K64_2P64].u64 = U64x(43f00000,00000000);
+  J->k32[LJ_K32_M2P64_31] = LJ_64 ? 0xdf800000 : 0xcf000000;
+#endif
+#if LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS64
+  J->k64[LJ_K64_M2P64].u64 = U64x(c3f00000,00000000);
+#endif
+#if LJ_TARGET_PPC
+  J->k32[LJ_K32_2P52_2P31] = 0x59800004;
+  J->k32[LJ_K32_2P52] = 0x59800000;
+#endif
+#if LJ_TARGET_PPC || LJ_TARGET_MIPS
+  J->k32[LJ_K32_2P31] = 0x4f000000;
+#endif
+#if LJ_TARGET_MIPS
+  J->k64[LJ_K64_2P31].u64 = U64x(41e00000,00000000);
+#if LJ_64
+  J->k64[LJ_K64_2P63].u64 = U64x(43e00000,00000000);
+  J->k32[LJ_K32_2P63] = 0x5f000000;
+  J->k32[LJ_K32_M2P64] = 0xdf800000;
+#endif
+#endif
+}
+
+/* Free everything associated with the JIT compiler state. */
+void lj_trace_freestate(global_State *g)
+{
+  jit_State *J = G2J(g);
+#ifdef LUA_USE_ASSERT
+  {  /* This assumes all traces have already been freed. */
+    ptrdiff_t i;
+    for (i = 1; i < (ptrdiff_t)J->sizetrace; i++)
+      lj_assertG(i == (ptrdiff_t)J->cur.traceno || traceref(J, i) == NULL,
+		 "trace still allocated");
+  }
+#endif
+  lj_mcode_free(J);
+  lj_mem_freevec(g, J->snapmapbuf, J->sizesnapmap, SnapEntry);
+  lj_mem_freevec(g, J->snapbuf, J->sizesnap, SnapShot);
+  lj_mem_freevec(g, J->irbuf + J->irbotlim, J->irtoplim - J->irbotlim, IRIns);
+  lj_mem_freevec(g, J->trace, J->sizetrace, GCRef);
+}
+
+/* -- Penalties and blacklisting ------------------------------------------ */
+
+/* Blacklist a bytecode instruction. */
+static void blacklist_pc(GCpr
