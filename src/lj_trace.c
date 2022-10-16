@@ -273,4 +273,55 @@ void lj_trace_flush(jit_State *J, TraceNo traceno)
 void lj_trace_flushproto(global_State *g, GCproto *pt)
 {
   while (pt->trace != 0)
-    trace_flushroot(G2J(g), traceref(G2J(g)
+    trace_flushroot(G2J(g), traceref(G2J(g), pt->trace));
+}
+
+/* Flush all traces. */
+int lj_trace_flushall(lua_State *L)
+{
+  jit_State *J = L2J(L);
+  ptrdiff_t i;
+  if ((J2G(J)->hookmask & HOOK_GC))
+    return 1;
+  for (i = (ptrdiff_t)J->sizetrace-1; i > 0; i--) {
+    GCtrace *T = traceref(J, i);
+    if (T) {
+      if (T->root == 0)
+	trace_flushroot(J, T);
+      lj_gdbjit_deltrace(J, T);
+      T->traceno = T->link = 0;  /* Blacklist the link for cont_stitch. */
+      setgcrefnull(J->trace[i]);
+    }
+  }
+  J->cur.traceno = 0;
+  J->freetrace = 0;
+  /* Clear penalty cache. */
+  memset(J->penalty, 0, sizeof(J->penalty));
+  /* Free the whole machine code and invalidate all exit stub groups. */
+  lj_mcode_free(J);
+  memset(J->exitstubgroup, 0, sizeof(J->exitstubgroup));
+  lj_vmevent_send(L, TRACE,
+    setstrV(L, L->top++, lj_str_newlit(L, "flush"));
+  );
+  return 0;
+}
+
+/* Initialize JIT compiler state. */
+void lj_trace_initstate(global_State *g)
+{
+  jit_State *J = G2J(g);
+  TValue *tv;
+
+  /* Initialize aligned SIMD constants. */
+  tv = LJ_KSIMD(J, LJ_KSIMD_ABS);
+  tv[0].u64 = U64x(7fffffff,ffffffff);
+  tv[1].u64 = U64x(7fffffff,ffffffff);
+  tv = LJ_KSIMD(J, LJ_KSIMD_NEG);
+  tv[0].u64 = U64x(80000000,00000000);
+  tv[1].u64 = U64x(80000000,00000000);
+
+  /* Initialize 32/64 bit constants. */
+#if LJ_TARGET_X86ORX64
+  J->k64[LJ_K64_TOBIT].u64 = U64x(43380000,00000000);
+#if LJ_32
+  J->k64[LJ_K64_M2P64_31].u64 = U64x(c1e00000,000000
