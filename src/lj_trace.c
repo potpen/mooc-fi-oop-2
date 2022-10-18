@@ -461,4 +461,53 @@ static void trace_start(jit_State *J)
     setstrV(L, L->top++, lj_str_newlit(L, "start"));
     setintV(L->top++, traceno);
     setfuncV(L, L->top++, J->fn);
-    setintV(L->
+    setintV(L->top++, proto_bcpos(J->pt, J->pc));
+    if (J->parent) {
+      setintV(L->top++, J->parent);
+      setintV(L->top++, J->exitno);
+    } else {
+      BCOp op = bc_op(*J->pc);
+      if (op == BC_CALLM || op == BC_CALL || op == BC_ITERC) {
+	setintV(L->top++, J->exitno);  /* Parent of stitched trace. */
+	setintV(L->top++, -1);
+      }
+    }
+  );
+  lj_record_setup(J);
+}
+
+/* Stop tracing. */
+static void trace_stop(jit_State *J)
+{
+  BCIns *pc = mref(J->cur.startpc, BCIns);
+  BCOp op = bc_op(J->cur.startins);
+  GCproto *pt = &gcref(J->cur.startpt)->pt;
+  TraceNo traceno = J->cur.traceno;
+  GCtrace *T = J->curfinal;
+  lua_State *L;
+
+  switch (op) {
+  case BC_FORL:
+    setbc_op(pc+bc_j(J->cur.startins), BC_JFORI);  /* Patch FORI, too. */
+    /* fallthrough */
+  case BC_LOOP:
+  case BC_ITERL:
+  case BC_FUNCF:
+    /* Patch bytecode of starting instruction in root trace. */
+    setbc_op(pc, (int)op+(int)BC_JLOOP-(int)BC_LOOP);
+    setbc_d(pc, traceno);
+  addroot:
+    /* Add to root trace chain in prototype. */
+    J->cur.nextroot = pt->trace;
+    pt->trace = (TraceNo1)traceno;
+    break;
+  case BC_ITERN:
+  case BC_RET:
+  case BC_RET0:
+  case BC_RET1:
+    *pc = BCINS_AD(BC_JLOOP, J->cur.snap[0].nslots, traceno);
+    goto addroot;
+  case BC_JMP:
+    /* Patch exit branch in parent to side trace entry. */
+    lj_assertJ(J->parent != 0 && J->cur.root != 0, "not a side trace");
+ 
