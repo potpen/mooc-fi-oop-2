@@ -555,4 +555,53 @@ static int trace_downrec(jit_State *J)
   /* Restart recording at the return instruction. */
   lj_assertJ(J->pt != NULL, "no active prototype");
   lj_assertJ(bc_isret(bc_op(*J->pc)), "not at a return bytecode");
-  if (bc_op(*J->pc) == BC
+  if (bc_op(*J->pc) == BC_RETM)
+    return 0;  /* NYI: down-recursion with RETM. */
+  J->parent = 0;
+  J->exitno = 0;
+  J->state = LJ_TRACE_RECORD;
+  trace_start(J);
+  return 1;
+}
+
+/* Abort tracing. */
+static int trace_abort(jit_State *J)
+{
+  lua_State *L = J->L;
+  TraceError e = LJ_TRERR_RECERR;
+  TraceNo traceno;
+
+  J->postproc = LJ_POST_NONE;
+  lj_mcode_abort(J);
+  if (J->curfinal) {
+    lj_trace_free(J2G(J), J->curfinal);
+    J->curfinal = NULL;
+  }
+  if (tvisnumber(L->top-1))
+    e = (TraceError)numberVint(L->top-1);
+  if (e == LJ_TRERR_MCODELM) {
+    L->top--;  /* Remove error object */
+    J->state = LJ_TRACE_ASM;
+    return 1;  /* Retry ASM with new MCode area. */
+  }
+  /* Penalize or blacklist starting bytecode instruction. */
+  if (J->parent == 0 && !bc_isret(bc_op(J->cur.startins))) {
+    if (J->exitno == 0) {
+      BCIns *startpc = mref(J->cur.startpc, BCIns);
+      if (e == LJ_TRERR_RETRY)
+	hotcount_set(J2GG(J), startpc+1, 1);  /* Immediate retry. */
+      else
+	penalty_pc(J, &gcref(J->cur.startpt)->pt, startpc, e);
+    } else {
+      traceref(J, J->exitno)->link = J->exitno;  /* Self-link is blacklisted. */
+    }
+  }
+
+  /* Is there anything to abort? */
+  traceno = J->cur.traceno;
+  if (traceno) {
+    ptrdiff_t errobj = savestack(L, L->top-1);  /* Stack may be resized. */
+    J->cur.link = 0;
+    J->cur.linktype = LJ_TRLINK_NONE;
+    lj_vmevent_send(L, TRACE,
+      TValue *fr
