@@ -510,4 +510,49 @@ static void trace_stop(jit_State *J)
   case BC_JMP:
     /* Patch exit branch in parent to side trace entry. */
     lj_assertJ(J->parent != 0 && J->cur.root != 0, "not a side trace");
- 
+    lj_asm_patchexit(J, traceref(J, J->parent), J->exitno, J->cur.mcode);
+    /* Avoid compiling a side trace twice (stack resizing uses parent exit). */
+    {
+      SnapShot *snap = &traceref(J, J->parent)->snap[J->exitno];
+      snap->count = SNAPCOUNT_DONE;
+      if (J->cur.topslot > snap->topslot) snap->topslot = J->cur.topslot;
+    }
+    /* Add to side trace chain in root trace. */
+    {
+      GCtrace *root = traceref(J, J->cur.root);
+      root->nchild++;
+      J->cur.nextside = root->nextside;
+      root->nextside = (TraceNo1)traceno;
+    }
+    break;
+  case BC_CALLM:
+  case BC_CALL:
+  case BC_ITERC:
+    /* Trace stitching: patch link of previous trace. */
+    traceref(J, J->exitno)->link = traceno;
+    break;
+  default:
+    lj_assertJ(0, "bad stop bytecode %d", op);
+    break;
+  }
+
+  /* Commit new mcode only after all patching is done. */
+  lj_mcode_commit(J, J->cur.mcode);
+  J->postproc = LJ_POST_NONE;
+  trace_save(J, T);
+
+  L = J->L;
+  lj_vmevent_send(L, TRACE,
+    setstrV(L, L->top++, lj_str_newlit(L, "stop"));
+    setintV(L->top++, traceno);
+    setfuncV(L, L->top++, J->fn);
+  );
+}
+
+/* Start a new root trace for down-recursion. */
+static int trace_downrec(jit_State *J)
+{
+  /* Restart recording at the return instruction. */
+  lj_assertJ(J->pt != NULL, "no active prototype");
+  lj_assertJ(bc_isret(bc_op(*J->pc)), "not at a return bytecode");
+  if (bc_op(*J->pc) == BC
