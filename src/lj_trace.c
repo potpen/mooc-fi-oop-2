@@ -604,4 +604,50 @@ static int trace_abort(jit_State *J)
     J->cur.link = 0;
     J->cur.linktype = LJ_TRLINK_NONE;
     lj_vmevent_send(L, TRACE,
-      TValue *fr
+      TValue *frame;
+      const BCIns *pc;
+      GCfunc *fn;
+      setstrV(L, L->top++, lj_str_newlit(L, "abort"));
+      setintV(L->top++, traceno);
+      /* Find original Lua function call to generate a better error message. */
+      frame = J->L->base-1;
+      pc = J->pc;
+      while (!isluafunc(frame_func(frame))) {
+	pc = (frame_iscont(frame) ? frame_contpc(frame) : frame_pc(frame)) - 1;
+	frame = frame_prev(frame);
+      }
+      fn = frame_func(frame);
+      setfuncV(L, L->top++, fn);
+      setintV(L->top++, proto_bcpos(funcproto(fn), pc));
+      copyTV(L, L->top++, restorestack(L, errobj));
+      copyTV(L, L->top++, &J->errinfo);
+    );
+    /* Drop aborted trace after the vmevent (which may still access it). */
+    setgcrefnull(J->trace[traceno]);
+    if (traceno < J->freetrace)
+      J->freetrace = traceno;
+    J->cur.traceno = 0;
+  }
+  L->top--;  /* Remove error object */
+  if (e == LJ_TRERR_DOWNREC)
+    return trace_downrec(J);
+  else if (e == LJ_TRERR_MCODEAL)
+    lj_trace_flushall(L);
+  return 0;
+}
+
+/* Perform pending re-patch of a bytecode instruction. */
+static LJ_AINLINE void trace_pendpatch(jit_State *J, int force)
+{
+  if (LJ_UNLIKELY(J->patchpc)) {
+    if (force || J->bcskip == 0) {
+      *J->patchpc = J->patchins;
+      J->patchpc = NULL;
+    } else {
+      J->bcskip = 0;
+    }
+  }
+}
+
+/* State machine for the trace compiler. Protected callback. */
+static TValue *trace_state(lua_State
