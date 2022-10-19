@@ -747,4 +747,44 @@ void lj_trace_ins(jit_State *J, const BCIns *pc)
   J->fn = curr_func(J->L);
   J->pt = isluafunc(J->fn) ? funcproto(J->fn) : NULL;
   while (lj_vm_cpcall(J->L, NULL, (void *)J, trace_state) != 0)
-    J->stat
+    J->state = LJ_TRACE_ERR;
+}
+
+/* A hotcount triggered. Start recording a root trace. */
+void LJ_FASTCALL lj_trace_hot(jit_State *J, const BCIns *pc)
+{
+  /* Note: pc is the interpreter bytecode PC here. It's offset by 1. */
+  ERRNO_SAVE
+  /* Reset hotcount. */
+  hotcount_set(J2GG(J), pc, J->param[JIT_P_hotloop]*HOTCOUNT_LOOP);
+  /* Only start a new trace if not recording or inside __gc call or vmevent. */
+  if (J->state == LJ_TRACE_IDLE &&
+      !(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT))) {
+    J->parent = 0;  /* Root trace. */
+    J->exitno = 0;
+    J->state = LJ_TRACE_START;
+    lj_trace_ins(J, pc-1);
+  }
+  ERRNO_RESTORE
+}
+
+/* Check for a hot side exit. If yes, start recording a side trace. */
+static void trace_hotside(jit_State *J, const BCIns *pc)
+{
+  SnapShot *snap = &traceref(J, J->parent)->snap[J->exitno];
+  if (!(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT)) &&
+      isluafunc(curr_func(J->L)) &&
+      snap->count != SNAPCOUNT_DONE &&
+      ++snap->count >= J->param[JIT_P_hotexit]) {
+    lj_assertJ(J->state == LJ_TRACE_IDLE, "hot side exit while recording");
+    /* J->parent is non-zero for a side trace. */
+    J->state = LJ_TRACE_START;
+    lj_trace_ins(J, pc);
+  }
+}
+
+/* Stitch a new trace to the previous trace. */
+void LJ_FASTCALL lj_trace_stitch(jit_State *J, const BCIns *pc)
+{
+  /* Only start a new trace if not recording or inside __gc call or vmevent. */
+  if (J->st
