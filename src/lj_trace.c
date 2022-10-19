@@ -700,4 +700,51 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
 	if (lj_opt_loop(J)) {  /* Loop optimization failed? */
 	  J->cur.link = 0;
 	  J->cur.linktype = LJ_TRLINK_NONE;
-	  J->lo
+	  J->loopref = J->cur.nins;
+	  J->state = LJ_TRACE_RECORD;  /* Try to continue recording. */
+	  break;
+	}
+	J->loopref = J->chain[IR_LOOP];  /* Needed by assembler. */
+      }
+      lj_opt_split(J);
+      lj_opt_sink(J);
+      if (!J->loopref) J->cur.snap[J->cur.nsnap-1].count = SNAPCOUNT_DONE;
+      J->state = LJ_TRACE_ASM;
+      break;
+
+    case LJ_TRACE_ASM:
+      setvmstate(J2G(J), ASM);
+      lj_asm_trace(J, &J->cur);
+      trace_stop(J);
+      setvmstate(J2G(J), INTERP);
+      J->state = LJ_TRACE_IDLE;
+      lj_dispatch_update(J2G(J));
+      return NULL;
+
+    default:  /* Trace aborted asynchronously. */
+      setintV(L->top++, (int32_t)LJ_TRERR_RECERR);
+      /* fallthrough */
+    case LJ_TRACE_ERR:
+      trace_pendpatch(J, 1);
+      if (trace_abort(J))
+	goto retry;
+      setvmstate(J2G(J), INTERP);
+      J->state = LJ_TRACE_IDLE;
+      lj_dispatch_update(J2G(J));
+      return NULL;
+    }
+  } while (J->state > LJ_TRACE_RECORD);
+  return NULL;
+}
+
+/* -- Event handling ------------------------------------------------------ */
+
+/* A bytecode instruction is about to be executed. Record it. */
+void lj_trace_ins(jit_State *J, const BCIns *pc)
+{
+  /* Note: J->L must already be set. pc is the true bytecode PC here. */
+  J->pc = pc;
+  J->fn = curr_func(J->L);
+  J->pt = isluafunc(J->fn) ? funcproto(J->fn) : NULL;
+  while (lj_vm_cpcall(J->L, NULL, (void *)J, trace_state) != 0)
+    J->stat
