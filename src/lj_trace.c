@@ -650,4 +650,54 @@ static LJ_AINLINE void trace_pendpatch(jit_State *J, int force)
 }
 
 /* State machine for the trace compiler. Protected callback. */
-static TValue *trace_state(lua_State
+static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
+{
+  jit_State *J = (jit_State *)ud;
+  UNUSED(dummy);
+  do {
+  retry:
+    switch (J->state) {
+    case LJ_TRACE_START:
+      J->state = LJ_TRACE_RECORD;  /* trace_start() may change state. */
+      trace_start(J);
+      lj_dispatch_update(J2G(J));
+      if (J->state != LJ_TRACE_RECORD_1ST)
+	break;
+      /* fallthrough */
+
+    case LJ_TRACE_RECORD_1ST:
+      J->state = LJ_TRACE_RECORD;
+      /* fallthrough */
+    case LJ_TRACE_RECORD:
+      trace_pendpatch(J, 0);
+      setvmstate(J2G(J), RECORD);
+      lj_vmevent_send_(L, RECORD,
+	/* Save/restore state for trace recorder. */
+	TValue savetv = J2G(J)->tmptv;
+	TValue savetv2 = J2G(J)->tmptv2;
+	TraceNo parent = J->parent;
+	ExitNo exitno = J->exitno;
+	setintV(L->top++, J->cur.traceno);
+	setfuncV(L, L->top++, J->fn);
+	setintV(L->top++, J->pt ? (int32_t)proto_bcpos(J->pt, J->pc) : -1);
+	setintV(L->top++, J->framedepth);
+      ,
+	J2G(J)->tmptv = savetv;
+	J2G(J)->tmptv2 = savetv2;
+	J->parent = parent;
+	J->exitno = exitno;
+      );
+      lj_record_ins(J);
+      break;
+
+    case LJ_TRACE_END:
+      trace_pendpatch(J, 1);
+      J->loopref = 0;
+      if ((J->flags & JIT_F_OPT_LOOP) &&
+	  J->cur.link == J->cur.traceno && J->framedepth + J->retdepth == 0) {
+	setvmstate(J2G(J), OPT);
+	lj_opt_dce(J);
+	if (lj_opt_loop(J)) {  /* Loop optimization failed? */
+	  J->cur.link = 0;
+	  J->cur.linktype = LJ_TRLINK_NONE;
+	  J->lo
