@@ -787,4 +787,53 @@ static void trace_hotside(jit_State *J, const BCIns *pc)
 void LJ_FASTCALL lj_trace_stitch(jit_State *J, const BCIns *pc)
 {
   /* Only start a new trace if not recording or inside __gc call or vmevent. */
-  if (J->st
+  if (J->state == LJ_TRACE_IDLE &&
+      !(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT))) {
+    J->parent = 0;  /* Have to treat it like a root trace. */
+    /* J->exitno is set to the invoking trace. */
+    J->state = LJ_TRACE_START;
+    lj_trace_ins(J, pc);
+  }
+}
+
+
+/* Tiny struct to pass data to protected call. */
+typedef struct ExitDataCP {
+  jit_State *J;
+  void *exptr;		/* Pointer to exit state. */
+  const BCIns *pc;	/* Restart interpreter at this PC. */
+} ExitDataCP;
+
+/* Need to protect lj_snap_restore because it may throw. */
+static TValue *trace_exit_cp(lua_State *L, lua_CFunction dummy, void *ud)
+{
+  ExitDataCP *exd = (ExitDataCP *)ud;
+  /* Always catch error here and don't call error function. */
+  cframe_errfunc(L->cframe) = 0;
+  cframe_nres(L->cframe) = -2*LUAI_MAXSTACK*(int)sizeof(TValue);
+  exd->pc = lj_snap_restore(exd->J, exd->exptr);
+  UNUSED(dummy);
+  return NULL;
+}
+
+#ifndef LUAJIT_DISABLE_VMEVENT
+/* Push all registers from exit state. */
+static void trace_exit_regs(lua_State *L, ExitState *ex)
+{
+  int32_t i;
+  setintV(L->top++, RID_NUM_GPR);
+  setintV(L->top++, RID_NUM_FPR);
+  for (i = 0; i < RID_NUM_GPR; i++) {
+    if (sizeof(ex->gpr[i]) == sizeof(int32_t))
+      setintV(L->top++, (int32_t)ex->gpr[i]);
+    else
+      setnumV(L->top++, (lua_Number)ex->gpr[i]);
+  }
+#if !LJ_SOFTFP
+  for (i = 0; i < RID_NUM_FPR; i++) {
+    setnumV(L->top, ex->fpr[i]);
+    if (LJ_UNLIKELY(tvisnan(L->top)))
+      setnanV(L->top);
+    L->top++;
+  }
+#e
