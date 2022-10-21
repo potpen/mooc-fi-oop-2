@@ -836,4 +836,54 @@ static void trace_exit_regs(lua_State *L, ExitState *ex)
       setnanV(L->top);
     L->top++;
   }
-#e
+#endif
+}
+#endif
+
+#if defined(EXITSTATE_PCREG) || (LJ_UNWIND_JIT && !EXITTRACE_VMSTATE)
+/* Determine trace number from pc of exit instruction. */
+static TraceNo trace_exit_find(jit_State *J, MCode *pc)
+{
+  TraceNo traceno;
+  for (traceno = 1; traceno < J->sizetrace; traceno++) {
+    GCtrace *T = traceref(J, traceno);
+    if (T && pc >= T->mcode && pc < (MCode *)((char *)T->mcode + T->szmcode))
+      return traceno;
+  }
+  lj_assertJ(0, "bad exit pc");
+  return 0;
+}
+#endif
+
+/* A trace exited. Restore interpreter state. */
+int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
+{
+  ERRNO_SAVE
+  lua_State *L = J->L;
+  ExitState *ex = (ExitState *)exptr;
+  ExitDataCP exd;
+  int errcode, exitcode = J->exitcode;
+  TValue exiterr;
+  const BCIns *pc;
+  void *cf;
+  GCtrace *T;
+
+  setnilV(&exiterr);
+  if (exitcode) {  /* Trace unwound with error code. */
+    J->exitcode = 0;
+    copyTV(L, &exiterr, L->top-1);
+  }
+
+#ifdef EXITSTATE_PCREG
+  J->parent = trace_exit_find(J, (MCode *)(intptr_t)ex->gpr[EXITSTATE_PCREG]);
+#endif
+  T = traceref(J, J->parent); UNUSED(T);
+#ifdef EXITSTATE_CHECKEXIT
+  if (J->exitno == T->nsnap) {  /* Treat stack check like a parent exit. */
+    lj_assertJ(T->root != 0, "stack check in root trace");
+    J->exitno = T->ir[REF_BASE].op2;
+    J->parent = T->ir[REF_BASE].op1;
+    T = traceref(J, J->parent);
+  }
+#endif
+  lj_assertJ(T != NULL && J->exitno < T->nsnap,
