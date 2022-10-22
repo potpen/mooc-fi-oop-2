@@ -933,4 +933,46 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   }
   /* Return MULTRES or 0. */
   ERRNO_RESTORE
-  switch (
+  switch (bc_op(*pc)) {
+  case BC_CALLM: case BC_CALLMT:
+    return (int)((BCReg)(L->top - L->base) - bc_a(*pc) - bc_c(*pc) - LJ_FR2);
+  case BC_RETM:
+    return (int)((BCReg)(L->top - L->base) + 1 - bc_a(*pc) - bc_d(*pc));
+  case BC_TSETM:
+    return (int)((BCReg)(L->top - L->base) + 1 - bc_a(*pc));
+  default:
+    if (bc_op(*pc) >= BC_FUNCF)
+      return (int)((BCReg)(L->top - L->base) + 1);
+    return 0;
+  }
+}
+
+#if LJ_UNWIND_JIT
+/* Given an mcode address determine trace exit address for unwinding. */
+uintptr_t LJ_FASTCALL lj_trace_unwind(jit_State *J, uintptr_t addr, ExitNo *ep)
+{
+#if EXITTRACE_VMSTATE
+  TraceNo traceno = J2G(J)->vmstate;
+#else
+  TraceNo traceno = trace_exit_find(J, (MCode *)addr);
+#endif
+  GCtrace *T = traceref(J, traceno);
+  if (T
+#if EXITTRACE_VMSTATE
+      && addr >= (uintptr_t)T->mcode && addr < (uintptr_t)T->mcode + T->szmcode
+#endif
+     ) {
+    SnapShot *snap = T->snap;
+    SnapNo lo = 0, exitno = T->nsnap;
+    uintptr_t ofs = (uintptr_t)((MCode *)addr - T->mcode);  /* MCode units! */
+    /* Rightmost binary search for mcode offset to determine exit number. */
+    do {
+      SnapNo mid = (lo+exitno) >> 1;
+      if (ofs < snap[mid].mcofs) exitno = mid; else lo = mid + 1;
+    } while (lo < exitno);
+    exitno--;
+    *ep = exitno;
+#ifdef EXITSTUBS_PER_GROUP
+    return (uintptr_t)exitstub_addr(J, exitno);
+#else
+    return (uintptr_t)ex
