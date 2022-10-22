@@ -975,4 +975,13 @@ uintptr_t LJ_FASTCALL lj_trace_unwind(jit_State *J, uintptr_t addr, ExitNo *ep)
 #ifdef EXITSTUBS_PER_GROUP
     return (uintptr_t)exitstub_addr(J, exitno);
 #else
-    return (uintptr_t)ex
+    return (uintptr_t)exitstub_trace_addr(T, exitno);
+#endif
+  }
+  /* Cannot correlate addr with trace/exit. This will be fatal. */
+  lj_assertJ(0, "bad exit pc");
+  return 0;
+}
+#endif
+
+#endif
