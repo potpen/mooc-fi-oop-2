@@ -41,4 +41,22 @@ void *lj_lightud_intern(lua_State *L, void *p)
   uint32_t up = lightudup(u);
   uint32_t *segmap = mref(g->gc.lightudseg, uint32_t);
   MSize segnum = g->gc.lightudnum;
-  if (s
+  if (segmap) {
+    MSize seg;
+    for (seg = 0; seg <= segnum; seg++)
+      if (segmap[seg] == up)  /* Fast path. */
+	return (void *)(((uint64_t)seg << LJ_LIGHTUD_BITS_LO) | lightudlo(u));
+    segnum++;
+    /* Leave last segment unused to avoid clash with ITERN key. */
+    if (segnum >= (1 << LJ_LIGHTUD_BITS_SEG)-1) lj_err_msg(L, LJ_ERR_BADLU);
+  }
+  if (!((segnum-1) & segnum) && segnum != 1) {
+    lj_mem_reallocvec(L, segmap, segnum, segnum ? 2*segnum : 2u, uint32_t);
+    setmref(g->gc.lightudseg, segmap);
+  }
+  g->gc.lightudnum = segnum;
+  segmap[segnum] = up;
+  return (void *)(((uint64_t)segnum << LJ_LIGHTUD_BITS_LO) | lightudlo(u));
+}
+#endif
+
