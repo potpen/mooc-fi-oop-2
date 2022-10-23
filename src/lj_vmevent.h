@@ -53,4 +53,7 @@ typedef enum {
   }
 
 LJ_FUNC ptrdiff_t lj_vmevent_prepare(lua_State *L, VMEvent ev);
-LJ_FUNC void lj_vmevent_call(lua_State *L, ptrdiff_
+LJ_FUNC void lj_vmevent_call(lua_State *L, ptrdiff_t argbase);
+#endif
+
+#endif
