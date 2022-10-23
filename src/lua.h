@@ -216,4 +216,56 @@ LUA_API int  (lua_resume) (lua_State *L, int narg);
 LUA_API int  (lua_status) (lua_State *L);
 
 /*
-** garbage-collection function 
+** garbage-collection function and options
+*/
+
+#define LUA_GCSTOP		0
+#define LUA_GCRESTART		1
+#define LUA_GCCOLLECT		2
+#define LUA_GCCOUNT		3
+#define LUA_GCCOUNTB		4
+#define LUA_GCSTEP		5
+#define LUA_GCSETPAUSE		6
+#define LUA_GCSETSTEPMUL	7
+#define LUA_GCISRUNNING		9
+
+LUA_API int (lua_gc) (lua_State *L, int what, int data);
+
+
+/*
+** miscellaneous functions
+*/
+
+LUA_API int   (lua_error) (lua_State *L);
+
+LUA_API int   (lua_next) (lua_State *L, int idx);
+
+LUA_API void  (lua_concat) (lua_State *L, int n);
+
+LUA_API lua_Alloc (lua_getallocf) (lua_State *L, void **ud);
+LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud);
+
+
+
+/*
+** ===============================================================
+** some useful macros
+** ===============================================================
+*/
+
+#define lua_pop(L,n)		lua_settop(L, -(n)-1)
+
+#define lua_newtable(L)		lua_createtable(L, 0, 0)
+
+#define lua_register(L,n,f) (lua_pushcfunction(L, (f)), lua_setglobal(L, (n)))
+
+#define lua_pushcfunction(L,f)	lua_pushcclosure(L, (f), 0)
+
+#define lua_strlen(L,i)		lua_objlen(L, (i))
+
+#define lua_isfunction(L,n)	(lua_type(L, (n)) == LUA_TFUNCTION)
+#define lua_istable(L,n)	(lua_type(L, (n)) == LUA_TTABLE)
+#define lua_islightuserdata(L,n)	(lua_type(L, (n)) == LUA_TLIGHTUSERDATA)
+#define lua_isnil(L,n)		(lua_type(L, (n)) == LUA_TNIL)
+#define lua_isboolean(L,n)	(lua_type(L, (n)) == LUA_TBOOLEAN)
+#define lua_isthread(L,n)	(l
