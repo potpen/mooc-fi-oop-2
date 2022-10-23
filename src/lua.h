@@ -109,4 +109,40 @@ typedef LUA_INTEGER lua_Integer;
 ** state manipulation
 */
 LUA_API lua_State *(lua_newstate) (lua_Alloc f, void *ud);
-LUA_AP
+LUA_API void       (lua_close) (lua_State *L);
+LUA_API lua_State *(lua_newthread) (lua_State *L);
+
+LUA_API lua_CFunction (lua_atpanic) (lua_State *L, lua_CFunction panicf);
+
+
+/*
+** basic stack manipulation
+*/
+LUA_API int   (lua_gettop) (lua_State *L);
+LUA_API void  (lua_settop) (lua_State *L, int idx);
+LUA_API void  (lua_pushvalue) (lua_State *L, int idx);
+LUA_API void  (lua_remove) (lua_State *L, int idx);
+LUA_API void  (lua_insert) (lua_State *L, int idx);
+LUA_API void  (lua_replace) (lua_State *L, int idx);
+LUA_API int   (lua_checkstack) (lua_State *L, int sz);
+
+LUA_API void  (lua_xmove) (lua_State *from, lua_State *to, int n);
+
+
+/*
+** access functions (stack -> C)
+*/
+
+LUA_API int             (lua_isnumber) (lua_State *L, int idx);
+LUA_API int             (lua_isstring) (lua_State *L, int idx);
+LUA_API int             (lua_iscfunction) (lua_State *L, int idx);
+LUA_API int             (lua_isuserdata) (lua_State *L, int idx);
+LUA_API int             (lua_type) (lua_State *L, int idx);
+LUA_API const char     *(lua_typename) (lua_State *L, int tp);
+
+LUA_API int            (lua_equal) (lua_State *L, int idx1, int idx2);
+LUA_API int            (lua_rawequal) (lua_State *L, int idx1, int idx2);
+LUA_API int            (lua_lessthan) (lua_State *L, int idx1, int idx2);
+
+LUA_API lua_Number      (lua_tonumber) (lua_State *L, int idx);
+LUA_API lua_Integer     (lua_tointeger) (
