@@ -268,4 +268,65 @@ LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud);
 #define lua_islightuserdata(L,n)	(lua_type(L, (n)) == LUA_TLIGHTUSERDATA)
 #define lua_isnil(L,n)		(lua_type(L, (n)) == LUA_TNIL)
 #define lua_isboolean(L,n)	(lua_type(L, (n)) == LUA_TBOOLEAN)
-#define lua_isthread(L,n)	(l
+#define lua_isthread(L,n)	(lua_type(L, (n)) == LUA_TTHREAD)
+#define lua_isnone(L,n)		(lua_type(L, (n)) == LUA_TNONE)
+#define lua_isnoneornil(L, n)	(lua_type(L, (n)) <= 0)
+
+#define lua_pushliteral(L, s)	\
+	lua_pushlstring(L, "" s, (sizeof(s)/sizeof(char))-1)
+
+#define lua_setglobal(L,s)	lua_setfield(L, LUA_GLOBALSINDEX, (s))
+#define lua_getglobal(L,s)	lua_getfield(L, LUA_GLOBALSINDEX, (s))
+
+#define lua_tostring(L,i)	lua_tolstring(L, (i), NULL)
+
+
+
+/*
+** compatibility macros and functions
+*/
+
+#define lua_open()	luaL_newstate()
+
+#define lua_getregistry(L)	lua_pushvalue(L, LUA_REGISTRYINDEX)
+
+#define lua_getgccount(L)	lua_gc(L, LUA_GCCOUNT, 0)
+
+#define lua_Chunkreader		lua_Reader
+#define lua_Chunkwriter		lua_Writer
+
+
+/* hack */
+LUA_API void lua_setlevel	(lua_State *from, lua_State *to);
+
+
+/*
+** {======================================================================
+** Debug API
+** =======================================================================
+*/
+
+
+/*
+** Event codes
+*/
+#define LUA_HOOKCALL	0
+#define LUA_HOOKRET	1
+#define LUA_HOOKLINE	2
+#define LUA_HOOKCOUNT	3
+#define LUA_HOOKTAILRET 4
+
+
+/*
+** Event masks
+*/
+#define LUA_MASKCALL	(1 << LUA_HOOKCALL)
+#define LUA_MASKRET	(1 << LUA_HOOKRET)
+#define LUA_MASKLINE	(1 << LUA_HOOKLINE)
+#define LUA_MASKCOUNT	(1 << LUA_HOOKCOUNT)
+
+typedef struct lua_Debug lua_Debug;  /* activation record */
+
+
+/* Functions to be called by the debuger in specific events */
+typedef void (*lua_Hook) (lua_State *L, lua_Debug *ar);
