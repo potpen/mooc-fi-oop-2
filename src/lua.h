@@ -330,3 +330,35 @@ typedef struct lua_Debug lua_Debug;  /* activation record */
 
 /* Functions to be called by the debuger in specific events */
 typedef void (*lua_Hook) (lua_State *L, lua_Debug *ar);
+
+
+LUA_API int lua_getstack (lua_State *L, int level, lua_Debug *ar);
+LUA_API int lua_getinfo (lua_State *L, const char *what, lua_Debug *ar);
+LUA_API const char *lua_getlocal (lua_State *L, const lua_Debug *ar, int n);
+LUA_API const char *lua_setlocal (lua_State *L, const lua_Debug *ar, int n);
+LUA_API const char *lua_getupvalue (lua_State *L, int funcindex, int n);
+LUA_API const char *lua_setupvalue (lua_State *L, int funcindex, int n);
+LUA_API int lua_sethook (lua_State *L, lua_Hook func, int mask, int count);
+LUA_API lua_Hook lua_gethook (lua_State *L);
+LUA_API int lua_gethookmask (lua_State *L);
+LUA_API int lua_gethookcount (lua_State *L);
+
+/* From Lua 5.2. */
+LUA_API void *lua_upvalueid (lua_State *L, int idx, int n);
+LUA_API void lua_upvaluejoin (lua_State *L, int idx1, int n1, int idx2, int n2);
+LUA_API int lua_loadx (lua_State *L, lua_Reader reader, void *dt,
+		       const char *chunkname, const char *mode);
+LUA_API const lua_Number *lua_version (lua_State *L);
+LUA_API void lua_copy (lua_State *L, int fromidx, int toidx);
+LUA_API lua_Number lua_tonumberx (lua_State *L, int idx, int *isnum);
+LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
+
+/* From Lua 5.3. */
+LUA_API int lua_isyieldable (lua_State *L);
+
+
+struct lua_Debug {
+  int event;
+  const char *name;	/* (n) */
+  const char *namewhat;	/* (n) `global', `local', `field', `method' */
+  const char *what;	/* (S) `Lua
