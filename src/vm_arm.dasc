@@ -1,0 +1,14 @@
+|// Low-level VM code for ARM CPUs.
+|// Bytecode interpreter, fast functions and helper functions.
+|// Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
+|
+|.arch arm
+|.section code_op, code_sub
+|
+|.actionlist build_actionlist
+|.globals GLOB_
+|.globalnames globnames
+|.externnames extnames
+|
+|// Note: The ragged indentation of the instructions is intentional.
+|//       The starting columns ind
