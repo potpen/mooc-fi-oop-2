@@ -9,4 +9,42 @@
 ** without limitation the rights to use, copy, modify, merge, publish,
 ** distribute, sublicense, and/or sell copies of the Software, and to
 ** permit persons to whom the Software is furnished to do so, subject to
-** the following condit
+** the following conditions:
+**
+** The above copyright notice and this permission notice shall be
+** included in all copies or substantial portions of the Software.
+**
+** THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+** EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+** MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+** IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+** CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+** TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+** SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+**
+** [ MIT license: https://www.opensource.org/licenses/mit-license.php ]
+*/
+
+#ifndef _LUAJIT_H
+#define _LUAJIT_H
+
+#include "lua.h"
+
+#define LUAJIT_VERSION		"LuaJIT 2.1.0-beta3"
+#define LUAJIT_VERSION_NUM	20100  /* Version 2.1.0 = 02.01.00. */
+#define LUAJIT_VERSION_SYM	luaJIT_version_2_1_0_beta3
+#define LUAJIT_COPYRIGHT	"Copyright (C) 2005-2022 Mike Pall"
+#define LUAJIT_URL		"https://luajit.org/"
+
+/* Modes for luaJIT_setmode. */
+#define LUAJIT_MODE_MASK	0x00ff
+
+enum {
+  LUAJIT_MODE_ENGINE,		/* Set mode for whole JIT engine. */
+  LUAJIT_MODE_DEBUG,		/* Set debug mode (idx = level). */
+
+  LUAJIT_MODE_FUNC,		/* Change mode for a function. */
+  LUAJIT_MODE_ALLFUNC,		/* Recurse into subroutine protos. */
+  LUAJIT_MODE_ALLSUBFUNC,	/* Change only the subroutines. */
+
+  LUAJIT_MODE_TRACE,		/* Flush a compile
