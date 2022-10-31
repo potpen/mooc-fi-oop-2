@@ -11,4 +11,46 @@
 |.externnames extnames
 |
 |// Note: The ragged indentation of the instructions is intentional.
-|//       The starting columns ind
+|//       The starting columns indicate data dependencies.
+|
+|//-----------------------------------------------------------------------
+|
+|// Fixed register assignments for the interpreter.
+|
+|// The following must be C callee-save.
+|.define MASKR8,	r4	// 255*8 constant for fast bytecode decoding.
+|.define KBASE,		r5	// Constants of current Lua function.
+|.define PC,		r6	// Next PC.
+|.define DISPATCH,	r7	// Opcode dispatch table.
+|.define LREG,		r8	// Register holding lua_State (also in SAVE_L).
+|
+|// C callee-save in EABI, but often refetched. Temporary in iOS 3.0+.
+|.define BASE,		r9	// Base of current Lua stack frame.
+|
+|// The following temporaries are not saved across C calls, except for RA/RC.
+|.define RA,		r10	// Callee-save.
+|.define RC,		r11	// Callee-save.
+|.define RB,		r12
+|.define OP,		r12	// Overlaps RB, must not be lr.
+|.define INS,		lr
+|
+|// Calling conventions. Also used as temporaries.
+|.define CARG1,		r0
+|.define CARG2,		r1
+|.define CARG3,		r2
+|.define CARG4,		r3
+|.define CARG12,	r0	// For 1st soft-fp double.
+|.define CARG34,	r2	// For 2nd soft-fp double.
+|
+|.define CRET1,		r0
+|.define CRET2,		r1
+|
+|// Stack layout while in interpreter. Must match with lj_frame.h.
+|.define SAVE_R4,	[sp, #28]
+|.define CFRAME_SPACE,	#28
+|.define SAVE_ERRF,	[sp, #24]
+|.define SAVE_NRES,	[sp, #20]
+|.define SAVE_CFRAME,	[sp, #16]
+|.define SAVE_L,	[sp, #12]
+|.define SAVE_PC,	[sp, #8]
+|.define SAVE_MULTRES,	[sp, #4
