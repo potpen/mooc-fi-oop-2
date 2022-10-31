@@ -53,4 +53,64 @@
 |.define SAVE_CFRAME,	[sp, #16]
 |.define SAVE_L,	[sp, #12]
 |.define SAVE_PC,	[sp, #8]
-|.define SAVE_MULTRES,	[sp, #4
+|.define SAVE_MULTRES,	[sp, #4]
+|.define ARG5,		[sp]
+|
+|.define TMPDhi,	[sp, #4]
+|.define TMPDlo,	[sp]
+|.define TMPD,		[sp]
+|.define TMPDp,		sp
+|
+|.if FPU
+|.macro saveregs
+|  push {r5, r6, r7, r8, r9, r10, r11, lr}
+|  vpush {d8-d15}
+|  sub sp, sp, CFRAME_SPACE+4
+|  str r4, SAVE_R4
+|.endmacro
+|.macro restoreregs_ret
+|  ldr r4, SAVE_R4
+|  add sp, sp, CFRAME_SPACE+4
+|  vpop {d8-d15}
+|  pop {r5, r6, r7, r8, r9, r10, r11, pc}
+|.endmacro
+|.else
+|.macro saveregs
+|  push {r4, r5, r6, r7, r8, r9, r10, r11, lr}
+|  sub sp, sp, CFRAME_SPACE
+|.endmacro
+|.macro restoreregs_ret
+|  add sp, sp, CFRAME_SPACE
+|  pop {r4, r5, r6, r7, r8, r9, r10, r11, pc}
+|.endmacro
+|.endif
+|
+|// Type definitions. Some of these are only used for documentation.
+|.type L,		lua_State,	LREG
+|.type GL,		global_State
+|.type TVALUE,		TValue
+|.type GCOBJ,		GCobj
+|.type STR,		GCstr
+|.type TAB,		GCtab
+|.type LFUNC,		GCfuncL
+|.type CFUNC,		GCfuncC
+|.type PROTO,		GCproto
+|.type UPVAL,		GCupval
+|.type NODE,		Node
+|.type NARGS8,		int
+|.type TRACE,		GCtrace
+|.type SBUF,		SBuf
+|
+|//-----------------------------------------------------------------------
+|
+|// Trap for not-yet-implemented parts.
+|.macro NYI; ud; .endmacro
+|
+|//-----------------------------------------------------------------------
+|
+|// Access to frame relative to BASE.
+|.define FRAME_FUNC,	#-8
+|.define FRAME_PC,	#-4
+|
+|.macro decode_RA8, dst, ins; and dst, MASKR8, ins, lsr #5; .endmacro
+|.ma
