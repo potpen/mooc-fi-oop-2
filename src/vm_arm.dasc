@@ -305,4 +305,49 @@ static void build_subroutines(BuildCtx *ctx)
   |  str BASE, L->top			// Store new top.
   |
   |->vm_leave_cp:
-  |  ldr RC, SAVE_CFRAME		// Restore previous 
+  |  ldr RC, SAVE_CFRAME		// Restore previous C frame.
+  |   mov CRET1, #0			// Ok return status for vm_pcall.
+  |  str RC, L->cframe
+  |
+  |->vm_leave_unw:
+  |  restoreregs_ret
+  |
+  |6:
+  |  blt >7				// Less results wanted?
+  |  // More results wanted. Check stack size and fill up results with nil.
+  |  ldr CARG3, L->maxstack
+  |   mvn CARG2, #~LJ_TNIL
+  |  cmp BASE, CARG3
+  |  bhs >8
+  |   str CARG2, [BASE, #4]
+  |  add RC, RC, #8
+  |  add BASE, BASE, #8
+  |  b <2
+  |
+  |7:  // Less results wanted.
+  |  sub CARG1, RC, KBASE
+  |  cmp KBASE, #0			// LUA_MULTRET+1 case?
+  |  subne BASE, BASE, CARG1		// Either keep top or shrink it.
+  |  b <3
+  |
+  |8:  // Corner case: need to grow stack for filling up results.
+  |  // This can happen if:
+  |  // - A C function grows the stack (a lot).
+  |  // - The GC shrinks the stack in between.
+  |  // - A return back from a lua_call() with (high) nresults adjustment.
+  |  str BASE, L->top			// Save current top held in BASE (yes).
+  |  lsr CARG2, KBASE, #3
+  |  mov CARG1, L
+  |  bl extern lj_state_growstack	// (lua_State *L, int n)
+  |  ldr BASE, L->top			// Need the (realloced) L->top in BASE.
+  |  b <2
+  |
+  |->vm_unwind_c:			// Unwind C stack, return from vm_pcall.
+  |  // (void *cframe, int errcode)
+  |  mov sp, CARG1
+  |  mov CRET1, CARG2
+  |->vm_unwind_c_eh:			// Landing pad for external unwinder.
+  |  ldr L, SAVE_L
+  |   mv_vmstate CARG4, C
+  |  ldr GL:CARG3, L->glref
+  |   str CARG4, GL:CARG3->vmsta
