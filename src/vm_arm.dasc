@@ -207,4 +207,54 @@
 |  and CARG1, CARG1, #126
 |  sub CARG1, CARG1, #-GG_DISP2HOT
 |  ldrh CARG2, [DISPATCH, CARG1]
-|  subs CAR
+|  subs CARG2, CARG2, #delta
+|  strh CARG2, [DISPATCH, CARG1]
+|.endmacro
+|
+|.macro hotloop
+|  hotcheck HOTCOUNT_LOOP
+|  blo ->vm_hotloop
+|.endmacro
+|
+|.macro hotcall
+|  hotcheck HOTCOUNT_CALL
+|  blo ->vm_hotcall
+|.endmacro
+|
+|// Set current VM state.
+|.macro mv_vmstate, reg, st; mvn reg, #LJ_VMST_..st; .endmacro
+|.macro st_vmstate, reg; str reg, [DISPATCH, #DISPATCH_GL(vmstate)]; .endmacro
+|
+|// Move table write barrier back. Overwrites mark and tmp.
+|.macro barrierback, tab, mark, tmp
+|  ldr tmp, [DISPATCH, #DISPATCH_GL(gc.grayagain)]
+|   bic mark, mark, #LJ_GC_BLACK		// black2gray(tab)
+|  str tab, [DISPATCH, #DISPATCH_GL(gc.grayagain)]
+|   strb mark, tab->marked
+|  str tmp, tab->gclist
+|.endmacro
+|
+|.macro .IOS, a, b
+|.if IOS
+|  a, b
+|.endif
+|.endmacro
+|
+|//-----------------------------------------------------------------------
+
+#if !LJ_DUALNUM
+#error "Only dual-number mode supported for ARM target"
+#endif
+
+/* Generate subroutines used by opcodes and other parts of the VM. */
+/* The .code_sub section should be last to help static branch prediction. */
+static void build_subroutines(BuildCtx *ctx)
+{
+  |.code_sub
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Return handling ----------------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |->vm_returnp:
+  |  // See vm_return. A
