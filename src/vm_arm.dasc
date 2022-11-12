@@ -430,3 +430,50 @@ static void build_subroutines(BuildCtx *ctx)
   |    add CARG2, sp, #CFRAME_RESUME
   |  ldrb CARG1, L->status
   |   str CARG3, SAVE_ERRF
+  |   str L, SAVE_PC			// Any value outside of bytecode is ok.
+  |   str CARG3, SAVE_CFRAME
+  |  cmp CARG1, #0
+  |    str CARG2, L->cframe
+  |  beq >3
+  |
+  |  // Resume after yield (like a return).
+  |  str L, [DISPATCH, #DISPATCH_GL(cur_L)]
+  |  mov RA, BASE
+  |   ldr BASE, L->base
+  |   ldr CARG1, L->top
+  |    mov MASKR8, #255
+  |     strb CARG3, L->status
+  |   sub RC, CARG1, BASE
+  |  ldr PC, [BASE, FRAME_PC]
+  |    lsl MASKR8, MASKR8, #3		// MASKR8 = 255*8.
+  |     mv_vmstate CARG2, INTERP
+  |   add RC, RC, #8
+  |  ands CARG1, PC, #FRAME_TYPE
+  |     st_vmstate CARG2
+  |   str RC, SAVE_MULTRES
+  |  beq ->BC_RET_Z
+  |  b ->vm_return
+  |
+  |->vm_pcall:				// Setup protected C frame and enter VM.
+  |  // (lua_State *L, TValue *base, int nres1, ptrdiff_t ef)
+  |  saveregs
+  |  mov PC, #FRAME_CP
+  |  str CARG4, SAVE_ERRF
+  |  b >1
+  |
+  |->vm_call:				// Setup C frame and enter VM.
+  |  // (lua_State *L, TValue *base, int nres1)
+  |  saveregs
+  |  mov PC, #FRAME_C
+  |
+  |1:  // Entry point for vm_pcall above (PC = ftype).
+  |  ldr RC, L:CARG1->cframe
+  |   str CARG3, SAVE_NRES
+  |    mov L, CARG1
+  |   str CARG1, SAVE_L
+  |    ldr DISPATCH, L->glref		// Setup pointer to dispatch table.
+  |     mov BASE, CARG2
+  |   str CARG1, SAVE_PC		// Any value outside of bytecode is ok.
+  |  str RC, SAVE_CFRAME
+  |    add DISPATCH, DISPATCH, #GG_G2DISP
+  |  str 
