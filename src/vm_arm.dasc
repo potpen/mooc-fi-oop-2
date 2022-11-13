@@ -476,4 +476,42 @@ static void build_subroutines(BuildCtx *ctx)
   |   str CARG1, SAVE_PC		// Any value outside of bytecode is ok.
   |  str RC, SAVE_CFRAME
   |    add DISPATCH, DISPATCH, #GG_G2DISP
-  |  str 
+  |  str sp, L->cframe			// Add our C frame to cframe chain.
+  |
+  |3:  // Entry point for vm_cpcall/vm_resume (BASE = base, PC = ftype).
+  |  str L, [DISPATCH, #DISPATCH_GL(cur_L)]
+  |  ldr RB, L->base			// RB = old base (for vmeta_call).
+  |   ldr CARG1, L->top
+  |    mov MASKR8, #255
+  |  add PC, PC, BASE
+  |    lsl MASKR8, MASKR8, #3		// MASKR8 = 255*8.
+  |  sub PC, PC, RB			// PC = frame delta + frame type
+  |    mv_vmstate CARG2, INTERP
+  |   sub NARGS8:RC, CARG1, BASE
+  |    st_vmstate CARG2
+  |
+  |->vm_call_dispatch:
+  |  // RB = old base, BASE = new base, RC = nargs*8, PC = caller PC
+  |  ldrd CARG34, [BASE, FRAME_FUNC]
+  |  checkfunc CARG4, ->vmeta_call
+  |
+  |->vm_call_dispatch_f:
+  |  ins_call
+  |  // BASE = new base, CARG3 = func, RC = nargs*8, PC = caller PC
+  |
+  |->vm_cpcall:				// Setup protected C frame, call C.
+  |  // (lua_State *L, lua_CFunction func, void *ud, lua_CPFunction cp)
+  |  saveregs
+  |  mov L, CARG1
+  |   ldr RA, L:CARG1->stack
+  |  str CARG1, SAVE_L
+  |    ldr DISPATCH, L->glref		// Setup pointer to dispatch table.
+  |   ldr RB, L->top
+  |  str CARG1, SAVE_PC			// Any value outside of bytecode is ok.
+  |  ldr RC, L->cframe
+  |    add DISPATCH, DISPATCH, #GG_G2DISP
+  |   sub RA, RA, RB			// Compute -savestack(L, L->top).
+  |  mov RB, #0
+  |   str RA, SAVE_NRES			// Neg. delta means cframe w/o frame.
+  |  str RB, SAVE_ERRF			// No error function.
+  
