@@ -609,4 +609,61 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov CARG1, L
   |   str PC, SAVE_PC
   |  bl extern lj_meta_tget		// (lua_State *L, TValue *o, TValue *k)
-  |  // Returns TValue * (
+  |  // Returns TValue * (finished) or NULL (metamethod).
+  |  .IOS ldr BASE, L->base
+  |  cmp CRET1, #0
+  |  beq >3
+  |  ldrd CARG34, [CRET1]
+  |   ins_next1
+  |   ins_next2
+  |  strd CARG34, [BASE, RA]
+  |   ins_next3
+  |
+  |3:  // Call __index metamethod.
+  |  // BASE = base, L->top = new base, stack = cont/func/t/k
+  |   rsb CARG1, BASE, #FRAME_CONT
+  |  ldr BASE, L->top
+  |    mov NARGS8:RC, #16		// 2 args for func(t, k).
+  |    str PC, [BASE, #-12]		// [cont|PC]
+  |   add PC, CARG1, BASE
+  |  ldr LFUNC:CARG3, [BASE, FRAME_FUNC]  // Guaranteed to be a function here.
+  |  b ->vm_call_dispatch_f
+  |
+  |->vmeta_tgetr:
+  |  .IOS mov RC, BASE
+  |  bl extern lj_tab_getinth		// (GCtab *t, int32_t key)
+  |  // Returns cTValue * or NULL.
+  |  .IOS mov BASE, RC
+  |  cmp CRET1, #0
+  |  ldrdne CARG12, [CRET1]
+  |  mvneq CARG2, #~LJ_TNIL
+  |  b ->BC_TGETR_Z
+  |
+  |//-----------------------------------------------------------------------
+  |
+  |->vmeta_tsets1:
+  |  add CARG2, BASE, RB
+  |  b >2
+  |
+  |->vmeta_tsets:
+  |  sub CARG2, DISPATCH, #-DISPATCH_GL(tmptv)
+  |   mvn CARG4, #~LJ_TTAB
+  |  str TAB:RB, [CARG2]
+  |   str CARG4, [CARG2, #4]
+  |2:
+  |   mvn CARG4, #~LJ_TSTR
+  |  str STR:RC, TMPDlo
+  |   str CARG4, TMPDhi
+  |  mov CARG3, TMPDp
+  |  b >1
+  |
+  |->vmeta_tsetb:			// RC = index
+  |  decode_RB8 RB, INS
+  |   str RC, TMPDlo
+  |   mvn CARG4, #~LJ_TISNUM
+  |  add CARG2, BASE, RB
+  |   str CARG4, TMPDhi
+  |  mov CARG3, TMPDp
+  |  b >1
+  |
+  |->vmeta_
