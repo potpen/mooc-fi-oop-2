@@ -666,4 +666,53 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov CARG3, TMPDp
   |  b >1
   |
-  |->vmeta_
+  |->vmeta_tsetv:
+  |  add CARG2, BASE, RB
+  |   add CARG3, BASE, RC
+  |1:
+  |   str BASE, L->base
+  |  mov CARG1, L
+  |   str PC, SAVE_PC
+  |  bl extern lj_meta_tset		// (lua_State *L, TValue *o, TValue *k)
+  |  // Returns TValue * (finished) or NULL (metamethod).
+  |  .IOS ldr BASE, L->base
+  |  cmp CRET1, #0
+  |   ldrd CARG34, [BASE, RA]
+  |  beq >3
+  |   ins_next1
+  |  // NOBARRIER: lj_meta_tset ensures the table is not black.
+  |  strd CARG34, [CRET1]
+  |   ins_next2
+  |   ins_next3
+  |
+  |3:  // Call __newindex metamethod.
+  |  // BASE = base, L->top = new base, stack = cont/func/t/k/(v)
+  |   rsb CARG1, BASE, #FRAME_CONT
+  |  ldr BASE, L->top
+  |    mov NARGS8:RC, #24		// 3 args for func(t, k, v).
+  |   strd CARG34, [BASE, #16]		// Copy value to third argument.
+  |    str PC, [BASE, #-12]		// [cont|PC]
+  |   add PC, CARG1, BASE
+  |  ldr LFUNC:CARG3, [BASE, FRAME_FUNC]  // Guaranteed to be a function here.
+  |  b ->vm_call_dispatch_f
+  |
+  |->vmeta_tsetr:
+  |  str BASE, L->base
+  |  .IOS mov RC, BASE
+  |  mov CARG1, L
+  |  str PC, SAVE_PC
+  |  bl extern lj_tab_setinth  // (lua_State *L, GCtab *t, int32_t key)
+  |  // Returns TValue *.
+  |  .IOS mov BASE, RC
+  |  b ->BC_TSETR_Z
+  |
+  |//-- Comparison metamethods ---------------------------------------------
+  |
+  |->vmeta_comp:
+  |  mov CARG1, L
+  |   sub PC, PC, #4
+  |  mov CARG2, RA
+  |   str BASE, L->base
+  |  mov CARG3, RC
+  |   str PC, SAVE_PC
+  |  decode_OP CARG
