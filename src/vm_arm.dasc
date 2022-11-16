@@ -552,4 +552,61 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |.if FFI
   |1:
-  |  beq ->cont_ffi_callback		// cont = 1: r
+  |  beq ->cont_ffi_callback		// cont = 1: return from FFI callback.
+  |  // cont = 0: tailcall from C function.
+  |  sub CARG4, CARG4, #16
+  |  sub RC, CARG4, BASE
+  |  b ->vm_call_tail
+  |.endif
+  |
+  |->cont_cat:				// RA = resultptr, CARG4 = meta base
+  |  ldr INS, [PC, #-4]
+  |   sub CARG2, CARG4, #16
+  |   ldrd CARG34, [RA]
+  |     str BASE, L->base
+  |  decode_RB8 RC, INS
+  |   decode_RA8 RA, INS
+  |  add CARG1, BASE, RC
+  |  subs CARG1, CARG2, CARG1
+  |   strdne CARG34, [CARG2]
+  |   movne CARG3, CARG1
+  |  bne ->BC_CAT_Z
+  |   strd CARG34, [BASE, RA]
+  |  b ->cont_nop
+  |
+  |//-- Table indexing metamethods -----------------------------------------
+  |
+  |->vmeta_tgets1:
+  |  add CARG2, BASE, RB
+  |  b >2
+  |
+  |->vmeta_tgets:
+  |  sub CARG2, DISPATCH, #-DISPATCH_GL(tmptv)
+  |   mvn CARG4, #~LJ_TTAB
+  |  str TAB:RB, [CARG2]
+  |   str CARG4, [CARG2, #4]
+  |2:
+  |   mvn CARG4, #~LJ_TSTR
+  |  str STR:RC, TMPDlo
+  |   str CARG4, TMPDhi
+  |  mov CARG3, TMPDp
+  |  b >1
+  |
+  |->vmeta_tgetb:			// RC = index
+  |  decode_RB8 RB, INS
+  |   str RC, TMPDlo
+  |   mvn CARG4, #~LJ_TISNUM
+  |  add CARG2, BASE, RB
+  |   str CARG4, TMPDhi
+  |  mov CARG3, TMPDp
+  |  b >1
+  |
+  |->vmeta_tgetv:
+  |  add CARG2, BASE, RB
+  |   add CARG3, BASE, RC
+  |1:
+  |   str BASE, L->base
+  |  mov CARG1, L
+  |   str PC, SAVE_PC
+  |  bl extern lj_meta_tget		// (lua_State *L, TValue *o, TValue *k)
+  |  // Returns TValue * (
