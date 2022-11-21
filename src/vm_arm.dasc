@@ -715,4 +715,60 @@ static void build_subroutines(BuildCtx *ctx)
   |   str BASE, L->base
   |  mov CARG3, RC
   |   str PC, SAVE_PC
-  |  decode_OP CARG
+  |  decode_OP CARG4, INS
+  |  bl extern lj_meta_comp  // (lua_State *L, TValue *o1, *o2, int op)
+  |  // Returns 0/1 or TValue * (metamethod).
+  |3:
+  |  .IOS ldr BASE, L->base
+  |  cmp CRET1, #1
+  |  bhi ->vmeta_binop
+  |4:
+  |  ldrh RB, [PC, #2]
+  |   add PC, PC, #4
+  |  add RB, PC, RB, lsl #2
+  |  subhs PC, RB, #0x20000
+  |->cont_nop:
+  |  ins_next
+  |
+  |->cont_ra:				// RA = resultptr
+  |  ldr INS, [PC, #-4]
+  |   ldrd CARG12, [RA]
+  |  decode_RA8 CARG3, INS
+  |   strd CARG12, [BASE, CARG3]
+  |  b ->cont_nop
+  |
+  |->cont_condt:			// RA = resultptr
+  |  ldr CARG2, [RA, #4]
+  |   mvn CARG1, #~LJ_TTRUE
+  |  cmp CARG1, CARG2			// Branch if result is true.
+  |  b <4
+  |
+  |->cont_condf:			// RA = resultptr
+  |  ldr CARG2, [RA, #4]
+  |  checktp CARG2, LJ_TFALSE		// Branch if result is false.
+  |  b <4
+  |
+  |->vmeta_equal:
+  |  // CARG2, CARG3, CARG4 are already set by BC_ISEQV/BC_ISNEV.
+  |  sub PC, PC, #4
+  |   str BASE, L->base
+  |   mov CARG1, L
+  |  str PC, SAVE_PC
+  |  bl extern lj_meta_equal  // (lua_State *L, GCobj *o1, *o2, int ne)
+  |  // Returns 0/1 or TValue * (metamethod).
+  |  b <3
+  |
+  |->vmeta_equal_cd:
+  |.if FFI
+  |  sub PC, PC, #4
+  |   str BASE, L->base
+  |   mov CARG1, L
+  |   mov CARG2, INS
+  |  str PC, SAVE_PC
+  |  bl extern lj_meta_equal_cd		// (lua_State *L, BCIns op)
+  |  // Returns 0/1 or TValue * (metamethod).
+  |  b <3
+  |.endif
+  |
+  |->vmeta_istype:
+  |  sub P
