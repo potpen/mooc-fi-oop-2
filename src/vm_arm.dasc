@@ -771,4 +771,60 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |
   |->vmeta_istype:
-  |  sub P
+  |  sub PC, PC, #4
+  |   str BASE, L->base
+  |   mov CARG1, L
+  |   lsr CARG2, RA, #3
+  |   mov CARG3, RC
+  |  str PC, SAVE_PC
+  |  bl extern lj_meta_istype  // (lua_State *L, BCReg ra, BCReg tp)
+  |  .IOS ldr BASE, L->base
+  |  b ->cont_nop
+  |
+  |//-- Arithmetic metamethods ---------------------------------------------
+  |
+  |->vmeta_arith_vn:
+  |  decode_RB8 RB, INS
+  |   decode_RC8 RC, INS
+  |  add CARG3, BASE, RB
+  |   add CARG4, KBASE, RC
+  |  b >1
+  |
+  |->vmeta_arith_nv:
+  |  decode_RB8 RB, INS
+  |   decode_RC8 RC, INS
+  |  add CARG4, BASE, RB
+  |   add CARG3, KBASE, RC
+  |  b >1
+  |
+  |->vmeta_unm:
+  |  ldr INS, [PC, #-8]
+  |   sub PC, PC, #4
+  |  add CARG3, BASE, RC
+  |  add CARG4, BASE, RC
+  |  b >1
+  |
+  |->vmeta_arith_vv:
+  |  decode_RB8 RB, INS
+  |   decode_RC8 RC, INS
+  |  add CARG3, BASE, RB
+  |   add CARG4, BASE, RC
+  |1:
+  |  decode_OP OP, INS
+  |   add CARG2, BASE, RA
+  |    str BASE, L->base
+  |   mov CARG1, L
+  |    str PC, SAVE_PC
+  |  str OP, ARG5
+  |  bl extern lj_meta_arith  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+  |  // Returns NULL (finished) or TValue * (metamethod).
+  |  .IOS ldr BASE, L->base
+  |  cmp CRET1, #0
+  |  beq ->cont_nop
+  |
+  |  // Call metamethod for binary op.
+  |->vmeta_binop:
+  |  // BASE = old base, CRET1 = new base, stack = cont/func/o1/o2
+  |  sub CARG2, CRET1, BASE
+  |   str PC, [CRET1, #-12]		// [cont|PC]
+  |  add PC, CARG2, #F
