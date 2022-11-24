@@ -872,4 +872,57 @@ static void build_subroutines(BuildCtx *ctx)
   |  sub CARG2, RA, #8
   |   str PC, SAVE_PC
   |  add CARG3, RA, NARGS8:RC
-  |  bl extern 
+  |  bl extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
+  |  .IOS ldr BASE, L->base
+  |  ldr LFUNC:CARG3, [RA, FRAME_FUNC]  // Guaranteed to be a function here.
+  |   ldr PC, [BASE, FRAME_PC]
+  |    add NARGS8:RC, NARGS8:RC, #8	// Got one more argument now.
+  |  b ->BC_CALLT2_Z
+  |
+  |//-- Argument coercion for 'for' statement ------------------------------
+  |
+  |->vmeta_for:
+  |  mov CARG1, L
+  |   str BASE, L->base
+  |  mov CARG2, RA
+  |   str PC, SAVE_PC
+  |  bl extern lj_meta_for	// (lua_State *L, TValue *base)
+  |  .IOS ldr BASE, L->base
+  |.if JIT
+  |   ldrb OP, [PC, #-4]
+  |.endif
+  |  ldr INS, [PC, #-4]
+  |.if JIT
+  |   cmp OP, #BC_JFORI
+  |.endif
+  |  decode_RA8 RA, INS
+  |  decode_RD RC, INS
+  |.if JIT
+  |   beq =>BC_JFORI
+  |.endif
+  |  b =>BC_FORI
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Fast functions -----------------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |.macro .ffunc, name
+  |->ff_ .. name:
+  |.endmacro
+  |
+  |.macro .ffunc_1, name
+  |->ff_ .. name:
+  |  ldrd CARG12, [BASE]
+  |   cmp NARGS8:RC, #8
+  |   blo ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc_2, name
+  |->ff_ .. name:
+  |  ldrd CARG12, [BASE]
+  |   ldrd CARG34, [BASE, #8]
+  |    cmp NARGS8:RC, #16
+  |    blo ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc
