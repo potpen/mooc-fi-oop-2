@@ -925,4 +925,62 @@ static void build_subroutines(BuildCtx *ctx)
   |    blo ->fff_fallback
   |.endmacro
   |
-  |.macro .ffunc
+  |.macro .ffunc_n, name
+  |  .ffunc_1 name
+  |  checktp CARG2, LJ_TISNUM
+  |  bhs ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc_nn, name
+  |  .ffunc_2 name
+  |  checktp CARG2, LJ_TISNUM
+  |  cmnlo CARG4, #-LJ_TISNUM
+  |  bhs ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc_d, name
+  |  .ffunc name
+  |  ldr CARG2, [BASE, #4]
+  |   cmp NARGS8:RC, #8
+  |  vldr d0, [BASE]
+  |   blo ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  bhs ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc_dd, name
+  |  .ffunc name
+  |  ldr CARG2, [BASE, #4]
+  |  ldr CARG4, [BASE, #12]
+  |   cmp NARGS8:RC, #16
+  |  vldr d0, [BASE]
+  |  vldr d1, [BASE, #8]
+  |   blo ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  cmnlo CARG4, #-LJ_TISNUM
+  |  bhs ->fff_fallback
+  |.endmacro
+  |
+  |// Inlined GC threshold check. Caveat: uses CARG1 and CARG2.
+  |.macro ffgccheck
+  |  ldr CARG1, [DISPATCH, #DISPATCH_GL(gc.total)]
+  |  ldr CARG2, [DISPATCH, #DISPATCH_GL(gc.threshold)]
+  |  cmp CARG1, CARG2
+  |  blge ->fff_gcstep
+  |.endmacro
+  |
+  |//-- Base library: checks -----------------------------------------------
+  |
+  |.ffunc_1 assert
+  |  checktp CARG2, LJ_TTRUE
+  |  bhi ->fff_fallback
+  |   ldr PC, [BASE, FRAME_PC]
+  |  strd CARG12, [BASE, #-8]
+  |  mov RB, BASE
+  |  subs RA, NARGS8:RC, #8
+  |   add RC, NARGS8:RC, #8		// Compute (nresults+1)*8.
+  |  beq ->fff_res			// Done if exactly 1 argument.
+  |1:
+  |   ldrd CARG12, [RB, #8]
+  |  subs RA, RA, #8
+  |   strd CARG12, [RB], #8
