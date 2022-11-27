@@ -984,3 +984,47 @@ static void build_subroutines(BuildCtx *ctx)
   |   ldrd CARG12, [RB, #8]
   |  subs RA, RA, #8
   |   strd CARG12, [RB], #8
+  |  bne <1
+  |  b ->fff_res
+  |
+  |.ffunc type
+  |  ldr CARG2, [BASE, #4]
+  |   cmp NARGS8:RC, #8
+  |   blo ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  mvnlo CARG2, #~LJ_TISNUM
+  |  rsb CARG4, CARG2, #(int)(offsetof(GCfuncC, upvalue)>>3)-1
+  |  lsl CARG4, CARG4, #3
+  |  ldrd CARG12, [CFUNC:CARG3, CARG4]
+  |  b ->fff_restv
+  |
+  |//-- Base library: getters and setters ---------------------------------
+  |
+  |.ffunc_1 getmetatable
+  |  checktp CARG2, LJ_TTAB
+  |  cmnne CARG2, #-LJ_TUDATA
+  |  bne >6
+  |1:  // Field metatable must be at same offset for GCtab and GCudata!
+  |  ldr TAB:RB, TAB:CARG1->metatable
+  |2:
+  |   mvn CARG2, #~LJ_TNIL
+  |   ldr STR:RC, [DISPATCH, #DISPATCH_GL(gcroot[GCROOT_MMNAME+MM_metatable])]
+  |  cmp TAB:RB, #0
+  |  beq ->fff_restv
+  |  ldr CARG3, TAB:RB->hmask
+  |   ldr CARG4, STR:RC->sid
+  |    ldr NODE:INS, TAB:RB->node
+  |  and CARG3, CARG3, CARG4		// idx = str->sid & tab->hmask
+  |  add CARG3, CARG3, CARG3, lsl #1
+  |    add NODE:INS, NODE:INS, CARG3, lsl #3	// node = tab->node + idx*3*8
+  |3:  // Rearranged logic, because we expect _not_ to find the key.
+  |  ldrd CARG34, NODE:INS->key  // STALL: early NODE:INS.
+  |   ldrd CARG12, NODE:INS->val
+  |    ldr NODE:INS, NODE:INS->next
+  |  checktp CARG4, LJ_TSTR
+  |  cmpeq CARG3, STR:RC
+  |  beq >5
+  |  cmp NODE:INS, #0
+  |  bne <3
+  |4:
+  |  mov CARG1, RB			// Use metatable as def
