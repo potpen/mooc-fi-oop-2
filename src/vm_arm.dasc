@@ -1027,4 +1027,57 @@ static void build_subroutines(BuildCtx *ctx)
   |  cmp NODE:INS, #0
   |  bne <3
   |4:
-  |  mov CARG1, RB			// Use metatable as def
+  |  mov CARG1, RB			// Use metatable as default result.
+  |  mvn CARG2, #~LJ_TTAB
+  |  b ->fff_restv
+  |5:
+  |  checktp CARG2, LJ_TNIL
+  |  bne ->fff_restv
+  |  b <4
+  |
+  |6:
+  |  checktp CARG2, LJ_TISNUM
+  |  mvnhs CARG2, CARG2
+  |  movlo CARG2, #~LJ_TISNUM
+  |  add CARG4, DISPATCH, CARG2, lsl #2
+  |  ldr TAB:RB, [CARG4, #DISPATCH_GL(gcroot[GCROOT_BASEMT])]
+  |  b <2
+  |
+  |.ffunc_2 setmetatable
+  |  // Fast path: no mt for table yet and not clearing the mt.
+  |  checktp CARG2, LJ_TTAB
+  |   ldreq TAB:RB, TAB:CARG1->metatable
+  |  checktpeq CARG4, LJ_TTAB
+  |    ldrbeq CARG4, TAB:CARG1->marked
+  |   cmpeq TAB:RB, #0
+  |  bne ->fff_fallback
+  |    tst CARG4, #LJ_GC_BLACK		// isblack(table)
+  |     str TAB:CARG3, TAB:CARG1->metatable
+  |    beq ->fff_restv
+  |  barrierback TAB:CARG1, CARG4, CARG3
+  |  b ->fff_restv
+  |
+  |.ffunc rawget
+  |  ldrd CARG34, [BASE]
+  |   cmp NARGS8:RC, #16
+  |   blo ->fff_fallback
+  |   mov CARG2, CARG3
+  |  checktab CARG4, ->fff_fallback
+  |   mov CARG1, L
+  |   add CARG3, BASE, #8
+  |  .IOS mov RA, BASE
+  |  bl extern lj_tab_get  // (lua_State *L, GCtab *t, cTValue *key)
+  |  // Returns cTValue *.
+  |  .IOS mov BASE, RA
+  |  ldrd CARG12, [CRET1]
+  |  b ->fff_restv
+  |
+  |//-- Base library: conversions ------------------------------------------
+  |
+  |.ffunc tonumber
+  |  // Only handles the number case inline (without a base argument).
+  |  ldrd CARG12, [BASE]
+  |   cmp NARGS8:RC, #8
+  |   bne ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  bl
