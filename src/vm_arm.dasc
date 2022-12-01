@@ -1080,4 +1080,49 @@ static void build_subroutines(BuildCtx *ctx)
   |   cmp NARGS8:RC, #8
   |   bne ->fff_fallback
   |  checktp CARG2, LJ_TISNUM
-  |  bl
+  |  bls ->fff_restv
+  |  b ->fff_fallback
+  |
+  |.ffunc_1 tostring
+  |  // Only handles the string or number case inline.
+  |  checktp CARG2, LJ_TSTR
+  |  // A __tostring method in the string base metatable is ignored.
+  |  beq ->fff_restv
+  |  // Handle numbers inline, unless a number base metatable is present.
+  |  ldr CARG4, [DISPATCH, #DISPATCH_GL(gcroot[GCROOT_BASEMT_NUM])]
+  |   str BASE, L->base
+  |  checktp CARG2, LJ_TISNUM
+  |  cmpls CARG4, #0
+  |   str PC, SAVE_PC			// Redundant (but a defined value).
+  |  bhi ->fff_fallback
+  |  ffgccheck
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  bl extern lj_strfmt_number		// (lua_State *L, cTValue *o)
+  |  // Returns GCstr *.
+  |  ldr BASE, L->base
+  |  mvn CARG2, #~LJ_TSTR
+  |  b ->fff_restv
+  |
+  |//-- Base library: iterators -------------------------------------------
+  |
+  |.ffunc_1 next
+  |   mvn CARG4, #~LJ_TNIL
+  |  checktab CARG2, ->fff_fallback
+  |   strd CARG34, [BASE, NARGS8:RC]	// Set missing 2nd arg to nil.
+  |   ldr PC, [BASE, FRAME_PC]
+  |  add CARG2, BASE, #8
+  |  sub CARG3, BASE, #8
+  |  bl extern lj_tab_next		// (GCtab *t, cTValue *key, TValue *o)
+  |  // Returns 1=found, 0=end, -1=error.
+  |  .IOS ldr BASE, L->base
+  |  cmp CRET1, #0
+  |   mov RC, #(2+1)*8
+  |  bgt ->fff_res			// Found key/value.
+  |  bmi ->fff_fallback			// Invalid key.
+  |  // End of traversal: return nil.
+  |  mvn CRET2, #~LJ_TNIL
+  |  b ->fff_restv
+  |
+  |.ffunc_1 pairs
+  |  ch
