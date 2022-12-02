@@ -1125,4 +1125,62 @@ static void build_subroutines(BuildCtx *ctx)
   |  b ->fff_restv
   |
   |.ffunc_1 pairs
-  |  ch
+  |  checktab CARG2, ->fff_fallback
+#if LJ_52
+  |  ldr TAB:RB, TAB:CARG1->metatable
+#endif
+  |   ldrd CFUNC:CARG34, CFUNC:CARG3->upvalue[0]
+  |    ldr PC, [BASE, FRAME_PC]
+#if LJ_52
+  |  cmp TAB:RB, #0
+  |  bne ->fff_fallback
+#endif
+  |  mvn CARG2, #~LJ_TNIL
+  |    mov RC, #(3+1)*8
+  |   strd CFUNC:CARG34, [BASE, #-8]
+  |  str CARG2, [BASE, #12]
+  |  b ->fff_res
+  |
+  |.ffunc_2 ipairs_aux
+  |  checktp CARG2, LJ_TTAB
+  |  checktpeq CARG4, LJ_TISNUM
+  |  bne ->fff_fallback
+  |  ldr RB, TAB:CARG1->asize
+  |   ldr RC, TAB:CARG1->array
+  |  add CARG3, CARG3, #1
+  |    ldr PC, [BASE, FRAME_PC]
+  |  cmp CARG3, RB
+  |   add RC, RC, CARG3, lsl #3
+  |  strd CARG34, [BASE, #-8]
+  |   ldrdlo CARG12, [RC]
+  |   mov RC, #(0+1)*8
+  |  bhs >2				// Not in array part?
+  |1:
+  |   checktp CARG2, LJ_TNIL
+  |   movne RC, #(2+1)*8
+  |   strdne CARG12, [BASE]
+  |  b ->fff_res
+  |2:  // Check for empty hash part first. Otherwise call C function.
+  |  ldr RB, TAB:CARG1->hmask
+  |   mov CARG2, CARG3
+  |  cmp RB, #0
+  |  beq ->fff_res
+  |  .IOS mov RA, BASE
+  |  bl extern lj_tab_getinth		// (GCtab *t, int32_t key)
+  |  // Returns cTValue * or NULL.
+  |  .IOS mov BASE, RA
+  |  cmp CRET1, #0
+  |  beq ->fff_res
+  |  ldrd CARG12, [CRET1]
+  |  b <1
+  |
+  |.ffunc_1 ipairs
+  |  checktab CARG2, ->fff_fallback
+#if LJ_52
+  |  ldr TAB:RB, TAB:CARG1->metatable
+#endif
+  |   ldrd CFUNC:CARG34, CFUNC:CARG3->upvalue[0]
+  |    ldr PC, [BASE, FRAME_PC]
+#if LJ_52
+  |  cmp TAB:RB, #0
+  |  bne ->fff_fallb
