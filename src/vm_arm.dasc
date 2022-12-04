@@ -1230,4 +1230,60 @@ static void build_subroutines(BuildCtx *ctx)
   |.ffunc coroutine_wrap_aux
   |  ldr L:CARG1, CFUNC:CARG3->upvalue[0].gcr
   |.endif
-  |   ldr PC
+  |   ldr PC, [BASE, FRAME_PC]
+  |     str BASE, L->base
+  |  ldr CARG2, L:CARG1->top
+  |   ldrb RA, L:CARG1->status
+  |    ldr RB, L:CARG1->base
+  |  add CARG3, CARG2, NARGS8:RC
+  |  add CARG4, CARG2, RA
+  |   str PC, SAVE_PC
+  |  cmp CARG4, RB
+  |  beq ->fff_fallback
+  |   ldr CARG4, L:CARG1->maxstack
+  |    ldr RB, L:CARG1->cframe
+  |   cmp RA, #LUA_YIELD
+  |   cmpls CARG3, CARG4
+  |    cmpls RB, #0
+  |    bhi ->fff_fallback
+  |1:
+  |.if resume
+  |  sub CARG3, CARG3, #8		// Keep resumed thread in stack for GC.
+  |  add BASE, BASE, #8
+  |  sub NARGS8:RC, NARGS8:RC, #8
+  |.endif
+  |  str CARG3, L:CARG1->top
+  |  str BASE, L->top
+  |2:  // Move args to coroutine.
+  |   ldrd CARG34, [BASE, RB]
+  |  cmp RB, NARGS8:RC
+  |   strdne CARG34, [CARG2, RB]
+  |  add RB, RB, #8
+  |  bne <2
+  |
+  |  mov CARG3, #0
+  |   mov L:RA, L:CARG1
+  |  mov CARG4, #0
+  |  bl ->vm_resume			// (lua_State *L, TValue *base, 0, 0)
+  |  // Returns thread status.
+  |4:
+  |  ldr CARG3, L:RA->base
+  |    mv_vmstate CARG2, INTERP
+  |  ldr CARG4, L:RA->top
+  |   cmp CRET1, #LUA_YIELD
+  |  ldr BASE, L->base
+  |    str L, [DISPATCH, #DISPATCH_GL(cur_L)]
+  |    st_vmstate CARG2
+  |   bhi >8
+  |  subs RC, CARG4, CARG3
+  |   ldr CARG1, L->maxstack
+  |   add CARG2, BASE, RC
+  |  beq >6				// No results?
+  |  cmp CARG2, CARG1
+  |   mov RB, #0
+  |  bhi >9				// Need to grow stack?
+  |
+  |  sub CARG4, RC, #8
+  |   str CARG3, L:RA->top		// Clear coroutine stack.
+  |5:  // Move results from coroutine.
+  |  
