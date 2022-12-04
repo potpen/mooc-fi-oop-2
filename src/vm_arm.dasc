@@ -1183,4 +1183,51 @@ static void build_subroutines(BuildCtx *ctx)
   |    ldr PC, [BASE, FRAME_PC]
 #if LJ_52
   |  cmp TAB:RB, #0
-  |  bne ->fff_fallb
+  |  bne ->fff_fallback
+#endif
+  |  mov CARG1, #0
+  |  mvn CARG2, #~LJ_TISNUM
+  |    mov RC, #(3+1)*8
+  |   strd CFUNC:CARG34, [BASE, #-8]
+  |  strd CARG12, [BASE, #8]
+  |  b ->fff_res
+  |
+  |//-- Base library: catch errors ----------------------------------------
+  |
+  |.ffunc pcall
+  |  ldrb RA, [DISPATCH, #DISPATCH_GL(hookmask)]
+  |   cmp NARGS8:RC, #8
+  |   blo ->fff_fallback
+  |  tst RA, #HOOK_ACTIVE		// Remember active hook before pcall.
+  |   mov RB, BASE
+  |   add BASE, BASE, #8
+  |  moveq PC, #8+FRAME_PCALL
+  |  movne PC, #8+FRAME_PCALLH
+  |   sub NARGS8:RC, NARGS8:RC, #8
+  |  b ->vm_call_dispatch
+  |
+  |.ffunc_2 xpcall
+  |  ldrb RA, [DISPATCH, #DISPATCH_GL(hookmask)]
+  |  checkfunc CARG4, ->fff_fallback	// Traceback must be a function.
+  |   mov RB, BASE
+  |  strd CARG12, [BASE, #8]		// Swap function and traceback.
+  |   strd CARG34, [BASE]
+  |  tst RA, #HOOK_ACTIVE		// Remember active hook before pcall.
+  |   add BASE, BASE, #16
+  |  moveq PC, #16+FRAME_PCALL
+  |  movne PC, #16+FRAME_PCALLH
+  |   sub NARGS8:RC, NARGS8:RC, #16
+  |  b ->vm_call_dispatch
+  |
+  |//-- Coroutine library --------------------------------------------------
+  |
+  |.macro coroutine_resume_wrap, resume
+  |.if resume
+  |.ffunc_1 coroutine_resume
+  |  checktp CARG2, LJ_TTHREAD
+  |  bne ->fff_fallback
+  |.else
+  |.ffunc coroutine_wrap_aux
+  |  ldr L:CARG1, CFUNC:CARG3->upvalue[0].gcr
+  |.endif
+  |   ldr PC
