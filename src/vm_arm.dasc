@@ -1286,4 +1286,58 @@ static void build_subroutines(BuildCtx *ctx)
   |  sub CARG4, RC, #8
   |   str CARG3, L:RA->top		// Clear coroutine stack.
   |5:  // Move results from coroutine.
-  |  
+  |   ldrd CARG12, [CARG3, RB]
+  |  cmp RB, CARG4
+  |   strd CARG12, [BASE, RB]
+  |  add RB, RB, #8
+  |  bne <5
+  |6:
+  |.if resume
+  |  mvn CARG3, #~LJ_TTRUE
+  |   add RC, RC, #16
+  |7:
+  |  str CARG3, [BASE, #-4]		// Prepend true/false to results.
+  |   sub RA, BASE, #8
+  |.else
+  |   mov RA, BASE
+  |   add RC, RC, #8
+  |.endif
+  |  ands CARG1, PC, #FRAME_TYPE
+  |   str PC, SAVE_PC
+  |   str RC, SAVE_MULTRES
+  |  beq ->BC_RET_Z
+  |  b ->vm_return
+  |
+  |8:  // Coroutine returned with error (at co->top-1).
+  |.if resume
+  |  ldrd CARG12, [CARG4, #-8]!
+  |   mvn CARG3, #~LJ_TFALSE
+  |    mov RC, #(2+1)*8
+  |  str CARG4, L:RA->top		// Remove error from coroutine stack.
+  |  strd CARG12, [BASE]		// Copy error message.
+  |  b <7
+  |.else
+  |  mov CARG1, L
+  |  mov CARG2, L:RA
+  |  bl extern lj_ffh_coroutine_wrap_err  // (lua_State *L, lua_State *co)
+  |  // Never returns.
+  |.endif
+  |
+  |9:  // Handle stack expansion on return from yield.
+  |  mov CARG1, L
+  |  lsr CARG2, RC, #3
+  |  bl extern lj_state_growstack	// (lua_State *L, int n)
+  |  mov CRET1, #0
+  |  b <4
+  |.endmacro
+  |
+  |  coroutine_resume_wrap 1		// coroutine.resume
+  |  coroutine_resume_wrap 0		// coroutine.wrap
+  |
+  |.ffunc coroutine_yield
+  |  ldr CARG1, L->cframe
+  |   add CARG2, BASE, NARGS8:RC
+  |   str BASE, L->base
+  |  tst CARG1, #CFRAME_RESUME
+  |   str CARG2, L->top
+  |    mov CRET1
