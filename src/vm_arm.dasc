@@ -1388,4 +1388,66 @@ static void build_subroutines(BuildCtx *ctx)
   |  orr CARG3, CARG3, CARG1		// ztest = abs(hi) | lo
   |.if "func" == "floor"
   |  tst CARG3, CARG2, asr #31		// return (ztest & sign) == 0 ? 0 : -1
-  |  moveq CARG1,
+  |  moveq CARG1, #0
+  |  mvnne CARG1, #0
+  |.else
+  |  bics CARG3, CARG3, CARG2, asr #31	// return (ztest & ~sign) == 0 ? 0 : 1
+  |  moveq CARG1, #0
+  |  movne CARG1, #1
+  |.endif
+  |  mvn CARG2, #~LJ_TISNUM
+  |  b ->fff_restv
+  |
+  |3:  // |x| >= 2^31. Check for x == -(2^31).
+  |  cmpeq CARG4, #0x80000000
+  |.if "func" == "floor"
+  |  cmpeq CARG3, #0
+  |.endif
+  |  bne >4
+  |  cmp CARG2, #0
+  |  movmi CARG1, #0x80000000
+  |  bmi <1
+  |4:
+  |  bl ->vm_..func.._sf
+  |  b ->fff_restv
+  |.endmacro
+  |
+  |  math_round floor
+  |  math_round ceil
+  |
+  |.align 8
+  |9:
+  |  .long 0x00000000, 0x41e00000	// 2^31.
+  |
+  |.ffunc_1 math_abs
+  |  checktp CARG2, LJ_TISNUM
+  |  bhi ->fff_fallback
+  |  bicne CARG2, CARG2, #0x80000000
+  |  bne ->fff_restv
+  |  cmp CARG1, #0
+  |  rsbslt CARG1, CARG1, #0
+  |  ldrdvs CARG12, <9
+  |  // Fallthrough.
+  |
+  |->fff_restv:
+  |  // CARG12 = TValue result.
+  |  ldr PC, [BASE, FRAME_PC]
+  |  strd CARG12, [BASE, #-8]
+  |->fff_res1:
+  |  // PC = return.
+  |  mov RC, #(1+1)*8
+  |->fff_res:
+  |  // RC = (nresults+1)*8, PC = return.
+  |  ands CARG1, PC, #FRAME_TYPE
+  |  ldreq INS, [PC, #-4]
+  |   str RC, SAVE_MULTRES
+  |  sub RA, BASE, #8
+  |  bne ->vm_return
+  |  decode_RB8 RB, INS
+  |5:
+  |  cmp RB, RC				// More results expected?
+  |  bhi >6
+  |  decode_RA8 CARG1, INS
+  |   ins_next1
+  |   ins_next2
+  |  // Adjust BASE. KBASE is assum
