@@ -1340,4 +1340,52 @@ static void build_subroutines(BuildCtx *ctx)
   |   str BASE, L->base
   |  tst CARG1, #CFRAME_RESUME
   |   str CARG2, L->top
-  |    mov CRET1
+  |    mov CRET1, #LUA_YIELD
+  |   mov CARG3, #0
+  |  beq ->fff_fallback
+  |   str CARG3, L->cframe
+  |    strb CRET1, L->status
+  |  b ->vm_leave_unw
+  |
+  |//-- Math library -------------------------------------------------------
+  |
+  |.macro math_round, func
+  |  .ffunc_1 math_ .. func
+  |  checktp CARG2, LJ_TISNUM
+  |  beq ->fff_restv
+  |  bhi ->fff_fallback
+  |  // Round FP value and normalize result.
+  |  lsl CARG3, CARG2, #1
+  |  adds RB, CARG3, #0x00200000
+  |  bpl >2				// |x| < 1?
+  |  mvn CARG4, #0x3e0
+  |    subs RB, CARG4, RB, asr #21
+  |  lsl CARG4, CARG2, #11
+  |   lsl CARG3, CARG1, #11
+  |  orr CARG4, CARG4, #0x80000000
+  |   rsb INS, RB, #32
+  |  orr CARG4, CARG4, CARG1, lsr #21
+  |    bls >3				// |x| >= 2^31?
+  |   orr CARG3, CARG3, CARG4, lsl INS
+  |  lsr CARG1, CARG4, RB
+  |.if "func" == "floor"
+  |   tst CARG3, CARG2, asr #31
+  |   addne CARG1, CARG1, #1
+  |.else
+  |   bics CARG3, CARG3, CARG2, asr #31
+  |   addsne CARG1, CARG1, #1
+  |   ldrdvs CARG12, >9
+  |   bvs ->fff_restv
+  |.endif
+  |    cmp CARG2, #0
+  |    rsblt CARG1, CARG1, #0
+  |1:
+  |   mvn CARG2, #~LJ_TISNUM
+  |  b ->fff_restv
+  |
+  |2:  // |x| < 1
+  |  bcs ->fff_restv			// |x| is not finite.
+  |  orr CARG3, CARG3, CARG1		// ztest = abs(hi) | lo
+  |.if "func" == "floor"
+  |  tst CARG3, CARG2, asr #31		// return (ztest & sign) == 0 ? 0 : -1
+  |  moveq CARG1,
