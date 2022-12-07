@@ -1587,4 +1587,70 @@ static void build_subroutines(BuildCtx *ctx)
   |  .IOS mov RA, BASE
   |  bl extern frexp
   |  .IOS mov BASE, RA
-  |   ldr CARG
+  |   ldr CARG3, [sp]
+  |   mvn CARG4, #~LJ_TISNUM
+  |    ldr PC, [BASE, FRAME_PC]
+  |  strd CARG12, [BASE, #-8]
+  |    mov RC, #(2+1)*8
+  |   strd CARG34, [BASE]
+  |  b ->fff_res
+  |.endif
+  |
+  |.if HFABI
+  |.ffunc_d math_modf
+  |  sub CARG1, BASE, #8
+  |   ldr PC, [BASE, FRAME_PC]
+  |  .IOS mov RA, BASE
+  |  bl extern modf
+  |  .IOS mov BASE, RA
+  |   mov RC, #(2+1)*8
+  |  vstr d0, [BASE]
+  |  b ->fff_res
+  |.else
+  |.ffunc_n math_modf
+  |  sub CARG3, BASE, #8
+  |   ldr PC, [BASE, FRAME_PC]
+  |  .IOS mov RA, BASE
+  |  bl extern modf
+  |  .IOS mov BASE, RA
+  |   mov RC, #(2+1)*8
+  |  strd CARG12, [BASE]
+  |  b ->fff_res
+  |.endif
+  |
+  |.macro math_minmax, name, cond, fcond
+  |.if FPU
+  |  .ffunc_1 name
+  |   add RB, BASE, RC
+  |  checktp CARG2, LJ_TISNUM
+  |   add RA, BASE, #8
+  |  bne >4
+  |1:  // Handle integers.
+  |  ldrd CARG34, [RA]
+  |   cmp RA, RB
+  |   bhs ->fff_restv
+  |  checktp CARG4, LJ_TISNUM
+  |  bne >3
+  |  cmp CARG1, CARG3
+  |   add RA, RA, #8
+  |  mov..cond CARG1, CARG3
+  |  b <1
+  |3:  // Convert intermediate result to number and continue below.
+  |  vmov s4, CARG1
+  |  bhi ->fff_fallback
+  |  vldr d1, [RA]
+  |  vcvt.f64.s32 d0, s4
+  |  b >6
+  |
+  |4:
+  |  vldr d0, [BASE]
+  |  bhi ->fff_fallback
+  |5:  // Handle numbers.
+  |  ldrd CARG34, [RA]
+  |  vldr d1, [RA]
+  |   cmp RA, RB
+  |   bhs ->fff_resd
+  |  checktp CARG4, LJ_TISNUM
+  |  bhs >7
+  |6:
+  |  vcmp.f64 d0, d1
