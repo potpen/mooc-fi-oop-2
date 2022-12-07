@@ -1524,4 +1524,67 @@ static void build_subroutines(BuildCtx *ctx)
   |  b ->fff_resd
   |.else
   |  b ->fff_restv
-  |.end
+  |.endif
+  |
+  |  math_extern log10
+  |  math_extern exp
+  |  math_extern sin
+  |  math_extern cos
+  |  math_extern tan
+  |  math_extern asin
+  |  math_extern acos
+  |  math_extern atan
+  |  math_extern sinh
+  |  math_extern cosh
+  |  math_extern tanh
+  |  math_extern2 pow
+  |  math_extern2 atan2
+  |  math_extern2 fmod
+  |
+  |.if HFABI
+  |  .ffunc math_ldexp
+  |  ldr CARG4, [BASE, #4]
+  |  ldrd CARG12, [BASE, #8]
+  |   cmp NARGS8:RC, #16
+  |   blo ->fff_fallback
+  |  vldr d0, [BASE]
+  |  checktp CARG4, LJ_TISNUM
+  |  bhs ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  bne ->fff_fallback
+  |  .IOS mov RA, BASE
+  |  bl extern ldexp			// (double x, int exp)
+  |  .IOS mov BASE, RA
+  |  b ->fff_resd
+  |.else
+  |.ffunc_2 math_ldexp
+  |  checktp CARG2, LJ_TISNUM
+  |  bhs ->fff_fallback
+  |  checktp CARG4, LJ_TISNUM
+  |  bne ->fff_fallback
+  |  .IOS mov RA, BASE
+  |  bl extern ldexp			// (double x, int exp)
+  |  .IOS mov BASE, RA
+  |  b ->fff_restv
+  |.endif
+  |
+  |.if HFABI
+  |.ffunc_d math_frexp
+  |  mov CARG1, sp
+  |  .IOS mov RA, BASE
+  |  bl extern frexp
+  |  .IOS mov BASE, RA
+  |   ldr CARG3, [sp]
+  |   mvn CARG4, #~LJ_TISNUM
+  |    ldr PC, [BASE, FRAME_PC]
+  |  vstr d0, [BASE, #-8]
+  |    mov RC, #(2+1)*8
+  |   strd CARG34, [BASE]
+  |  b ->fff_res
+  |.else
+  |.ffunc_n math_frexp
+  |  mov CARG3, sp
+  |  .IOS mov RA, BASE
+  |  bl extern frexp
+  |  .IOS mov BASE, RA
+  |   ldr CARG
