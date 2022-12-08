@@ -1717,4 +1717,56 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |.ffunc string_byte			// Only handle the 1-arg case here.
   |  ldrd CARG12, [BASE]
-  |    ldr PC
+  |    ldr PC, [BASE, FRAME_PC]
+  |   cmp NARGS8:RC, #8
+  |   checktpeq CARG2, LJ_TSTR		// Need exactly 1 argument.
+  |   bne ->fff_fallback
+  |  ldr CARG3, STR:CARG1->len
+  |   ldrb CARG1, STR:CARG1[1]		// Access is always ok (NUL at end).
+  |   mvn CARG2, #~LJ_TISNUM
+  |  cmp CARG3, #0
+  |  moveq RC, #(0+1)*8
+  |  movne RC, #(1+1)*8
+  |   strd CARG12, [BASE, #-8]
+  |  b ->fff_res
+  |
+  |.ffunc string_char			// Only handle the 1-arg case here.
+  |  ffgccheck
+  |  ldrd CARG12, [BASE]
+  |    ldr PC, [BASE, FRAME_PC]
+  |   cmp NARGS8:RC, #8			// Need exactly 1 argument.
+  |   checktpeq CARG2, LJ_TISNUM
+  |   bicseq CARG4, CARG1, #255
+  |  mov CARG3, #1
+  |   bne ->fff_fallback
+  |  str CARG1, TMPD
+  |  mov CARG2, TMPDp			// Points to stack. Little-endian.
+  |->fff_newstr:
+  |  // CARG2 = str, CARG3 = len.
+  |   str BASE, L->base
+  |  mov CARG1, L
+  |   str PC, SAVE_PC
+  |  bl extern lj_str_new		// (lua_State *L, char *str, size_t l)
+  |->fff_resstr:
+  |  // Returns GCstr *.
+  |  ldr BASE, L->base
+  |   mvn CARG2, #~LJ_TSTR
+  |  b ->fff_restv
+  |
+  |.ffunc string_sub
+  |  ffgccheck
+  |  ldrd CARG12, [BASE]
+  |   ldrd CARG34, [BASE, #16]
+  |    cmp NARGS8:RC, #16
+  |     mvn RB, #0
+  |    beq >1
+  |    blo ->fff_fallback
+  |   checktp CARG4, LJ_TISNUM
+  |    mov RB, CARG3
+  |   bne ->fff_fallback
+  |1:
+  |  ldrd CARG34, [BASE, #8]
+  |  checktp CARG2, LJ_TSTR
+  |   ldreq CARG2, STR:CARG1->len
+  |  checktpeq CARG4, LJ_TISNUM
+  |  b
