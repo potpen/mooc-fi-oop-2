@@ -1769,4 +1769,49 @@ static void build_subroutines(BuildCtx *ctx)
   |  checktp CARG2, LJ_TSTR
   |   ldreq CARG2, STR:CARG1->len
   |  checktpeq CARG4, LJ_TISNUM
-  |  b
+  |  bne ->fff_fallback
+  |  // CARG1 = str, CARG2 = str->len, CARG3 = start, RB = end
+  |  add CARG4, CARG2, #1
+  |  cmp CARG3, #0			// if (start < 0) start += len+1
+  |  addlt CARG3, CARG3, CARG4
+  |  cmp CARG3, #1			// if (start < 1) start = 1
+  |  movlt CARG3, #1
+  |  cmp RB, #0				// if (end < 0) end += len+1
+  |  addlt RB, RB, CARG4
+  |  bic RB, RB, RB, asr #31		// if (end < 0) end = 0
+  |  cmp RB, CARG2			// if (end > len) end = len
+  |   add CARG1, STR:CARG1, #sizeof(GCstr)-1
+  |  movgt RB, CARG2
+  |   add CARG2, CARG1, CARG3
+  |  subs CARG3, RB, CARG3		// len = end - start
+  |   add CARG3, CARG3, #1		// len += 1
+  |  bge ->fff_newstr
+  |->fff_emptystr:
+  |  sub STR:CARG1, DISPATCH, #-DISPATCH_GL(strempty)
+  |  mvn CARG2, #~LJ_TSTR
+  |  b ->fff_restv
+  |
+  |.macro ffstring_op, name
+  |  .ffunc string_ .. name
+  |  ffgccheck
+  |  ldr CARG3, [BASE, #4]
+  |   cmp NARGS8:RC, #8
+  |  ldr STR:CARG2, [BASE]
+  |   blo ->fff_fallback
+  |  sub SBUF:CARG1, DISPATCH, #-DISPATCH_GL(tmpbuf)
+  |  checkstr CARG3, ->fff_fallback
+  |  ldr CARG4, SBUF:CARG1->b
+  |   str BASE, L->base
+  |   str PC, SAVE_PC
+  |   str L, SBUF:CARG1->L
+  |  str CARG4, SBUF:CARG1->w
+  |  bl extern lj_buf_putstr_ .. name
+  |  bl extern lj_buf_tostr
+  |  b ->fff_resstr
+  |.endmacro
+  |
+  |ffstring_op reverse
+  |ffstring_op lower
+  |ffstring_op upper
+  |
+  |//-- Bit li
