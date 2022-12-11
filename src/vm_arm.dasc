@@ -1876,4 +1876,57 @@ static void build_subroutines(BuildCtx *ctx)
   |2:
   |  mvn CARG4, #~LJ_TISNUM
   |   ldr PC, [BASE, FRAME_PC]
-  |  strd CARG34, [BASE
+  |  strd CARG34, [BASE, #-8]
+  |  b ->fff_res1
+  |
+  |.ffunc_bit bswap
+  |  eor CARG3, CARG1, CARG1, ror #16
+  |  bic CARG3, CARG3, #0x00ff0000
+  |  ror CARG1, CARG1, #8
+  |   mvn CARG2, #~LJ_TISNUM
+  |  eor CARG1, CARG1, CARG3, lsr #8
+  |  b ->fff_restv
+  |
+  |.ffunc_bit bnot
+  |  mvn CARG1, CARG1
+  |  mvn CARG2, #~LJ_TISNUM
+  |  b ->fff_restv
+  |
+  |.macro .ffunc_bit_sh, name, ins, shmod
+  |  .ffunc bit_..name
+  |  ldrd CARG12, [BASE, #8]
+  |   cmp NARGS8:RC, #16
+  |   blo ->fff_fallback
+  |  checktp CARG2, LJ_TISNUM
+  |  blne ->vm_tobit_fb
+  |.if shmod == 0
+  |  and RA, CARG1, #31
+  |.else
+  |  rsb RA, CARG1, #0
+  |.endif
+  |  ldrd CARG12, [BASE]
+  |  checktp CARG2, LJ_TISNUM
+  |  blne ->vm_tobit_fb
+  |  ins CARG1, CARG1, RA
+  |  mvn CARG2, #~LJ_TISNUM
+  |  b ->fff_restv
+  |.endmacro
+  |
+  |.ffunc_bit_sh lshift, lsl, 0
+  |.ffunc_bit_sh rshift, lsr, 0
+  |.ffunc_bit_sh arshift, asr, 0
+  |.ffunc_bit_sh rol, ror, 1
+  |.ffunc_bit_sh ror, ror, 0
+  |
+  |//-----------------------------------------------------------------------
+  |
+  |->fff_fallback:			// Call fast function fallback handler.
+  |  // BASE = new base, RC = nargs*8
+  |   ldr CARG3, [BASE, FRAME_FUNC]
+  |  ldr CARG2, L->maxstack
+  |  add CARG1, BASE, NARGS8:RC
+  |    ldr PC, [BASE, FRAME_PC]		// Fallback may overwrite PC.
+  |  str CARG1, L->top
+  |   ldr CARG3, CFUNC:CARG3->f
+  |    str BASE, L->base
+  |  add CARG1, CARG1, #8*LUA_MINS
