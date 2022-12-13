@@ -1970,4 +1970,42 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RA, lr
   |   str BASE, L->base
   |  add CARG2, BASE, NARGS8:RC
-  |   str PC, SAVE_PC			// Redundant (but
+  |   str PC, SAVE_PC			// Redundant (but a defined value).
+  |  str CARG2, L->top
+  |  mov CARG1, L
+  |  bl extern lj_gc_step		// (lua_State *L)
+  |   ldr BASE, L->base
+  |  mov lr, RA				// Help return address predictor.
+  |   ldr CFUNC:CARG3, [BASE, FRAME_FUNC]
+  |  bx lr
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Special dispatch targets -------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |->vm_record:				// Dispatch target for recording phase.
+  |.if JIT
+  |  ldrb CARG1, [DISPATCH, #DISPATCH_GL(hookmask)]
+  |  tst CARG1, #HOOK_VMEVENT		// No recording while in vmevent.
+  |  bne >5
+  |  // Decrement the hookcount for consistency, but always do the call.
+  |   ldr CARG2, [DISPATCH, #DISPATCH_GL(hookcount)]
+  |  tst CARG1, #HOOK_ACTIVE
+  |  bne >1
+  |   sub CARG2, CARG2, #1
+  |  tst CARG1, #LUA_MASKLINE|LUA_MASKCOUNT
+  |   strne CARG2, [DISPATCH, #DISPATCH_GL(hookcount)]
+  |  b >1
+  |.endif
+  |
+  |->vm_rethook:			// Dispatch target for return hooks.
+  |  ldrb CARG1, [DISPATCH, #DISPATCH_GL(hookmask)]
+  |  tst CARG1, #HOOK_ACTIVE		// Hook already active?
+  |  beq >1
+  |5:  // Re-dispatch to static ins.
+  |  decode_OP OP, INS
+  |  add OP, DISPATCH, OP, lsl #2
+  |  ldr pc, [OP, #GG_DISP2STATIC]
+  |
+  |->vm_inshook:			// Dispatch target for instr/line hooks.
+  |  ldrb CARG1, [DISPATCH, #DISPATCH_GL(hookma
