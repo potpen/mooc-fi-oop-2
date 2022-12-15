@@ -2113,4 +2113,48 @@ static void build_subroutines(BuildCtx *ctx)
   |   bhi >9				// More results wanted?
   |
   |  ldrh RA, TRACE:CARG3->traceno
-  |  ldrh RC, 
+  |  ldrh RC, TRACE:CARG3->link
+  |  cmp RC, RA
+  |  beq ->cont_nop			// Blacklisted.
+  |  cmp RC, #0
+  |  bne =>BC_JLOOP			// Jump to stitched trace.
+  |
+  |  // Stitch a new trace to the previous trace.
+  |  str RA, [DISPATCH, #DISPATCH_J(exitno)]
+  |  str L, [DISPATCH, #DISPATCH_J(L)]
+  |  str BASE, L->base
+  |  sub CARG1, DISPATCH, #-GG_DISP2J
+  |  mov CARG2, PC
+  |  bl extern lj_dispatch_stitch	// (jit_State *J, const BCIns *pc)
+  |  ldr BASE, L->base
+  |  b ->cont_nop
+  |
+  |9:  // Fill up results with nil.
+  |  strd CARG12, [BASE, RC]
+  |  add RC, RC, #8
+  |  b <3
+  |.endif
+  |
+  |->vm_profhook:			// Dispatch target for profiler hook.
+#if LJ_HASPROFILE
+  |  mov CARG1, L
+  |   str BASE, L->base
+  |  mov CARG2, PC
+  |  bl extern lj_dispatch_profile	// (lua_State *L, const BCIns *pc)
+  |  // HOOK_PROFILE is off again, so re-dispatch to dynamic instruction.
+  |  ldr BASE, L->base
+  |  sub PC, PC, #4
+  |  b ->cont_nop
+#endif
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Trace exit handler -------------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |->vm_exit_handler:
+  |.if JIT
+  |  sub sp, sp, #12
+  |  push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}
+  |  ldr CARG1, [sp, #64]	// Load original value of lr.
+  |   ldr DISPATCH, [lr]	// Load DISPATCH.
+  
