@@ -2432,4 +2432,50 @@ static void build_subroutines(BuildCtx *ctx)
   |.define NEXT_LIM,		r12
   |.define NEXT_RES_PTR,	sp
   |.define NEXT_RES_VAL,	[sp]
-  |.define NEXT_RES_
+  |.define NEXT_RES_KEY_I,	[sp, #8]
+  |.define NEXT_RES_KEY_IT,	[sp, #12]
+  |
+  |// TValue *lj_vm_next(GCtab *t, uint32_t idx)
+  |// Next idx returned in CRET2.
+  |->vm_next:
+  |.if JIT
+  |  ldr NEXT_TMP0, NEXT_TAB->array
+  |   ldr NEXT_LIM, NEXT_TAB->asize
+  |  add NEXT_TMP0, NEXT_TMP0, NEXT_IDX, lsl #3
+  |1:  // Traverse array part.
+  |   subs NEXT_TMP1, NEXT_IDX, NEXT_LIM
+  |   bhs >5
+  |  ldr NEXT_TMP1, [NEXT_TMP0, #4]
+  |   str NEXT_IDX, NEXT_RES_KEY_I
+  |   add NEXT_TMP0, NEXT_TMP0, #8
+  |   add NEXT_IDX, NEXT_IDX, #1
+  |  checktp NEXT_TMP1, LJ_TNIL
+  |  beq <1				// Skip holes in array part.
+  |  ldr NEXT_TMP0, [NEXT_TMP0, #-8]
+  |   mov NEXT_RES, NEXT_RES_PTR
+  |  strd NEXT_TMP0, NEXT_RES_VAL	// Stores NEXT_TMP1, too.
+  |  mvn NEXT_TMP0, #~LJ_TISNUM
+  |  str NEXT_TMP0, NEXT_RES_KEY_IT
+  |  bx lr
+  |
+  |5:  // Traverse hash part.
+  |  ldr NEXT_TMP0, NEXT_TAB->hmask
+  |   ldr NODE:NEXT_RES, NEXT_TAB->node
+  |   add NEXT_TMP1, NEXT_TMP1, NEXT_TMP1, lsl #1
+  |  add NEXT_LIM, NEXT_LIM, NEXT_TMP0
+  |   add NODE:NEXT_RES, NODE:NEXT_RES, NEXT_TMP1, lsl #3
+  |6:
+  |  cmp NEXT_IDX, NEXT_LIM
+  |  bhi >9
+  |  ldr NEXT_TMP1, NODE:NEXT_RES->val.it
+  |  checktp NEXT_TMP1, LJ_TNIL
+  |   add NEXT_IDX, NEXT_IDX, #1
+  |  bxne lr
+  |  // Skip holes in hash part.
+  |  add NEXT_RES, NEXT_RES, #sizeof(Node)
+  |  b <6
+  |
+  |9:  // End of iteration. Set the key to nil (not the value).
+  |  mvn NEXT_TMP0, #0
+  |   mov NEXT_RES, NEXT_RES_PTR
+  |  str NE
