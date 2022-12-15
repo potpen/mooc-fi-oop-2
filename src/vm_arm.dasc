@@ -2273,4 +2273,66 @@ static void build_subroutines(BuildCtx *ctx)
   |   tst CARG3, CARG2, asr #31		// iszero = ((ztest & signmask) == 0)
   |.else
   |   bics CARG3, CARG3, CARG2, asr #31	// iszero = ((ztest & ~signmask) == 0)
-  
+  |.endif
+  |.if hf == 1
+  |  vmoveq d0, CARG1, CARG2
+  |.endif
+  |  bxeq lr				// iszero: done.
+  |  mvn CARG4, #1
+  |  cmp RB, #0
+  |  lslpl CARG3, CARG4, RB
+  |  mvnmi CARG3, #0
+  |  add RB, RB, #32
+  |  subs CARG1, CARG1, CARG4, lsl RB	// lo = lo-lomask
+  |  sbc CARG2, CARG2, CARG3		// hi = hi-himask+carry
+  |.if hf == 1
+  |  vmov d0, CARG1, CARG2
+  |.endif
+  |  bx lr
+  |
+  |2:  // |x| < 1:
+  |  bxcs lr				// |x| is not finite.
+  |  orr CARG3, CARG3, CARG1		// ztest = (2*hi) | lo
+  |.if "func" == "floor"
+  |  tst CARG3, CARG2, asr #31		// iszero = ((ztest & signmask) == 0)
+  |.else
+  |  bics CARG3, CARG3, CARG2, asr #31	// iszero = ((ztest & ~signmask) == 0)
+  |.endif
+  |  mov CARG1, #0			// lo = 0
+  |  and CARG2, CARG2, #0x80000000
+  |  ldrne CARG4, <9			// hi = sign(x) | (iszero ? 0.0 : 1.0)
+  |  orrne CARG2, CARG2, CARG4
+  |.if hf == 1
+  |  vmov d0, CARG1, CARG2
+  |.endif
+  |  bx lr
+  |.endmacro
+  |
+  |9:
+  |  .long 0x3ff00000			// hiword(+1.0)
+  |
+  |->vm_floor:
+  |.if HFABI
+  |  vm_round floor, 1
+  |.endif
+  |->vm_floor_sf:
+  |  vm_round floor, 0
+  |
+  |->vm_ceil:
+  |.if HFABI
+  |  vm_round ceil, 1
+  |.endif
+  |->vm_ceil_sf:
+  |  vm_round ceil, 0
+  |
+  |.macro vm_trunc, hf
+  |.if JIT
+  |.if hf == 1
+  |  vmov CARG1, CARG2, d0
+  |.endif
+  |  lsl CARG3, CARG2, #1
+  |  adds RB, CARG3, #0x00200000
+  |  andpl CARG2, CARG2, #0x80000000	// |x| < 1? hi = sign(x), lo = 0.
+  |  movpl CARG1, #0
+  |.if hf == 1
+  |  vmovp
