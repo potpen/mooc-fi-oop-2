@@ -2157,4 +2157,39 @@ static void build_subroutines(BuildCtx *ctx)
   |  push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}
   |  ldr CARG1, [sp, #64]	// Load original value of lr.
   |   ldr DISPATCH, [lr]	// Load DISPATCH.
-  
+  |    add CARG3, sp, #64	// Recompute original value of sp.
+  |   mv_vmstate CARG4, EXIT
+  |    str CARG3, [sp, #52]	// Store sp in RID_SP
+  |   st_vmstate CARG4
+  |  ldr CARG2, [CARG1, #-4]!	// Get exit instruction.
+  |   str CARG1, [sp, #56]	// Store exit pc in RID_LR and RID_PC.
+  |   str CARG1, [sp, #60]
+  |.if FPU
+  |  vpush {d0-d15}
+  |.endif
+  |  lsl CARG2, CARG2, #8
+  |  add CARG1, CARG1, CARG2, asr #6
+  |   ldr CARG2, [lr, #4]	// Load exit stub group offset.
+  |   sub CARG1, CARG1, lr
+  |  ldr L, [DISPATCH, #DISPATCH_GL(cur_L)]
+  |   add CARG1, CARG2, CARG1, lsr #2	// Compute exit number.
+  |    ldr BASE, [DISPATCH, #DISPATCH_GL(jit_base)]
+  |   str CARG1, [DISPATCH, #DISPATCH_J(exitno)]
+  |   mov CARG4, #0
+  |    str BASE, L->base
+  |  str L, [DISPATCH, #DISPATCH_J(L)]
+  |   str CARG4, [DISPATCH, #DISPATCH_GL(jit_base)]
+  |  sub CARG1, DISPATCH, #-GG_DISP2J
+  |  mov CARG2, sp
+  |  bl extern lj_trace_exit		// (jit_State *J, ExitState *ex)
+  |  // Returns MULTRES (unscaled) or negated error code.
+  |  ldr CARG2, L->cframe
+  |   ldr BASE, L->base
+  |  bic CARG2, CARG2, #~CFRAME_RAWMASK	// Use two steps: bic sp is deprecated.
+  |  mov sp, CARG2
+  |   ldr PC, SAVE_PC			// Get SAVE_PC.
+  |  str L, SAVE_L			// Set SAVE_L (on-trace resume/yield).
+  |  b >1
+  |.endif
+  |->vm_exit_interp:
+  |  // CARG1 = MULTRES or negated error cod
