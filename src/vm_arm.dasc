@@ -2192,4 +2192,46 @@ static void build_subroutines(BuildCtx *ctx)
   |  b >1
   |.endif
   |->vm_exit_interp:
-  |  // CARG1 = MULTRES or negated error cod
+  |  // CARG1 = MULTRES or negated error code, BASE, PC and DISPATCH set.
+  |.if JIT
+  |  ldr L, SAVE_L
+  |1:
+  |  cmp CARG1, #0
+  |  blt >9				// Check for error from exit.
+  |   lsl RC, CARG1, #3
+  |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+  |   str RC, SAVE_MULTRES
+  |   mov CARG3, #0
+  |   str BASE, L->base
+  |  ldr CARG2, LFUNC:CARG2->field_pc
+  |   str CARG3, [DISPATCH, #DISPATCH_GL(jit_base)]
+  |    mv_vmstate CARG4, INTERP
+  |  ldr KBASE, [CARG2, #PC2PROTO(k)]
+  |  // Modified copy of ins_next which handles function header dispatch, too.
+  |  ldrb OP, [PC]
+  |     mov MASKR8, #255
+  |   ldr INS, [PC], #4
+  |     lsl MASKR8, MASKR8, #3		// MASKR8 = 255*8.
+  |    st_vmstate CARG4
+  |  cmp OP, #BC_FUNCC+2		// Fast function?
+  |  bhs >4
+  |2:
+  |  cmp OP, #BC_FUNCF			// Function header?
+  |  ldr OP, [DISPATCH, OP, lsl #2]
+  |   decode_RA8 RA, INS
+  |   lsrlo RC, INS, #16	// No: Decode operands A*8 and D.
+  |   subhs RC, RC, #8
+  |   addhs RA, RA, BASE	// Yes: RA = BASE+framesize*8, RC = nargs*8
+  |   ldrhs CARG3, [BASE, FRAME_FUNC]
+  |  bx OP
+  |
+  |4:  // Check frame below fast function.
+  |  ldr CARG1, [BASE, FRAME_PC]
+  |  ands CARG2, CARG1, #FRAME_TYPE
+  |  bne <2			// Trace stitching continuation?
+  |  // Otherwise set KBASE for Lua function below fast function.
+  |  ldr CARG3, [CARG1, #-4]
+  |  decode_RA8 CARG1, CARG3
+  |  sub CARG2, BASE, CARG1
+  |  ldr LFUNC:CARG3, [CARG2, #-16]
+  |  ldr CA
