@@ -2234,4 +2234,43 @@ static void build_subroutines(BuildCtx *ctx)
   |  decode_RA8 CARG1, CARG3
   |  sub CARG2, BASE, CARG1
   |  ldr LFUNC:CARG3, [CARG2, #-16]
-  |  ldr CA
+  |  ldr CARG3, LFUNC:CARG3->field_pc
+  |  ldr KBASE, [CARG3, #PC2PROTO(k)]
+  |  b <2
+  |
+  |9:  // Rethrow error from the right C frame.
+  |  rsb CARG2, CARG1, #0
+  |  mov CARG1, L
+  |  bl extern lj_err_trace		// (lua_State *L, int errcode)
+  |.endif
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Math helper functions ----------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |// FP value rounding. Called from JIT code.
+  |//
+  |// double lj_vm_floor/ceil/trunc(double x);
+  |.macro vm_round, func, hf
+  |.if hf == 1
+  |  vmov CARG1, CARG2, d0
+  |.endif
+  |  lsl CARG3, CARG2, #1
+  |  adds RB, CARG3, #0x00200000
+  |  bpl >2				// |x| < 1?
+  |  mvn CARG4, #0x3cc
+  |  subs RB, CARG4, RB, asr #21	// 2^0: RB = 51, 2^51: RB = 0.
+  |  bxlo lr				// |x| >= 2^52: done.
+  |  mvn CARG4, #1
+  |   bic CARG3, CARG1, CARG4, lsl RB	// ztest = lo & ~lomask
+  |  and CARG1, CARG1, CARG4, lsl RB	// lo &= lomask
+  |  subs RB, RB, #32
+  |   bicpl CARG4, CARG2, CARG4, lsl RB	// |x| <= 2^20: ztest |= hi & ~himask
+  |   orrpl CARG3, CARG3, CARG4
+  |   mvnpl CARG4, #1
+  |  andpl CARG2, CARG2, CARG4, lsl RB	// |x| <= 2^20: hi &= himask
+  |.if "func" == "floor"
+  |   tst CARG3, CARG2, asr #31		// iszero = ((ztest & signmask) == 0)
+  |.else
+  |   bics CARG3, CARG3, CARG2, asr #31	// iszero = ((ztest & ~signmask) == 0)
+  
