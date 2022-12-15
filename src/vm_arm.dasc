@@ -2335,4 +2335,59 @@ static void build_subroutines(BuildCtx *ctx)
   |  andpl CARG2, CARG2, #0x80000000	// |x| < 1? hi = sign(x), lo = 0.
   |  movpl CARG1, #0
   |.if hf == 1
-  |  vmovp
+  |  vmovpl d0, CARG1, CARG2
+  |.endif
+  |  bxpl lr
+  |  mvn CARG4, #0x3cc
+  |  subs RB, CARG4, RB, asr #21	// 2^0: RB = 51, 2^51: RB = 0.
+  |  bxlo lr				// |x| >= 2^52: already done.
+  |  mvn CARG4, #1
+  |  and CARG1, CARG1, CARG4, lsl RB	// lo &= lomask
+  |  subs RB, RB, #32
+  |  andpl CARG2, CARG2, CARG4, lsl RB	// |x| <= 2^20: hi &= himask
+  |.if hf == 1
+  |  vmov d0, CARG1, CARG2
+  |.endif
+  |  bx lr
+  |.endif
+  |.endmacro
+  |
+  |->vm_trunc:
+  |.if HFABI
+  |  vm_trunc 1
+  |.endif
+  |->vm_trunc_sf:
+  |  vm_trunc 0
+  |
+  |  // double lj_vm_mod(double dividend, double divisor);
+  |->vm_mod:
+  |.if FPU
+  |  // Special calling convention. Also, RC (r11) is not preserved.
+  |  vdiv.f64 d0, d6, d7
+  |   mov RC, lr
+  |  vmov CARG1, CARG2, d0
+  |  bl ->vm_floor_sf
+  |  vmov d0, CARG1, CARG2
+  |  vmul.f64 d0, d0, d7
+  |   mov lr, RC
+  |  vsub.f64 d6, d6, d0
+  |  bx lr
+  |.else
+  |  push {r0, r1, r2, r3, r4, lr}
+  |  bl extern __aeabi_ddiv
+  |  bl ->vm_floor_sf
+  |  ldrd CARG34, [sp, #8]
+  |  bl extern __aeabi_dmul
+  |  ldrd CARG34, [sp]
+  |  eor CARG2, CARG2, #0x80000000
+  |  bl extern __aeabi_dadd
+  |  add sp, sp, #20
+  |  pop {pc}
+  |.endif
+  |
+  |  // int lj_vm_modi(int dividend, int divisor);
+  |->vm_modi:
+  |  ands RB, CARG1, #0x80000000
+  |  rsbmi CARG1, CARG1, #0		// a = |dividend|
+  |  eor RB, RB, CARG2, asr #1		// Keep signdiff and sign(divisor).
+  |  cmp CARG2, #0
