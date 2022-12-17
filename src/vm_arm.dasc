@@ -2728,4 +2728,56 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     if (vk) {
       |  bne >3				// Different GCobjs or pvalues?
       |1:  // Branch if same.
-     
+      |  sub PC, RB, #0x20000
+      |2:  // Different.
+      |  ins_next
+      |3:
+      |  checktp CARG2, LJ_TISTABUD
+      |  bhi <2				// Different objects and not table/ud?
+    } else {
+      |  beq >1				// Same GCobjs or pvalues?
+      |  checktp CARG2, LJ_TISTABUD
+      |  bhi >2				// Different objects and not table/ud?
+    }
+    |  // Different tables or userdatas. Need to check __eq metamethod.
+    |  // Field metatable must be at same offset for GCtab and GCudata!
+    |  ldr TAB:RA, TAB:CARG1->metatable
+    |  cmp TAB:RA, #0
+    if (vk) {
+      |  beq <2			// No metatable?
+    } else {
+      |  beq >2			// No metatable?
+    }
+    |  ldrb RA, TAB:RA->nomm
+    |   mov CARG4, #1-vk		// ne = 0 or 1.
+    |   mov CARG2, CARG1
+    |  tst RA, #1<<MM_eq
+    |  beq ->vmeta_equal		// 'no __eq' flag not set?
+    if (vk) {
+      |  b <2
+    } else {
+      |2:  // Branch if different.
+      |  sub PC, RB, #0x20000
+      |1:  // Same.
+      |  ins_next
+    }
+    break;
+
+  case BC_ISEQS: case BC_ISNES:
+    vk = op == BC_ISEQS;
+    |  // RA = src*8, RC = str_const (~), JMP with RC = target
+    |   mvn RC, RC
+    |  ldrd CARG12, [BASE, RA]
+    |    ldrh RB, [PC, #2]
+    |   ldr STR:CARG3, [KBASE, RC, lsl #2]
+    |    add PC, PC, #4
+    |    add RB, PC, RB, lsl #2
+    |  checktp CARG2, LJ_TSTR
+    |.if FFI
+    |  bne >7
+    |  cmp CARG1, CARG3
+    |.else
+    |  cmpeq CARG1, CARG3
+    |.endif
+    if (vk) {
+      |  subeq PC,
