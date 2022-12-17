@@ -2633,4 +2633,51 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktp CARG4, LJ_TISNUM
     |   vldr d1, [RC]
     |  blo >5
-    |  bhi ->vmeta
+    |  bhi ->vmeta_comp
+    |  // d0 is a number, CARG3 is an integer.
+    |  vmov s4, CARG3
+    |  vcvt.f64.s32 d1, s4
+    |  b >5
+    |4:  // CARG1 is an integer, CARG34 is not an integer.
+    |   vldr d1, [RC]
+    |  bhi ->vmeta_comp
+    |  // CARG1 is an integer, d1 is a number.
+    |  vmov s4, CARG1
+    |  vcvt.f64.s32 d0, s4
+    |5:  // d0 and d1 are numbers.
+    |  vcmp.f64 d0, d1
+    |  vmrs
+    |  // To preserve NaN semantics GE/GT branch on unordered, but LT/LE don't.
+    if (op == BC_ISLT) {
+      |  sublo PC, RB, #0x20000
+    } else if (op == BC_ISGE) {
+      |  subhs PC, RB, #0x20000
+    } else if (op == BC_ISLE) {
+      |  subls PC, RB, #0x20000
+    } else {
+      |  subhi PC, RB, #0x20000
+    }
+    |  b <1
+    |.else
+    |  bhi ->vmeta_comp
+    |  // CARG12 is a number.
+    |  checktp CARG4, LJ_TISNUM
+    |  movlo RA, RB			// Save RB.
+    |  blo >5
+    |  bhi ->vmeta_comp
+    |  // CARG12 is a number, CARG3 is an integer.
+    |  mov CARG1, CARG3
+    |  mov RC, RA
+    |  mov RA, RB			// Save RB.
+    |  bl extern __aeabi_i2d
+    |  mov CARG3, CARG1
+    |  mov CARG4, CARG2
+    |  ldrd CARG12, [RC]		// Restore first operand.
+    |  b >5
+    |4:  // CARG1 is an integer, CARG34 is not an integer.
+    |  bhi ->vmeta_comp
+    |  // CARG1 is an integer, CARG34 is a number.
+    |  mov RA, RB			// Save RB.
+    |  bl extern __aeabi_i2d
+    |  ldrd CARG34, [RC]		// Restore second operand.
+    |5:  // CARG12 an
