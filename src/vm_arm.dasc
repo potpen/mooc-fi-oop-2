@@ -2680,4 +2680,52 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RA, RB			// Save RB.
     |  bl extern __aeabi_i2d
     |  ldrd CARG34, [RC]		// Restore second operand.
-    |5:  // CARG12 an
+    |5:  // CARG12 and CARG34 are numbers.
+    |  bl extern __aeabi_cdcmple
+    |  // To preserve NaN semantics GE/GT branch on unordered, but LT/LE don't.
+    if (op == BC_ISLT) {
+      |  sublo PC, RA, #0x20000
+    } else if (op == BC_ISGE) {
+      |  subhs PC, RA, #0x20000
+    } else if (op == BC_ISLE) {
+      |  subls PC, RA, #0x20000
+    } else {
+      |  subhi PC, RA, #0x20000
+    }
+    |  b <1
+    |.endif
+    break;
+
+  case BC_ISEQV: case BC_ISNEV:
+    vk = op == BC_ISEQV;
+    |  // RA = src1*8, RC = src2, JMP with RC = target
+    |   lsl RC, RC, #3
+    |  ldrd CARG12, [RA, BASE]!
+    |    ldrh RB, [PC, #2]
+    |   ldrd CARG34, [RC, BASE]!
+    |    add PC, PC, #4
+    |    add RB, PC, RB, lsl #2
+    |  checktp CARG2, LJ_TISNUM
+    |  cmnls CARG4, #-LJ_TISNUM
+    if (vk) {
+      |  bls ->BC_ISEQN_Z
+    } else {
+      |  bls ->BC_ISNEN_Z
+    }
+    |  // Either or both types are not numbers.
+    |.if FFI
+    |  checktp CARG2, LJ_TCDATA
+    |  checktpne CARG4, LJ_TCDATA
+    |  beq ->vmeta_equal_cd
+    |.endif
+    |  cmp CARG2, CARG4			// Compare types.
+    |  bne >2				// Not the same type?
+    |  checktp CARG2, LJ_TISPRI
+    |  bhs >1				// Same type and primitive type?
+    |
+    |  // Same types and not a primitive type. Compare GCobj or pvalue.
+    |  cmp CARG1, CARG3
+    if (vk) {
+      |  bne >3				// Different GCobjs or pvalues?
+      |1:  // Branch if same.
+     
