@@ -2580,4 +2580,57 @@ static void build_subroutines(BuildCtx *ctx)
   |  strd CRET1, CCSTATE->gpr[0]
   |.if HFABI
   |  vstmdb r12!, {d0-d3}
-  |.
+  |.endif
+  |  pop {CCSTATE, r5, r11, pc}
+  |.endif
+  |// Note: vm_ffi_call must be the last function in this object file!
+  |
+  |//-----------------------------------------------------------------------
+}
+
+/* Generate the code for a single instruction. */
+static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+{
+  int vk = 0;
+  |=>defop:
+
+  switch (op) {
+
+  /* -- Comparison ops ---------------------------------------------------- */
+
+  /* Remember: all ops branch for a true comparison, fall through otherwise. */
+
+  case BC_ISLT: case BC_ISGE: case BC_ISLE: case BC_ISGT:
+    |  // RA = src1*8, RC = src2, JMP with RC = target
+    |   lsl RC, RC, #3
+    |  ldrd CARG12, [RA, BASE]!
+    |    ldrh RB, [PC, #2]
+    |   ldrd CARG34, [RC, BASE]!
+    |    add PC, PC, #4
+    |    add RB, PC, RB, lsl #2
+    |  checktp CARG2, LJ_TISNUM
+    |  bne >3
+    |  checktp CARG4, LJ_TISNUM
+    |  bne >4
+    |  cmp CARG1, CARG3
+    if (op == BC_ISLT) {
+      |  sublt PC, RB, #0x20000
+    } else if (op == BC_ISGE) {
+      |  subge PC, RB, #0x20000
+    } else if (op == BC_ISLE) {
+      |  suble PC, RB, #0x20000
+    } else {
+      |  subgt PC, RB, #0x20000
+    }
+    |1:
+    |  ins_next
+    |
+    |3: // CARG12 is not an integer.
+    |.if FPU
+    |   vldr d0, [RA]
+    |  bhi ->vmeta_comp
+    |  // d0 is a number.
+    |  checktp CARG4, LJ_TISNUM
+    |   vldr d1, [RC]
+    |  blo >5
+    |  bhi ->vmeta
