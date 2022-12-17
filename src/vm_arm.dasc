@@ -2909,4 +2909,64 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   case BC_ISTC: case BC_ISFC: case BC_IST: case BC_ISF:
     |  // RA = dst*8 or unused, RC = src, JMP with RC = target
-    |  add RC, 
+    |  add RC, BASE, RC, lsl #3
+    |   ldrh RB, [PC, #2]
+    |  ldrd CARG12, [RC]
+    |   add PC, PC, #4
+    |   add RB, PC, RB, lsl #2
+    |  checktp CARG2, LJ_TTRUE
+    if (op == BC_ISTC || op == BC_IST) {
+      |  subls PC, RB, #0x20000
+      if (op == BC_ISTC) {
+	|  strdls CARG12, [BASE, RA]
+      }
+    } else {
+      |  subhi PC, RB, #0x20000
+      if (op == BC_ISFC) {
+	|  strdhi CARG12, [BASE, RA]
+      }
+    }
+    |  ins_next
+    break;
+
+  case BC_ISTYPE:
+    |  // RA = src*8, RC = -type
+    |  ldrd CARG12, [BASE, RA]
+    |   ins_next1
+    |  cmn CARG2, RC
+    |   ins_next2
+    |  bne ->vmeta_istype
+    |   ins_next3
+    break;
+  case BC_ISNUM:
+    |  // RA = src*8, RC = -(TISNUM-1)
+    |  ldrd CARG12, [BASE, RA]
+    |   ins_next1
+    |  checktp CARG2, LJ_TISNUM
+    |   ins_next2
+    |  bhs ->vmeta_istype
+    |   ins_next3
+    break;
+
+  /* -- Unary ops --------------------------------------------------------- */
+
+  case BC_MOV:
+    |  // RA = dst*8, RC = src
+    |  lsl RC, RC, #3
+    |   ins_next1
+    |  ldrd CARG12, [BASE, RC]
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+  case BC_NOT:
+    |  // RA = dst*8, RC = src
+    |  add RC, BASE, RC, lsl #3
+    |   ins_next1
+    |  ldr CARG1, [RC, #4]
+    |   add RA, BASE, RA
+    |   ins_next2
+    |  checktp CARG1, LJ_TTRUE
+    |  mvnls CARG2, #~LJ_TFALSE
+    |  mvnhi CARG2, #~LJ_TTRUE
+    | 
