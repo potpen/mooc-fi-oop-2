@@ -2851,4 +2851,62 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     if (vk) {
       |  subeq PC, RB, #0x20000
     } else {
-      |  subne PC, RB
+      |  subne PC, RB, #0x20000
+    }
+    |  b <2
+    |.else
+    |  // CARG12 is a number.
+    |  checktp CARG4, LJ_TISNUM
+    |  movlo RA, RB			// Save RB.
+    |  blo >5
+    |  // CARG12 is a number, CARG3 is an integer.
+    |  mov CARG1, CARG3
+    |  mov RC, RA
+    |4:  // CARG1 is an integer, CARG34 is a number.
+    |  mov RA, RB			// Save RB.
+    |  bl extern __aeabi_i2d
+    |  ldrd CARG34, [RC]		// Restore other operand.
+    |5:  // CARG12 and CARG34 are numbers.
+    |  bl extern __aeabi_cdcmpeq
+    if (vk) {
+      |  subeq PC, RA, #0x20000
+    } else {
+      |  subne PC, RA, #0x20000
+    }
+    |  b <2
+    |.endif
+    |
+    |.if FFI
+    |7:
+    |  checktp CARG2, LJ_TCDATA
+    |  bne <1
+    |  b ->vmeta_equal_cd
+    |.endif
+    break;
+
+  case BC_ISEQP: case BC_ISNEP:
+    vk = op == BC_ISEQP;
+    |  // RA = src*8, RC = primitive_type (~), JMP with RC = target
+    |  ldrd CARG12, [BASE, RA]
+    |   ldrh RB, [PC, #2]
+    |   add PC, PC, #4
+    |  mvn RC, RC
+    |   add RB, PC, RB, lsl #2
+    |.if FFI
+    |  checktp CARG2, LJ_TCDATA
+    |  beq ->vmeta_equal_cd
+    |.endif
+    |  cmp CARG2, RC
+    if (vk) {
+      |  subeq PC, RB, #0x20000
+    } else {
+      |  subne PC, RB, #0x20000
+    }
+    |  ins_next
+    break;
+
+  /* -- Unary test and copy ops ------------------------------------------- */
+
+  case BC_ISTC: case BC_ISFC: case BC_IST: case BC_ISF:
+    |  // RA = dst*8 or unused, RC = src, JMP with RC = target
+    |  add RC, 
