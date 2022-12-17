@@ -2478,4 +2478,50 @@ static void build_subroutines(BuildCtx *ctx)
   |9:  // End of iteration. Set the key to nil (not the value).
   |  mvn NEXT_TMP0, #0
   |   mov NEXT_RES, NEXT_RES_PTR
-  |  str NE
+  |  str NEXT_TMP0, NEXT_RES_KEY_IT
+  |  bx lr
+  |.endif
+  |
+  |//-----------------------------------------------------------------------
+  |//-- FFI helper functions -----------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |// Handler for callback functions.
+  |// Saveregs already performed. Callback slot number in [sp], g in r12.
+  |->vm_ffi_callback:
+  |.if FFI
+  |.type CTSTATE, CTState, PC
+  |  ldr CTSTATE, GL:r12->ctype_state
+  |   add DISPATCH, r12, #GG_G2DISP
+  |.if FPU
+  |  str r4, SAVE_R4
+  |  add r4, sp, CFRAME_SPACE+4+8*8
+  |  vstmdb r4!, {d8-d15}
+  |.endif
+  |.if HFABI
+  |  add r12, CTSTATE, #offsetof(CTState, cb.fpr[8])
+  |.endif
+  |  strd CARG34, CTSTATE->cb.gpr[2]
+  |  strd CARG12, CTSTATE->cb.gpr[0]
+  |.if HFABI
+  |  vstmdb r12!, {d0-d7}
+  |.endif
+  |  ldr CARG4, [sp]
+  |   add CARG3, sp, #CFRAME_SIZE
+  |    mov CARG1, CTSTATE
+  |  lsr CARG4, CARG4, #3
+  |   str CARG3, CTSTATE->cb.stack
+  |    mov CARG2, sp
+  |  str CARG4, CTSTATE->cb.slot
+  |  str CTSTATE, SAVE_PC		// Any value outside of bytecode is ok.
+  |  bl extern lj_ccallback_enter	// (CTState *cts, void *cf)
+  |  // Returns lua_State *.
+  |  ldr BASE, L:CRET1->base
+  |    mv_vmstate CARG2, INTERP
+  |  ldr RC, L:CRET1->top
+  |    mov MASKR8, #255
+  |   ldr LFUNC:CARG3, [BASE, FRAME_FUNC]
+  |    mov L, CRET1
+  |  sub RC, RC, BASE
+  |    lsl MASKR8, MASKR8, #3		// MASKR8 = 255*8.
+  |    
