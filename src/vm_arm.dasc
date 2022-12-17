@@ -2780,4 +2780,75 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmpeq CARG1, CARG3
     |.endif
     if (vk) {
-      |  subeq PC,
+      |  subeq PC, RB, #0x20000
+      |1:
+    } else {
+      |1:
+      |  subne PC, RB, #0x20000
+    }
+    |  ins_next
+    |
+    |.if FFI
+    |7:
+    |  checktp CARG2, LJ_TCDATA
+    |  bne <1
+    |  b ->vmeta_equal_cd
+    |.endif
+    break;
+
+  case BC_ISEQN: case BC_ISNEN:
+    vk = op == BC_ISEQN;
+    |  // RA = src*8, RC = num_const (~), JMP with RC = target
+    |   lsl RC, RC, #3
+    |  ldrd CARG12, [RA, BASE]!
+    |    ldrh RB, [PC, #2]
+    |   ldrd CARG34, [RC, KBASE]!
+    |    add PC, PC, #4
+    |    add RB, PC, RB, lsl #2
+    if (vk) {
+      |->BC_ISEQN_Z:
+    } else {
+      |->BC_ISNEN_Z:
+    }
+    |  checktp CARG2, LJ_TISNUM
+    |  bne >3
+    |  checktp CARG4, LJ_TISNUM
+    |  bne >4
+    |  cmp CARG1, CARG3
+    if (vk) {
+      |  subeq PC, RB, #0x20000
+      |1:
+    } else {
+      |1:
+      |  subne PC, RB, #0x20000
+    }
+    |2:
+    |  ins_next
+    |
+    |3:  // CARG12 is not an integer.
+    |.if FFI
+    |  bhi >7
+    |.else
+    if (!vk) {
+      |  subhi PC, RB, #0x20000
+    }
+    |  bhi <2
+    |.endif
+    |.if FPU
+    |  checktp CARG4, LJ_TISNUM
+    |  vmov s4, CARG3
+    |   vldr d0, [RA]
+    |  vldrlo d1, [RC]
+    |  vcvths.f64.s32 d1, s4
+    |  b >5
+    |4:  // CARG1 is an integer, d1 is a number.
+    |  vmov s4, CARG1
+    |   vldr d1, [RC]
+    |  vcvt.f64.s32 d0, s4
+    |5:  // d0 and d1 are numbers.
+    |  vcmp.f64 d0, d1
+    |  vmrs
+    if (vk) {
+      |  subeq PC, RB, #0x20000
+    } else {
+      |  subne PC, RB
