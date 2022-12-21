@@ -2969,4 +2969,65 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktp CARG1, LJ_TTRUE
     |  mvnls CARG2, #~LJ_TFALSE
     |  mvnhi CARG2, #~LJ_TTRUE
-    | 
+    |  str CARG2, [RA, #4]
+    |   ins_next3
+    break;
+  case BC_UNM:
+    |  // RA = dst*8, RC = src
+    |  lsl RC, RC, #3
+    |  ldrd CARG12, [BASE, RC]
+    |   ins_next1
+    |   ins_next2
+    |  checktp CARG2, LJ_TISNUM
+    |  bhi ->vmeta_unm
+    |  eorne CARG2, CARG2, #0x80000000
+    |  bne >5
+    |  rsbseq CARG1, CARG1, #0
+    |  ldrdvs CARG12, >9
+    |5:
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |
+    |.align 8
+    |9:
+    |  .long 0x00000000, 0x41e00000	// 2^31.
+    break;
+  case BC_LEN:
+    |  // RA = dst*8, RC = src
+    |  lsl RC, RC, #3
+    |  ldrd CARG12, [BASE, RC]
+    |  checkstr CARG2, >2
+    |  ldr CARG1, STR:CARG1->len
+    |1:
+    |  mvn CARG2, #~LJ_TISNUM
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |2:
+    |  checktab CARG2, ->vmeta_len
+#if LJ_52
+    |  ldr TAB:CARG3, TAB:CARG1->metatable
+    |  cmp TAB:CARG3, #0
+    |  bne >9
+    |3:
+#endif
+    |->BC_LEN_Z:
+    |  .IOS mov RC, BASE
+    |  bl extern lj_tab_len		// (GCtab *t)
+    |  // Returns uint32_t (but less than 2^31).
+    |  .IOS mov BASE, RC
+    |  b <1
+#if LJ_52
+    |9:
+    |  ldrb CARG4, TAB:CARG3->nomm
+    |  tst CARG4, #1<<MM_len
+    |  bne <3				// 'no __len' flag set: done.
+    |  b ->vmeta_len
+#endif
+    break;
+
+  /* -- Binary ops -------------------------------------------------------- */
+
+    |.macro ins_arithcheck, cond, ncond, target
+    ||if
