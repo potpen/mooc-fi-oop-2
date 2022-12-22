@@ -3030,4 +3030,62 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   /* -- Binary ops -------------------------------------------------------- */
 
     |.macro ins_arithcheck, cond, ncond, target
-    ||if
+    ||if (vk == 1) {
+    |   cmn CARG4, #-LJ_TISNUM
+    |    cmn..cond CARG2, #-LJ_TISNUM
+    ||} else {
+    |   cmn CARG2, #-LJ_TISNUM
+    |    cmn..cond CARG4, #-LJ_TISNUM
+    ||}
+    |  b..ncond target
+    |.endmacro
+    |.macro ins_arithcheck_int, target
+    |  ins_arithcheck eq, ne, target
+    |.endmacro
+    |.macro ins_arithcheck_num, target
+    |  ins_arithcheck lo, hs, target
+    |.endmacro
+    |
+    |.macro ins_arithpre
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = dst*8, RB = src1*8, RC = src2*8 | num_const*8
+    ||vk = ((int)op - BC_ADDVN) / (BC_ADDNV-BC_ADDVN);
+    ||switch (vk) {
+    ||case 0:
+    |   .if FPU
+    |   ldrd CARG12, [RB, BASE]!
+    |    ldrd CARG34, [RC, KBASE]!
+    |   .else
+    |   ldrd CARG12, [BASE, RB]
+    |    ldrd CARG34, [KBASE, RC]
+    |   .endif
+    ||  break;
+    ||case 1:
+    |   .if FPU
+    |   ldrd CARG34, [RB, BASE]!
+    |    ldrd CARG12, [RC, KBASE]!
+    |   .else
+    |   ldrd CARG34, [BASE, RB]
+    |    ldrd CARG12, [KBASE, RC]
+    |   .endif
+    ||  break;
+    ||default:
+    |   .if FPU
+    |   ldrd CARG12, [RB, BASE]!
+    |    ldrd CARG34, [RC, BASE]!
+    |   .else
+    |   ldrd CARG12, [BASE, RB]
+    |    ldrd CARG34, [BASE, RC]
+    |   .endif
+    ||  break;
+    ||}
+    |.endmacro
+    |
+    |.macro ins_arithpre_fpu, reg1, reg2
+    |.if FPU
+    ||if (vk == 1) {
+    |  vldr reg2, [RB]
+    |  vldr reg1, [RC]
+    ||} else {
+    |  vldr re
