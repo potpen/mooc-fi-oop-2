@@ -3366,4 +3366,53 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |1:
     |   ins_next
     |
-    |2:  // Che
+    |2:  // Check if string is white and ensure upvalue is closed.
+    |  tst RB, #LJ_GC_WHITES		// iswhite(str)
+    |  cmpne RC, #0
+    |   sub CARG1, DISPATCH, #-GG_DISP2G
+    |  // Crossed a write barrier. Move the barrier forward.
+    |.if IOS
+    |  beq <1
+    |  mov RC, BASE
+    |  bl extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |  mov BASE, RC
+    |.else
+    |  blne extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |.endif
+    |  b <1
+    break;
+  case BC_USETN:
+    |  // RA = uvnum*8, RC = num_const
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   lsr RA, RA, #1
+    |   add RA, RA, #offsetof(GCfuncL, uvptr)
+    |    lsl RC, RC, #3
+    |  ldr UPVAL:CARG2, [LFUNC:CARG2, RA]
+    |    ldrd CARG34, [KBASE, RC]
+    |  ldr CARG2, UPVAL:CARG2->v
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG34, [CARG2]
+    |   ins_next3
+    break;
+  case BC_USETP:
+    |  // RA = uvnum*8, RC = primitive_type (~)
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   lsr RA, RA, #1
+    |   add RA, RA, #offsetof(GCfuncL, uvptr)
+    |  ldr UPVAL:CARG2, [LFUNC:CARG2, RA]
+    |   mvn RC, RC
+    |  ldr CARG2, UPVAL:CARG2->v
+    |   ins_next1
+    |   ins_next2
+    |  str RC, [CARG2, #4]
+    |   ins_next3
+    break;
+
+  case BC_UCLO:
+    |  // RA = level*8, RC = target
+    |  ldr CARG3, L->openupval
+    |   add RC, PC, RC, lsl #2
+    |   str BASE, L->base
+    |  cmp CARG3, #0
+    |   sub PC, RC, #0x
