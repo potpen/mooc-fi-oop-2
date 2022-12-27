@@ -3415,4 +3415,56 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   add RC, PC, RC, lsl #2
     |   str BASE, L->base
     |  cmp CARG3, #0
-    |   sub PC, RC, #0x
+    |   sub PC, RC, #0x20000
+    |  beq >1
+    |   mov CARG1, L
+    |   add CARG2, BASE, RA
+    |  bl extern lj_func_closeuv	// (lua_State *L, TValue *level)
+    |  ldr BASE, L->base
+    |1:
+    |  ins_next
+    break;
+
+  case BC_FNEW:
+    |  // RA = dst*8, RC = proto_const (~) (holding function prototype)
+    |  mvn RC, RC
+    |   str BASE, L->base
+    |  ldr CARG2, [KBASE, RC, lsl #2]
+    |   str PC, SAVE_PC
+    |  ldr CARG3, [BASE, FRAME_FUNC]
+    |   mov CARG1, L
+    |  // (lua_State *L, GCproto *pt, GCfuncL *parent)
+    |  bl extern lj_func_newL_gc
+    |  // Returns GCfuncL *.
+    |  ldr BASE, L->base
+    |  mvn CARG2, #~LJ_TFUNC
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+
+  /* -- Table ops --------------------------------------------------------- */
+
+  case BC_TNEW:
+  case BC_TDUP:
+    |  // RA = dst*8, RC = (hbits|asize) | tab_const (~)
+    if (op == BC_TDUP) {
+      |  mvn RC, RC
+    }
+    |  ldr CARG3, [DISPATCH, #DISPATCH_GL(gc.total)]
+    |   ldr CARG4, [DISPATCH, #DISPATCH_GL(gc.threshold)]
+    |    str BASE, L->base
+    |    str PC, SAVE_PC
+    |  cmp CARG3, CARG4
+    |   mov CARG1, L
+    |  bhs >5
+    |1:
+    if (op == BC_TNEW) {
+      |  lsl CARG2, RC, #21
+      |   lsr CARG3, RC, #11
+      |  asr RC, CARG2, #21
+      |  lsr CARG2, CARG2, #21
+      |  cmn RC, #1
+      |  addeq CARG2, CARG2, #2
+      |  bl extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_
