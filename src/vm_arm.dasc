@@ -3154,4 +3154,59 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_arithpost_fpu d6
     |.else
     |  bl fpcall
-    |.if "intins"
+    |.if "intins" ~= "vm_modi"
+    |  ins_next1
+    |.endif
+    |  b <4
+    |.endif
+    |.endmacro
+    |
+    |.macro ins_arithfp, fpins, fpcall
+    |  ins_arithpre
+    |.if "fpins" ~= "extern" or HFABI
+    |  ins_arithpre_fpu d0, d1
+    |.endif
+    |  ins_arithfallback ins_arithcheck_num
+    |.if "fpins" == "extern"
+    |  .IOS mov RC, BASE
+    |  bl fpcall
+    |  .IOS mov BASE, RC
+    |.elif FPU
+    |  fpins d0, d0, d1
+    |.else
+    |  bl fpcall
+    |.endif
+    |.if ("fpins" ~= "extern" or HFABI) and FPU
+    |  ins_arithpost_fpu d0
+    |.else
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |.endif
+    |.endmacro
+
+  case BC_ADDVN: case BC_ADDNV: case BC_ADDVV:
+    |  ins_arithdn adds, vadd.f64, extern __aeabi_dadd
+    break;
+  case BC_SUBVN: case BC_SUBNV: case BC_SUBVV:
+    |  ins_arithdn subs, vsub.f64, extern __aeabi_dsub
+    break;
+  case BC_MULVN: case BC_MULNV: case BC_MULVV:
+    |  ins_arithdn smull, vmul.f64, extern __aeabi_dmul
+    break;
+  case BC_DIVVN: case BC_DIVNV: case BC_DIVVV:
+    |  ins_arithfp vdiv.f64, extern __aeabi_ddiv
+    break;
+  case BC_MODVN: case BC_MODNV: case BC_MODVV:
+    |  ins_arithdn vm_modi, vm_mod, ->vm_mod
+    break;
+  case BC_POW:
+    |  // NYI: (partial) integer arithmetic.
+    |  ins_arithfp extern, extern pow
+    break;
+
+  case BC_CAT:
+    |  decode_RB8 RC, INS
+    |   decode_RC8 RB, INS
+    |  // RA = dst*8, RC = src_st
