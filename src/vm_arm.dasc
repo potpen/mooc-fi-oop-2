@@ -3209,4 +3209,53 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_CAT:
     |  decode_RB8 RC, INS
     |   decode_RC8 RB, INS
-    |  // RA = dst*8, RC = src_st
+    |  // RA = dst*8, RC = src_start*8, RB = src_end*8  (note: RB/RC swapped!)
+    |  sub CARG3, RB, RC
+    |   str BASE, L->base
+    |  add CARG2, BASE, RB
+    |->BC_CAT_Z:
+    |  // RA = dst*8, RC = src_start*8, CARG2 = top-1
+    |  mov CARG1, L
+    |   str PC, SAVE_PC
+    |  lsr CARG3, CARG3, #3
+    |  bl extern lj_meta_cat		// (lua_State *L, TValue *top, int left)
+    |  // Returns NULL (finished) or TValue * (metamethod).
+    |  ldr BASE, L->base
+    |  cmp CRET1, #0
+    |  bne ->vmeta_binop
+    |  ldrd CARG34, [BASE, RC]
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG34, [BASE, RA]		// Copy result to RA.
+    |   ins_next3
+    break;
+
+  /* -- Constant ops ------------------------------------------------------ */
+
+  case BC_KSTR:
+    |  // RA = dst*8, RC = str_const (~)
+    |  mvn RC, RC
+    |   ins_next1
+    |  ldr CARG1, [KBASE, RC, lsl #2]
+    |  mvn CARG2, #~LJ_TSTR
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+  case BC_KCDATA:
+    |.if FFI
+    |  // RA = dst*8, RC = cdata_const (~)
+    |  mvn RC, RC
+    |   ins_next1
+    |  ldr CARG1, [KBASE, RC, lsl #2]
+    |  mvn CARG2, #~LJ_TCDATA
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |.endif
+    break;
+  case BC_KSHORT:
+    |  // RA = dst*8, (RC = int16_literal)
+    |  mov CARG1, INS, asr #16			// Refetch sign-extended reg.
+    |  mvn CARG2, #~LJ_TISNUM
+    |   in
