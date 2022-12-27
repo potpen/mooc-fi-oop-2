@@ -3318,4 +3318,52 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   add RA, RA, #offsetof(GCfuncL, uvptr)
     |    lsl RC, RC, #3
     |  ldr UPVAL:CARG2, [LFUNC:CARG2, RA]
-    |    ldrd 
+    |    ldrd CARG34, [BASE, RC]
+    |  ldrb RB, UPVAL:CARG2->marked
+    |  ldrb RC, UPVAL:CARG2->closed
+    |    ldr CARG2, UPVAL:CARG2->v
+    |  tst RB, #LJ_GC_BLACK		// isblack(uv)
+    |   add RB, CARG4, #-LJ_TISGCV
+    |  cmpne RC, #0
+    |   strd CARG34, [CARG2]
+    |  bne >2				// Upvalue is closed and black?
+    |1:
+    |   ins_next
+    |
+    |2:  // Check if new value is collectable.
+    |  cmn RB, #-(LJ_TNUMX - LJ_TISGCV)
+    |   ldrbhi RC, GCOBJ:CARG3->gch.marked
+    |  bls <1				// tvisgcv(v)
+    |    sub CARG1, DISPATCH, #-GG_DISP2G
+    |   tst RC, #LJ_GC_WHITES
+    |  // Crossed a write barrier. Move the barrier forward.
+    |.if IOS
+    |  beq <1
+    |  mov RC, BASE
+    |  bl extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |  mov BASE, RC
+    |.else
+    |  blne extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |.endif
+    |  b <1
+    break;
+  case BC_USETS:
+    |  // RA = uvnum*8, RC = str_const (~)
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   lsr RA, RA, #1
+    |   add RA, RA, #offsetof(GCfuncL, uvptr)
+    |    mvn RC, RC
+    |  ldr UPVAL:CARG2, [LFUNC:CARG2, RA]
+    |    ldr STR:CARG3, [KBASE, RC, lsl #2]
+    |  ldrb RB, UPVAL:CARG2->marked
+    |     ldrb RC, UPVAL:CARG2->closed
+    |   ldr CARG2, UPVAL:CARG2->v
+    |    mvn CARG4, #~LJ_TSTR
+    |  tst RB, #LJ_GC_BLACK		// isblack(uv)
+    |    ldrb RB, STR:CARG3->marked
+    |   strd CARG34, [CARG2]
+    |  bne >2
+    |1:
+    |   ins_next
+    |
+    |2:  // Che
