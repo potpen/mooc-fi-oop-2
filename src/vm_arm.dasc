@@ -3258,4 +3258,64 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // RA = dst*8, (RC = int16_literal)
     |  mov CARG1, INS, asr #16			// Refetch sign-extended reg.
     |  mvn CARG2, #~LJ_TISNUM
-    |   in
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+  case BC_KNUM:
+    |  // RA = dst*8, RC = num_const
+    |  lsl RC, RC, #3
+    |   ins_next1
+    |  ldrd CARG12, [KBASE, RC]
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+  case BC_KPRI:
+    |  // RA = dst*8, RC = primitive_type (~)
+    |  add RA, BASE, RA
+    |  mvn RC, RC
+    |   ins_next1
+    |   ins_next2
+    |  str RC, [RA, #4]
+    |   ins_next3
+    break;
+  case BC_KNIL:
+    |  // RA = base*8, RC = end
+    |  add RA, BASE, RA
+    |   add RC, BASE, RC, lsl #3
+    |  mvn CARG1, #~LJ_TNIL
+    |  str CARG1, [RA, #4]
+    |   add RA, RA, #8
+    |1:
+    |  str CARG1, [RA, #4]
+    |  cmp RA, RC
+    |   add RA, RA, #8
+    |  blt <1
+    |  ins_next_
+    break;
+
+  /* -- Upvalue and function ops ------------------------------------------ */
+
+  case BC_UGET:
+    |  // RA = dst*8, RC = uvnum
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   lsl RC, RC, #2
+    |   add RC, RC, #offsetof(GCfuncL, uvptr)
+    |  ldr UPVAL:CARG2, [LFUNC:CARG2, RC]
+    |  ldr CARG2, UPVAL:CARG2->v
+    |  ldrd CARG34, [CARG2]
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG34, [BASE, RA]
+    |   ins_next3
+    break;
+  case BC_USETV:
+    |  // RA = uvnum*8, RC = src
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   lsr RA, RA, #1
+    |   add RA, RA, #offsetof(GCfuncL, uvptr)
+    |    lsl RC, RC, #3
+    |  ldr UPVAL:CARG2, [LFUNC:CARG2, RA]
+    |    ldrd 
