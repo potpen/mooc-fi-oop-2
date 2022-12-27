@@ -3521,4 +3521,47 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktp CARG4, LJ_TNIL
     |  beq >5
     |1:
-    |   ins_n
+    |   ins_next2
+    |  strd CARG34, [BASE, RA]
+    |   ins_next3
+    |
+    |5:  // Check for __index if table value is nil.
+    |  ldr TAB:CARG2, TAB:CARG1->metatable
+    |  cmp TAB:CARG2, #0
+    |  beq <1				// No metatable: done.
+    |  ldrb CARG2, TAB:CARG2->nomm
+    |  tst CARG2, #1<<MM_index
+    |  bne <1				// 'no __index' flag set: done.
+    |  decode_RB8 RB, INS		// Restore RB.
+    |  b ->vmeta_tgetv
+    |
+    |9:
+    |  checktp CARG4, LJ_TSTR		// String key?
+    |   moveq STR:RC, CARG3
+    |  beq ->BC_TGETS_Z
+    |  b ->vmeta_tgetv
+    break;
+  case BC_TGETS:
+    |  decode_RB8 RB, INS
+    |   and RC, RC, #255
+    |  // RA = dst*8, RB = table*8, RC = str_const (~)
+    |  ldrd CARG12, [BASE, RB]
+    |   mvn RC, RC
+    |   ldr STR:RC, [KBASE, RC, lsl #2]  // STALL: early RC.
+    |  checktab CARG2, ->vmeta_tgets1
+    |->BC_TGETS_Z:
+    |  // (TAB:RB =) TAB:CARG1 = GCtab *, STR:RC = GCstr *, RA = dst*8
+    |  ldr CARG3, TAB:CARG1->hmask
+    |   ldr CARG4, STR:RC->sid
+    |    ldr NODE:INS, TAB:CARG1->node
+    |     mov TAB:RB, TAB:CARG1
+    |  and CARG3, CARG3, CARG4			// idx = str->sid & tab->hmask
+    |  add CARG3, CARG3, CARG3, lsl #1
+    |    add NODE:INS, NODE:INS, CARG3, lsl #3	// node = tab->node + idx*3*8
+    |1:
+    |  ldrd CARG12, NODE:INS->key  // STALL: early NODE:INS.
+    |   ldrd CARG34, NODE:INS->val
+    |    ldr NODE:INS, NODE:INS->next
+    |  checktp CARG2, LJ_TSTR
+    |  cmpeq CARG1, STR:RC
+    |  bne >4
