@@ -3467,4 +3467,58 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  lsr CARG2, CARG2, #21
       |  cmn RC, #1
       |  addeq CARG2, CARG2, #2
-      |  bl extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_
+      |  bl extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_t hbits)
+      |  // Returns GCtab *.
+    } else {
+      |  ldr CARG2, [KBASE, RC, lsl #2]
+      |  bl extern lj_tab_dup  // (lua_State *L, Table *kt)
+      |  // Returns GCtab *.
+    }
+    |  ldr BASE, L->base
+    |  mvn CARG2, #~LJ_TTAB
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |5:
+    |  bl extern lj_gc_step_fixtop  // (lua_State *L)
+    |  mov CARG1, L
+    |  b <1
+    break;
+
+  case BC_GGET:
+    |  // RA = dst*8, RC = str_const (~)
+  case BC_GSET:
+    |  // RA = dst*8, RC = str_const (~)
+    |  ldr LFUNC:CARG2, [BASE, FRAME_FUNC]
+    |   mvn RC, RC
+    |  ldr TAB:CARG1, LFUNC:CARG2->env
+    |   ldr STR:RC, [KBASE, RC, lsl #2]
+    if (op == BC_GGET) {
+      |  b ->BC_TGETS_Z
+    } else {
+      |  b ->BC_TSETS_Z
+    }
+    break;
+
+  case BC_TGETV:
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = dst*8, RB = table*8, RC = key*8
+    |  ldrd TAB:CARG12, [BASE, RB]
+    |   ldrd CARG34, [BASE, RC]
+    |  checktab CARG2, ->vmeta_tgetv  // STALL: load CARG12.
+    |   checktp CARG4, LJ_TISNUM	// Integer key?
+    |  ldreq CARG4, TAB:CARG1->array
+    |    ldreq CARG2, TAB:CARG1->asize
+    |   bne >9
+    |
+    |  add CARG4, CARG4, CARG3, lsl #3
+    |    cmp CARG3, CARG2		// In array part?
+    |  ldrdlo CARG34, [CARG4]
+    |    bhs ->vmeta_tgetv
+    |   ins_next1  // Overwrites RB!
+    |  checktp CARG4, LJ_TNIL
+    |  beq >5
+    |1:
+    |   ins_n
