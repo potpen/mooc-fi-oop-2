@@ -3088,4 +3088,70 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  vldr reg2, [RB]
     |  vldr reg1, [RC]
     ||} else {
-    |  vldr re
+    |  vldr reg1, [RB]
+    |  vldr reg2, [RC]
+    ||}
+    |.endif
+    |.endmacro
+    |
+    |.macro ins_arithpost_fpu, reg
+    |   ins_next1
+    |  add RA, BASE, RA
+    |   ins_next2
+    |  vstr reg, [RA]
+    |   ins_next3
+    |.endmacro
+    |
+    |.macro ins_arithfallback, ins
+    ||switch (vk) {
+    ||case 0:
+    |   ins ->vmeta_arith_vn
+    ||  break;
+    ||case 1:
+    |   ins ->vmeta_arith_nv
+    ||  break;
+    ||default:
+    |   ins ->vmeta_arith_vv
+    ||  break;
+    ||}
+    |.endmacro
+    |
+    |.macro ins_arithdn, intins, fpins, fpcall
+    |  ins_arithpre
+    |.if "intins" ~= "vm_modi" and not FPU
+    |   ins_next1
+    |.endif
+    |  ins_arithcheck_int >5
+    |.if "intins" == "smull"
+    |  smull CARG1, RC, CARG3, CARG1
+    |  cmp RC, CARG1, asr #31
+    |  ins_arithfallback bne
+    |.elif "intins" == "vm_modi"
+    |  movs CARG2, CARG3
+    |  ins_arithfallback beq
+    |  bl ->vm_modi
+    |  mvn CARG2, #~LJ_TISNUM
+    |.else
+    |  intins CARG1, CARG1, CARG3
+    |  ins_arithfallback bvs
+    |.endif
+    |4:
+    |.if "intins" == "vm_modi" or FPU
+    |   ins_next1
+    |.endif
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    |5:  // FP variant.
+    |  ins_arithpre_fpu d6, d7
+    |  ins_arithfallback ins_arithcheck_num
+    |.if FPU
+    |.if "intins" == "vm_modi"
+    |  bl fpcall
+    |.else
+    |  fpins d6, d6, d7
+    |.endif
+    |  ins_arithpost_fpu d6
+    |.else
+    |  bl fpcall
+    |.if "intins"
