@@ -3565,3 +3565,51 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktp CARG2, LJ_TSTR
     |  cmpeq CARG1, STR:RC
     |  bne >4
+    |   checktp CARG4, LJ_TNIL
+    |   beq >5
+    |3:
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG34, [BASE, RA]
+    |   ins_next3
+    |
+    |4:  // Follow hash chain.
+    |  cmp NODE:INS, #0
+    |  bne <1
+    |  // End of hash chain: key not found, nil result.
+    |
+    |5:  // Check for __index if table value is nil.
+    |  ldr TAB:CARG1, TAB:RB->metatable
+    |   mov CARG3, #0  // Optional clear of undef. value (during load stall).
+    |   mvn CARG4, #~LJ_TNIL
+    |  cmp TAB:CARG1, #0
+    |  beq <3				// No metatable: done.
+    |  ldrb CARG2, TAB:CARG1->nomm
+    |  tst CARG2, #1<<MM_index
+    |  bne <3				// 'no __index' flag set: done.
+    |  b ->vmeta_tgets
+    break;
+  case BC_TGETB:
+    |  decode_RB8 RB, INS
+    |   and RC, RC, #255
+    |  // RA = dst*8, RB = table*8, RC = index
+    |  ldrd CARG12, [BASE, RB]
+    |  checktab CARG2, ->vmeta_tgetb  // STALL: load CARG12.
+    |   ldr CARG3, TAB:CARG1->asize
+    |  ldr CARG4, TAB:CARG1->array
+    |  lsl CARG2, RC, #3
+    |   cmp RC, CARG3
+    |  ldrdlo CARG34, [CARG4, CARG2]
+    |   bhs ->vmeta_tgetb
+    |   ins_next1  // Overwrites RB!
+    |  checktp CARG4, LJ_TNIL
+    |  beq >5
+    |1:
+    |   ins_next2
+    |  strd CARG34, [BASE, RA]
+    |   ins_next3
+    |
+    |5:  // Check for __index if table value is nil.
+    |  ldr TAB:CARG2, TAB:CARG1->metatable
+    |  cmp TAB:CARG2, #0
+    |  beq <1				// No metatabl
