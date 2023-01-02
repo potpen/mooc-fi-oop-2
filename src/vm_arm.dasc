@@ -3612,4 +3612,52 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |5:  // Check for __index if table value is nil.
     |  ldr TAB:CARG2, TAB:CARG1->metatable
     |  cmp TAB:CARG2, #0
-    |  beq <1				// No metatabl
+    |  beq <1				// No metatable: done.
+    |  ldrb CARG2, TAB:CARG2->nomm
+    |  tst CARG2, #1<<MM_index
+    |  bne <1				// 'no __index' flag set: done.
+    |  b ->vmeta_tgetb
+    break;
+  case BC_TGETR:
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = dst*8, RB = table*8, RC = key*8
+    |  ldr TAB:CARG1, [BASE, RB]
+    |   ldr CARG2, [BASE, RC]
+    |  ldr CARG4, TAB:CARG1->array
+    |    ldr CARG3, TAB:CARG1->asize
+    |  add CARG4, CARG4, CARG2, lsl #3
+    |    cmp CARG2, CARG3		// In array part?
+    |    bhs ->vmeta_tgetr
+    |  ldrd CARG12, [CARG4]
+    |->BC_TGETR_Z:
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, [BASE, RA]
+    |   ins_next3
+    break;
+
+  case BC_TSETV:
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = src*8, RB = table*8, RC = key*8
+    |  ldrd TAB:CARG12, [BASE, RB]
+    |   ldrd CARG34, [BASE, RC]
+    |  checktab CARG2, ->vmeta_tsetv  // STALL: load CARG12.
+    |   checktp CARG4, LJ_TISNUM	// Integer key?
+    |  ldreq CARG2, TAB:CARG1->array
+    |    ldreq CARG4, TAB:CARG1->asize
+    |   bne >9
+    |
+    |  add CARG2, CARG2, CARG3, lsl #3
+    |    cmp CARG3, CARG4		// In array part?
+    |  ldrlo INS, [CARG2, #4]
+    |    bhs ->vmeta_tsetv
+    |   ins_next1  // Overwrites RB!
+    |  checktp INS, LJ_TNIL
+    |  ldrb INS, TAB:CARG1->marked
+    |   ldrd CARG34, [BASE, RA]
+    |  beq >5
+    |1:
+    |  tst INS, #LJ_GC_BLACK		// isblack(table)
+    |
