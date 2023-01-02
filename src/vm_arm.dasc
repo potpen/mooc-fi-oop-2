@@ -3703,4 +3703,47 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    ldr NODE:INS, TAB:CARG1->node
     |     mov TAB:RB, TAB:CARG1
     |  and CARG3, CARG3, CARG4			// idx = str->sid & tab->hmask
-    |  add CARG3, CARG3, 
+    |  add CARG3, CARG3, CARG3, lsl #1
+    |   mov CARG4, #0
+    |    add NODE:INS, NODE:INS, CARG3, lsl #3	// node = tab->node + idx*3*8
+    |   strb CARG4, TAB:RB->nomm		// Clear metamethod cache.
+    |1:
+    |  ldrd CARG12, NODE:INS->key
+    |   ldr CARG4, NODE:INS->val.it
+    |    ldr NODE:CARG3, NODE:INS->next
+    |  checktp CARG2, LJ_TSTR
+    |  cmpeq CARG1, STR:RC
+    |  bne >5
+    |  ldrb CARG2, TAB:RB->marked
+    |   checktp CARG4, LJ_TNIL		// Key found, but nil value?
+    |    ldrd CARG34, [BASE, RA]
+    |   beq >4
+    |2:
+    |  tst CARG2, #LJ_GC_BLACK		// isblack(table)
+    |    strd CARG34, NODE:INS->val
+    |  bne >7
+    |3:
+    |   ins_next
+    |
+    |4:  // Check for __newindex if previous value is nil.
+    |  ldr TAB:CARG1, TAB:RB->metatable
+    |  cmp TAB:CARG1, #0
+    |  beq <2				// No metatable: done.
+    |  ldrb CARG1, TAB:CARG1->nomm
+    |  tst CARG1, #1<<MM_newindex
+    |  bne <2				// 'no __newindex' flag set: done.
+    |  b ->vmeta_tsets
+    |
+    |5:  // Follow hash chain.
+    |  movs NODE:INS, NODE:CARG3
+    |  bne <1
+    |  // End of hash chain: key not found, add a new one.
+    |
+    |  // But check for __newindex first.
+    |  ldr TAB:CARG1, TAB:RB->metatable
+    |   mov CARG3, TMPDp
+    |   str PC, SAVE_PC
+    |  cmp TAB:CARG1, #0		// No metatable: continue.
+    |   str BASE, L->base
+    |  ldrbne CARG2, TAB:CARG1->nomm
+    |  
