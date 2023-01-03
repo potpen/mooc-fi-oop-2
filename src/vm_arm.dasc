@@ -3793,4 +3793,50 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |5:  // Check for __newindex if previous value is nil.
     |  ldr TAB:RA, TAB:CARG1->metatable
-    |  cm
+    |  cmp TAB:RA, #0
+    |  beq <1				// No metatable: done.
+    |  ldrb RA, TAB:RA->nomm
+    |  tst RA, #1<<MM_newindex
+    |  bne <1				// 'no __newindex' flag set: done.
+    |  ldr INS, [PC, #-4]		// Restore INS.
+    |  decode_RA8 RA, INS
+    |  b ->vmeta_tsetb
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:CARG1, INS, CARG3
+    |  b <2
+    break;
+  case BC_TSETR:
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = src*8, RB = table*8, RC = key*8
+    |  ldr TAB:CARG2, [BASE, RB]
+    |   ldr CARG3, [BASE, RC]
+    |     ldrb INS, TAB:CARG2->marked
+    |  ldr CARG1, TAB:CARG2->array
+    |    ldr CARG4, TAB:CARG2->asize
+    |     tst INS, #LJ_GC_BLACK		// isblack(table)
+    |  add CARG1, CARG1, CARG3, lsl #3
+    |     bne >7
+    |2:
+    |    cmp CARG3, CARG4		// In array part?
+    |    bhs ->vmeta_tsetr
+    |->BC_TSETR_Z:
+    |  ldrd CARG34, [BASE, RA]
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG34, [CARG1]
+    |   ins_next3
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:CARG2, INS, RB
+    |  b <2
+    break;
+
+  case BC_TSETM:
+    |  // RA = base*8 (table at base-1), RC = num_const (start index)
+    |  add RA, BASE, RA
+    |1:
+    |   ldr RB, SAVE_MULTRES
+    |  ldr TAB:CARG2, [RA, #-8]		// Guaranteed to be a table.
+    |  l
