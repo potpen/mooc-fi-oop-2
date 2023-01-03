@@ -3746,4 +3746,51 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp TAB:CARG1, #0		// No metatable: continue.
     |   str BASE, L->base
     |  ldrbne CARG2, TAB:CARG1->nomm
-    |  
+    |   mov CARG1, L
+    |  beq >6
+    |  tst CARG2, #1<<MM_newindex
+    |  beq ->vmeta_tsets		// 'no __newindex' flag NOT set: check.
+    |6:
+    |  mvn CARG4, #~LJ_TSTR
+    |   str STR:RC, TMPDlo
+    |   mov CARG2, TAB:RB
+    |  str CARG4, TMPDhi
+    |  bl extern lj_tab_newkey		// (lua_State *L, GCtab *t, TValue *k)
+    |  // Returns TValue *.
+    |  ldr BASE, L->base
+    |  ldrd CARG34, [BASE, RA]
+    |  strd CARG34, [CRET1]
+    |  b <3				// No 2nd write barrier needed.
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:RB, CARG2, CARG3
+    |  b <3
+    break;
+  case BC_TSETB:
+    |  decode_RB8 RB, INS
+    |   and RC, RC, #255
+    |  // RA = src*8, RB = table*8, RC = index
+    |  ldrd CARG12, [BASE, RB]
+    |  checktab CARG2, ->vmeta_tsetb  // STALL: load CARG12.
+    |   ldr CARG3, TAB:CARG1->asize
+    |  ldr RB, TAB:CARG1->array
+    |  lsl CARG2, RC, #3
+    |   cmp RC, CARG3
+    |  ldrdlo CARG34, [CARG2, RB]!
+    |   bhs ->vmeta_tsetb
+    |   ins_next1  // Overwrites RB!
+    |  checktp CARG4, LJ_TNIL
+    |  ldrb INS, TAB:CARG1->marked
+    |   ldrd CARG34, [BASE, RA]
+    |  beq >5
+    |1:
+    |  tst INS, #LJ_GC_BLACK		// isblack(table)
+    |    strd CARG34, [CARG2]
+    |  bne >7
+    |2:
+    |   ins_next2
+    |   ins_next3
+    |
+    |5:  // Check for __newindex if previous value is nil.
+    |  ldr TAB:RA, TAB:CARG1->metatable
+    |  cm
