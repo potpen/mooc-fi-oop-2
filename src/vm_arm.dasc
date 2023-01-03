@@ -3839,4 +3839,49 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |1:
     |   ldr RB, SAVE_MULTRES
     |  ldr TAB:CARG2, [RA, #-8]		// Guaranteed to be a table.
-    |  l
+    |  ldr CARG1, [KBASE, RC, lsl #3]	// Integer constant is in lo-word.
+    |   subs RB, RB, #8
+    |  ldr CARG4, TAB:CARG2->asize
+    |   beq >4				// Nothing to copy?
+    |  add CARG3, CARG1, RB, lsr #3
+    |  cmp CARG3, CARG4
+    |   ldr CARG4, TAB:CARG2->array
+    |    add RB, RA, RB
+    |  bhi >5
+    |   add INS, CARG4, CARG1, lsl #3
+    |    ldrb CARG1, TAB:CARG2->marked
+    |3:  // Copy result slots to table.
+    |   ldrd CARG34, [RA], #8
+    |   strd CARG34, [INS], #8
+    |  cmp RA, RB
+    |  blo <3
+    |    tst CARG1, #LJ_GC_BLACK	// isblack(table)
+    |    bne >7
+    |4:
+    |  ins_next
+    |
+    |5:  // Need to resize array part.
+    |   str BASE, L->base
+    |  mov CARG1, L
+    |   str PC, SAVE_PC
+    |  bl extern lj_tab_reasize		// (lua_State *L, GCtab *t, int nasize)
+    |  // Must not reallocate the stack.
+    |  .IOS ldr BASE, L->base
+    |  b <1
+    |
+    |7:  // Possible table write barrier for any value. Skip valiswhite check.
+    |  barrierback TAB:CARG2, CARG1, CARG3
+    |  b <4
+    break;
+
+  /* -- Calls and vararg handling ----------------------------------------- */
+
+  case BC_CALLM:
+    |  // RA = base*8, (RB = nresults+1,) RC = extra_nargs
+    |  ldr CARG1, SAVE_MULTRES
+    |  decode_RC8 NARGS8:RC, INS
+    |  add NARGS8:RC, NARGS8:RC, CARG1
+    |  b ->BC_CALL_Z
+    break;
+  case BC_CALL:
+    |  decode_RC8 NARGS8:RC, I
