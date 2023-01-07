@@ -4026,4 +4026,55 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     break;
 
   case BC_ISNEXT:
-  
+    |  // RA = base*8, RC = target (points to ITERN)
+    |  add RA, BASE, RA
+    |     add RC, PC, RC, lsl #2
+    |  ldrd CFUNC:CARG12, [RA, #-24]
+    |   ldr CARG3, [RA, #-12]
+    |    ldr CARG4, [RA, #-4]
+    |  checktp CARG2, LJ_TFUNC
+    |  ldrbeq CARG1, CFUNC:CARG1->ffid
+    |   checktpeq CARG3, LJ_TTAB
+    |    checktpeq CARG4, LJ_TNIL
+    |  cmpeq CARG1, #FF_next_N
+    |     subeq PC, RC, #0x20000
+    |  bne >5
+    |   ins_next1
+    |   ins_next2
+    |  mov CARG1, #0
+    |  mvn CARG2, #~LJ_KEYINDEX
+    |  strd CARG1, [RA, #-8]		// Initialize control var.
+    |1:
+    |   ins_next3
+    |5:  // Despecialize bytecode if any of the checks fail.
+    |  mov CARG1, #BC_JMP
+    |   mov OP, #BC_ITERC
+    |  strb CARG1, [PC, #-4]
+    |   sub PC, RC, #0x20000
+    |.if JIT
+    |   ldrb CARG1, [PC]
+    |   cmp CARG1, #BC_ITERN
+    |   bne >6
+    |.endif
+    |   strb OP, [PC]			// Subsumes ins_next1.
+    |   ins_next2
+    |  b <1
+    |.if JIT
+    |6:  // Unpatch JLOOP.
+    |  ldr CARG1, [DISPATCH, #DISPATCH_J(trace)]
+    |  ldrh CARG2, [PC, #2]
+    |  ldr TRACE:CARG1, [CARG1, CARG2, lsl #2]
+    |  // Subsumes ins_next1 and ins_next2.
+    |  ldr INS, TRACE:CARG1->startins
+    |  bfi INS, OP, #0, #8
+    |  str INS, [PC], #4
+    |  b <1
+    |.endif
+    break;
+
+  case BC_VARG:
+    |  decode_RB8 RB, INS
+    |   decode_RC8 RC, INS
+    |  // RA = base*8, RB = (nresults+1)*8, RC = numparams*8
+    |  ldr CARG1, [BASE, FRAME_PC]
+    | 
