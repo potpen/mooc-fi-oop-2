@@ -4299,4 +4299,74 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     } else if (op == BC_IFORL) {
       |  suble PC, RC, #0x20000
     }
-    i
+    if (vk) {
+      |  strd CARG12, FOR_IDX
+    }
+    |2:
+    |   ins_next1
+    |   ins_next2
+    |  strd CARG12, FOR_EXT
+    if (op == BC_JFORI || op == BC_JFORL) {
+      |  ble =>BC_JLOOP
+    }
+    |3:
+    |   ins_next3
+    |
+    |4:  // Invert check for negative step.
+    if (!vk) {
+      |  cmp CARG3, CARG1
+    } else {
+      |  cmp CARG4, CARG1
+    }
+    |  b <1
+    |
+    |5:  // FP loop.
+    if (!vk) {
+      |  cmnlo CARG4, #-LJ_TISNUM
+      |  cmnlo RB, #-LJ_TISNUM
+      |  bhs ->vmeta_for
+      |.if FPU
+      |  vldr d0, FOR_IDX
+      |  vldr d1, FOR_STOP
+      |  cmp RB, #0
+      |  vstr d0, FOR_EXT
+      |.else
+      |  cmp RB, #0
+      |   strd CARG12, FOR_EXT
+      |  blt >8
+      |.endif
+    } else {
+      |.if FPU
+      |  vldr d0, FOR_IDX
+      |  vldr d2, FOR_STEP
+      |  vldr d1, FOR_STOP
+      |  cmp CARG4, #0
+      |  vadd.f64 d0, d0, d2
+      |.else
+      |  cmp CARG4, #0
+      |  blt >8
+      |  bl extern __aeabi_dadd
+      |   strd CARG12, FOR_IDX
+      |  ldrd CARG34, FOR_STOP
+      |   strd CARG12, FOR_EXT
+      |.endif
+    }
+    |6:
+    |.if FPU
+    |  vcmpge.f64 d0, d1
+    |  vcmplt.f64 d1, d0
+    |  vmrs
+    |.else
+    |  bl extern __aeabi_cdcmple
+    |.endif
+    if (vk) {
+      |.if FPU
+      |  vstr d0, FOR_IDX
+      |  vstr d0, FOR_EXT
+      |.endif
+    }
+    if (op == BC_FORI) {
+      |  subhi PC, RC, #0x20000
+    } else if (op == BC_JFORI) {
+      |  sub PC, RC, #0x20000
+      |  ldrhls
