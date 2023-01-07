@@ -3884,4 +3884,54 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  b ->BC_CALL_Z
     break;
   case BC_CALL:
-    |  decode_RC8 NARGS8:RC, I
+    |  decode_RC8 NARGS8:RC, INS
+    |  // RA = base*8, (RB = nresults+1,) RC = (nargs+1)*8
+    |->BC_CALL_Z:
+    |  mov RB, BASE			// Save old BASE for vmeta_call.
+    |  ldrd CARG34, [BASE, RA]!
+    |   sub NARGS8:RC, NARGS8:RC, #8
+    |   add BASE, BASE, #8
+    |  checkfunc CARG4, ->vmeta_call
+    |  ins_call
+    break;
+
+  case BC_CALLMT:
+    |  // RA = base*8, (RB = 0,) RC = extra_nargs
+    |  ldr CARG1, SAVE_MULTRES
+    |  add NARGS8:RC, CARG1, RC, lsl #3
+    |  b ->BC_CALLT1_Z
+    break;
+  case BC_CALLT:
+    |  lsl NARGS8:RC, RC, #3
+    |  // RA = base*8, (RB = 0,) RC = (nargs+1)*8
+    |->BC_CALLT1_Z:
+    |  ldrd LFUNC:CARG34, [RA, BASE]!
+    |   sub NARGS8:RC, NARGS8:RC, #8
+    |   add RA, RA, #8
+    |  checkfunc CARG4, ->vmeta_callt
+    |  ldr PC, [BASE, FRAME_PC]
+    |->BC_CALLT2_Z:
+    |   mov RB, #0
+    |   ldrb CARG4, LFUNC:CARG3->ffid
+    |  tst PC, #FRAME_TYPE
+    |  bne >7
+    |1:
+    |  str LFUNC:CARG3, [BASE, FRAME_FUNC]  // Copy function down, but keep PC.
+    |  cmp NARGS8:RC, #0
+    |  beq >3
+    |2:
+    |  ldrd CARG12, [RA, RB]
+    |   add INS, RB, #8
+    |   cmp INS, NARGS8:RC
+    |  strd CARG12, [BASE, RB]
+    |    mov RB, INS
+    |   bne <2
+    |3:
+    |  cmp CARG4, #1			// (> FF_C) Calling a fast function?
+    |  bhi >5
+    |4:
+    |  ins_callt
+    |
+    |5:  // Tailcall to a fast function with a Lua frame below.
+    |  ldr INS, [PC, #-4]
+    |  decode_RA8 RA, 
