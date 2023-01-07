@@ -3934,4 +3934,49 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |5:  // Tailcall to a fast function with a Lua frame below.
     |  ldr INS, [PC, #-4]
-    |  decode_RA8 RA, 
+    |  decode_RA8 RA, INS
+    |  sub CARG1, BASE, RA
+    |  ldr LFUNC:CARG1, [CARG1, #-16]
+    |  ldr CARG1, LFUNC:CARG1->field_pc
+    |  ldr KBASE, [CARG1, #PC2PROTO(k)]
+    |  b <4
+    |
+    |7:  // Tailcall from a vararg function.
+    |  eor PC, PC, #FRAME_VARG
+    |  tst PC, #FRAME_TYPEP		// Vararg frame below?
+    |  movne CARG4, #0			// Clear ffid if no Lua function below.
+    |  bne <1
+    |  sub BASE, BASE, PC
+    |  ldr PC, [BASE, FRAME_PC]
+    |  tst PC, #FRAME_TYPE
+    |  movne CARG4, #0			// Clear ffid if no Lua function below.
+    |  b <1
+    break;
+
+  case BC_ITERC:
+    |  // RA = base*8, (RB = nresults+1, RC = nargs+1 (2+1))
+    |  add RA, BASE, RA
+    |   mov RB, BASE			// Save old BASE for vmeta_call.
+    |  ldrd CARG34, [RA, #-16]
+    |   ldrd CARG12, [RA, #-8]
+    |    add BASE, RA, #8
+    |  strd CARG34, [RA, #8]		// Copy state.
+    |   strd CARG12, [RA, #16]		// Copy control var.
+    |  // STALL: locked CARG34.
+    |  ldrd LFUNC:CARG34, [RA, #-24]
+    |    mov NARGS8:RC, #16		// Iterators get 2 arguments.
+    |  // STALL: load CARG34.
+    |  strd LFUNC:CARG34, [RA]		// Copy callable.
+    |  checkfunc CARG4, ->vmeta_call
+    |  ins_call
+    break;
+
+  case BC_ITERN:
+    |.if JIT
+    |  hotloop
+    |.endif
+    |->vm_IITERN:
+    |  // RA = base*8, (RB = nresults+1, RC = nargs+1 (2+1))
+    |  add RA, BASE, RA
+    |  ldr TAB:RB, [RA, #-16]
+    |  ldr CARG1, [RA
