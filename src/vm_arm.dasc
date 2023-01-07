@@ -4240,4 +4240,63 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   |.define FOR_IDX,  [RA];      .define FOR_TIDX,  [RA, #4]
   |.define FOR_STOP, [RA, #8];  .define FOR_TSTOP, [RA, #12]
-  |.define FOR_STEP, [RA, #1
+  |.define FOR_STEP, [RA, #16]; .define FOR_TSTEP, [RA, #20]
+  |.define FOR_EXT,  [RA, #24]; .define FOR_TEXT,  [RA, #28]
+
+  case BC_FORL:
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_IFORL follows.
+    break;
+
+  case BC_JFORI:
+  case BC_JFORL:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_FORI:
+  case BC_IFORL:
+    |  // RA = base*8, RC = target (after end of loop or start of loop)
+    vk = (op == BC_IFORL || op == BC_JFORL);
+    |  ldrd CARG12, [RA, BASE]!
+    if (op != BC_JFORL) {
+      |   add RC, PC, RC, lsl #2
+    }
+    if (!vk) {
+      |  ldrd CARG34, FOR_STOP
+      |   checktp CARG2, LJ_TISNUM
+      |  ldr RB, FOR_TSTEP
+      |   bne >5
+      |  checktp CARG4, LJ_TISNUM
+      |   ldr CARG4, FOR_STEP
+      |  checktpeq RB, LJ_TISNUM
+      |  bne ->vmeta_for
+      |  cmp CARG4, #0
+      |  blt >4
+      |  cmp CARG1, CARG3
+    } else {
+      |  ldrd CARG34, FOR_STEP
+      |   checktp CARG2, LJ_TISNUM
+      |   bne >5
+      |  adds CARG1, CARG1, CARG3
+      |   ldr CARG4, FOR_STOP
+      if (op == BC_IFORL) {
+	|  addvs RC, PC, #0x20000		// Overflow: prevent branch.
+      } else {
+	|  bvs >2				// Overflow: do not enter mcode.
+      }
+      |  cmp CARG3, #0
+      |  blt >4
+      |  cmp CARG1, CARG4
+    }
+    |1:
+    if (op == BC_FORI) {
+      |  subgt PC, RC, #0x20000
+    } else if (op == BC_JFORI) {
+      |  sub PC, RC, #0x20000
+      |  ldrhle RC, [PC, #-2]
+    } else if (op == BC_IFORL) {
+      |  suble PC, RC, #0x20000
+    }
+    i
