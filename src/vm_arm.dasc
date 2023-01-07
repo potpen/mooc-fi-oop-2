@@ -3979,4 +3979,51 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // RA = base*8, (RB = nresults+1, RC = nargs+1 (2+1))
     |  add RA, BASE, RA
     |  ldr TAB:RB, [RA, #-16]
-    |  ldr CARG1, [RA
+    |  ldr CARG1, [RA, #-8]		// Get index from control var.
+    |  ldr INS, TAB:RB->asize
+    |   ldr CARG2, TAB:RB->array
+    |    add PC, PC, #4
+    |1:  // Traverse array part.
+    |  subs RC, CARG1, INS
+    |   add CARG3, CARG2, CARG1, lsl #3
+    |  bhs >5				// Index points after array part?
+    |   ldrd CARG34, [CARG3]
+    |   checktp CARG4, LJ_TNIL
+    |   addeq CARG1, CARG1, #1		// Skip holes in array part.
+    |   beq <1
+    |  ldrh RC, [PC, #-2]
+    |   mvn CARG2, #~LJ_TISNUM
+    |    strd CARG34, [RA, #8]
+    |  add RC, PC, RC, lsl #2
+    |    add RB, CARG1, #1
+    |   strd CARG12, [RA]
+    |  sub PC, RC, #0x20000
+    |    str RB, [RA, #-8]		// Update control var.
+    |3:
+    |  ins_next
+    |
+    |5:  // Traverse hash part.
+    |  ldr CARG4, TAB:RB->hmask
+    |   ldr NODE:RB, TAB:RB->node
+    |6:
+    |   add CARG1, RC, RC, lsl #1
+    |  cmp RC, CARG4			// End of iteration? Branch to ITERL+1.
+    |   add NODE:CARG3, NODE:RB, CARG1, lsl #3  // node = tab->node + idx*3*8
+    |  bhi <3
+    |   ldrd CARG12, NODE:CARG3->val
+    |   checktp CARG2, LJ_TNIL
+    |   add RC, RC, #1
+    |   beq <6				// Skip holes in hash part.
+    |  ldrh RB, [PC, #-2]
+    |   add RC, RC, INS
+    |    ldrd CARG34, NODE:CARG3->key
+    |   str RC, [RA, #-8]		// Update control var.
+    |   strd CARG12, [RA, #8]
+    |  add RC, PC, RB, lsl #2
+    |  sub PC, RC, #0x20000
+    |    strd CARG34, [RA]
+    |  b <3
+    break;
+
+  case BC_ISNEXT:
+  
