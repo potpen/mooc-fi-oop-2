@@ -4188,4 +4188,56 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  str CARG2, [BASE, #-12]
     |  b <5
     |
-    |->BC_RETV1_Z:  // Non-standard return ca
+    |->BC_RETV1_Z:  // Non-standard return case.
+    |  add RA, BASE, RA
+    |->BC_RETV2_Z:
+    |  tst CARG2, #FRAME_TYPEP
+    |  bne ->vm_return
+    |  // Return from vararg function: relocate BASE down.
+    |  sub BASE, BASE, CARG2
+    |  ldr PC, [BASE, FRAME_PC]
+    |  b <1
+    break;
+
+  case BC_RET0: case BC_RET1:
+    |  // RA = results*8, RC = nresults+1
+    |  ldr PC, [BASE, FRAME_PC]
+    |   lsl RC, RC, #3
+    |   str RC, SAVE_MULTRES
+    |  ands CARG1, PC, #FRAME_TYPE
+    |   eor CARG2, PC, #FRAME_VARG
+    |   ldreq INS, [PC, #-4]
+    |  bne ->BC_RETV1_Z
+    if (op == BC_RET1) {
+      |  ldrd CARG12, [BASE, RA]
+    }
+    |  sub CARG4, BASE, #8
+    |   decode_RA8 RA, INS
+    if (op == BC_RET1) {
+      |  strd CARG12, [CARG4]
+    }
+    |  sub BASE, CARG4, RA
+    |   decode_RB8 RB, INS
+    |  ldr LFUNC:CARG1, [BASE, FRAME_FUNC]
+    |5:
+    |  cmp RB, RC
+    |  bhi >6
+    |  ldr CARG2, LFUNC:CARG1->field_pc
+    |   ins_next1
+    |   ins_next2
+    |  ldr KBASE, [CARG2, #PC2PROTO(k)]
+    |   ins_next3
+    |
+    |6:  // Fill up results with nil.
+    |  sub CARG2, CARG4, #4
+    |  mvn CARG3, #~LJ_TNIL
+    |  str CARG3, [CARG2, RC]
+    |  add RC, RC, #8
+    |  b <5
+    break;
+
+  /* -- Loops and branches ------------------------------------------------ */
+
+  |.define FOR_IDX,  [RA];      .define FOR_TIDX,  [RA, #4]
+  |.define FOR_STOP, [RA, #8];  .define FOR_TSTOP, [RA, #12]
+  |.define FOR_STEP, [RA, #1
