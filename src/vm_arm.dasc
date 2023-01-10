@@ -4369,4 +4369,60 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  subhi PC, RC, #0x20000
     } else if (op == BC_JFORI) {
       |  sub PC, RC, #0x20000
-      |  ldrhls
+      |  ldrhls RC, [PC, #-2]
+      |  bls =>BC_JLOOP
+    } else if (op == BC_IFORL) {
+      |  subls PC, RC, #0x20000
+    } else {
+      |  bls =>BC_JLOOP
+    }
+    |  ins_next1
+    |  ins_next2
+    |  b <3
+    |
+    |.if not FPU
+    |8:  // Invert check for negative step.
+    if (vk) {
+      |  bl extern __aeabi_dadd
+      |  strd CARG12, FOR_IDX
+      |  strd CARG12, FOR_EXT
+    }
+    |  mov CARG3, CARG1
+    |  mov CARG4, CARG2
+    |  ldrd CARG12, FOR_STOP
+    |  b <6
+    |.endif
+    break;
+
+  case BC_ITERL:
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_IITERL follows.
+    break;
+
+  case BC_JITERL:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_IITERL:
+    |  // RA = base*8, RC = target
+    |  ldrd CARG12, [RA, BASE]!
+    if (op == BC_JITERL) {
+      |  cmn CARG2, #-LJ_TNIL		// Stop if iterator returned nil.
+      |  strdne CARG12, [RA, #-8]
+      |  bne =>BC_JLOOP
+    } else {
+      |   add RC, PC, RC, lsl #2
+      |  // STALL: load CARG12.
+      |  cmn CARG2, #-LJ_TNIL		// Stop if iterator returned nil.
+      |  subne PC, RC, #0x20000		// Otherwise save control var + branch.
+      |  strdne CARG12, [RA, #-8]
+    }
+    |  ins_next
+    break;
+
+  case BC_LOOP:
+    |  // RA = base*8, RC = target (loop extent)
+    |  // Note: RA/RC is only used by trace recorder to determine scope/extent
+    |  // This opcode does NOT jump, it's only purpose is to
