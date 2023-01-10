@@ -4425,4 +4425,55 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_LOOP:
     |  // RA = base*8, RC = target (loop extent)
     |  // Note: RA/RC is only used by trace recorder to determine scope/extent
-    |  // This opcode does NOT jump, it's only purpose is to
+    |  // This opcode does NOT jump, it's only purpose is to detect a hot loop.
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_ILOOP follows.
+    break;
+
+  case BC_ILOOP:
+    |  // RA = base*8, RC = target (loop extent)
+    |  ins_next
+    break;
+
+  case BC_JLOOP:
+    |.if JIT
+    |  // RA = base (ignored), RC = traceno
+    |  ldr CARG1, [DISPATCH, #DISPATCH_J(trace)]
+    |   mov CARG2, #0  // Traces on ARM don't store the trace number, so use 0.
+    |  ldr TRACE:RC, [CARG1, RC, lsl #2]
+    |   st_vmstate CARG2
+    |  ldr RA, TRACE:RC->mcode
+    |   str BASE, [DISPATCH, #DISPATCH_GL(jit_base)]
+    |   str L, [DISPATCH, #DISPATCH_GL(tmpbuf.L)]
+    |  bx RA
+    |.endif
+    break;
+
+  case BC_JMP:
+    |  // RA = base*8 (only used by trace recorder), RC = target
+    |  add RC, PC, RC, lsl #2
+    |  sub PC, RC, #0x20000
+    |  ins_next
+    break;
+
+  /* -- Function headers -------------------------------------------------- */
+
+  case BC_FUNCF:
+    |.if JIT
+    |  hotcall
+    |.endif
+  case BC_FUNCV:  /* NYI: compiled vararg functions. */
+    |  // Fall through. Assumes BC_IFUNCF/BC_IFUNCV follow.
+    break;
+
+  case BC_JFUNCF:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_IFUNCF:
+    |  // BASE = new base, RA = BASE+framesize*8, CARG3 = LFUNC, RC = nargs*8
+    |  ldr CARG1, L->maxstack
+    |   ldrb CARG2, [PC, #-4+PC2PROTO(numparams)]
+    | 
