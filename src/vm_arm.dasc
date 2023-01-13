@@ -4476,4 +4476,57 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // BASE = new base, RA = BASE+framesize*8, CARG3 = LFUNC, RC = nargs*8
     |  ldr CARG1, L->maxstack
     |   ldrb CARG2, [PC, #-4+PC2PROTO(numparams)]
-    | 
+    |    ldr KBASE, [PC, #-4+PC2PROTO(k)]
+    |  cmp RA, CARG1
+    |  bhi ->vm_growstack_l
+    if (op != BC_JFUNCF) {
+      |  ins_next1
+      |  ins_next2
+    }
+    |2:
+    |  cmp NARGS8:RC, CARG2, lsl #3	// Check for missing parameters.
+    |   mvn CARG4, #~LJ_TNIL
+    |  blo >3
+    if (op == BC_JFUNCF) {
+      |  decode_RD RC, INS
+      |  b =>BC_JLOOP
+    } else {
+      |  ins_next3
+    }
+    |
+    |3:  // Clear missing parameters.
+    |  strd CARG34, [BASE, NARGS8:RC]
+    |  add NARGS8:RC, NARGS8:RC, #8
+    |  b <2
+    break;
+
+  case BC_JFUNCV:
+#if !LJ_HASJIT
+    break;
+#endif
+    |  NYI  // NYI: compiled vararg functions
+    break;  /* NYI: compiled vararg functions. */
+
+  case BC_IFUNCV:
+    |  // BASE = new base, RA = BASE+framesize*8, CARG3 = LFUNC, RC = nargs*8
+    |  ldr CARG1, L->maxstack
+    |   add CARG4, BASE, RC
+    |  add RA, RA, RC
+    |   str LFUNC:CARG3, [CARG4]	// Store copy of LFUNC.
+    |   add CARG2, RC, #8+FRAME_VARG
+    |    ldr KBASE, [PC, #-4+PC2PROTO(k)]
+    |  cmp RA, CARG1
+    |   str CARG2, [CARG4, #4]		// Store delta + FRAME_VARG.
+    |  bhs ->vm_growstack_l
+    |  ldrb RB, [PC, #-4+PC2PROTO(numparams)]
+    |   mov RA, BASE
+    |   mov RC, CARG4
+    |  cmp RB, #0
+    |   add BASE, CARG4, #8
+    |  beq >3
+    |  mvn CARG3, #~LJ_TNIL
+    |1:
+    |  cmp RA, RC			// Less args than parameters?
+    |   ldrdlo CARG12, [RA], #8
+    |   movhs CARG2, CARG3
+    |  
