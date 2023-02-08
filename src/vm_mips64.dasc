@@ -1013,3 +1013,1482 @@ static void build_subroutines(BuildCtx *ctx)
 #if LJ_52
   |  move MULTRES, CARG1
 #endif
+  |  load_got lj_meta_len
+  |   sd BASE, L->base
+  |   sd PC, SAVE_PC
+  |  call_intern lj_meta_len		// (lua_State *L, TValue *o)
+  |.  move CARG1, L
+  |  // Returns NULL (retry) or TValue * (metamethod base).
+#if LJ_52
+  |  bnez CRET1, ->vmeta_binop		// Binop call for compatibility.
+  |.  nop
+  |  b ->BC_LEN_Z
+  |.  move CARG1, MULTRES
+#else
+  |  b ->vmeta_binop			// Binop call for compatibility.
+  |.  nop
+#endif
+  |
+  |//-- Call metamethod ----------------------------------------------------
+  |
+  |->vmeta_call:			// Resolve and call __call metamethod.
+  |  // TMP2 = old base, BASE = new base, RC = nargs*8
+  |  load_got lj_meta_call
+  |   sd TMP2, L->base			// This is the callers base!
+  |  daddiu CARG2, BASE, -16
+  |   sd PC, SAVE_PC
+  |  daddu CARG3, BASE, RC
+  |   move MULTRES, NARGS8:RC
+  |  call_intern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
+  |.  move CARG1, L
+  |  ld LFUNC:RB, FRAME_FUNC(BASE)	// Guaranteed to be a function here.
+  |   daddiu NARGS8:RC, MULTRES, 8	// Got one more argument now.
+  |  cleartp LFUNC:RB
+  |  ins_call
+  |
+  |->vmeta_callt:			// Resolve __call for BC_CALLT.
+  |  // BASE = old base, RA = new base, RC = nargs*8
+  |  load_got lj_meta_call
+  |   sd BASE, L->base
+  |  daddiu CARG2, RA, -16
+  |   sd PC, SAVE_PC
+  |  daddu CARG3, RA, RC
+  |   move MULTRES, NARGS8:RC
+  |  call_intern lj_meta_call		// (lua_State *L, TValue *func, TValue *top)
+  |.  move CARG1, L
+  |   ld RB, FRAME_FUNC(RA)		// Guaranteed to be a function here.
+  |  ld TMP1, FRAME_PC(BASE)
+  |  daddiu NARGS8:RC, MULTRES, 8	// Got one more argument now.
+  |  b ->BC_CALLT_Z
+  |.  cleartp LFUNC:CARG3, RB
+  |
+  |//-- Argument coercion for 'for' statement ------------------------------
+  |
+  |->vmeta_for:
+  |  load_got lj_meta_for
+  |   sd BASE, L->base
+  |  move CARG2, RA
+  |   sd PC, SAVE_PC
+  |  move MULTRES, INS
+  |  call_intern lj_meta_for	// (lua_State *L, TValue *base)
+  |.  move CARG1, L
+  |.if JIT
+  |  decode_OP1 TMP0, MULTRES
+  |  li AT, BC_JFORI
+  |.endif
+  |  decode_RA8a RA, MULTRES
+  |   decode_RD8a RD, MULTRES
+  |  decode_RA8b RA
+  |.if JIT
+  |  beq TMP0, AT, =>BC_JFORI
+  |.  decode_RD8b RD
+  |  b =>BC_FORI
+  |.  nop
+  |.else
+  |  b =>BC_FORI
+  |.  decode_RD8b RD
+  |.endif
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Fast functions -----------------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |.macro .ffunc, name
+  |->ff_ .. name:
+  |.endmacro
+  |
+  |.macro .ffunc_1, name
+  |->ff_ .. name:
+  |  beqz NARGS8:RC, ->fff_fallback
+  |.  ld CARG1, 0(BASE)
+  |.endmacro
+  |
+  |.macro .ffunc_2, name
+  |->ff_ .. name:
+  |  sltiu AT, NARGS8:RC, 16
+  |  ld CARG1, 0(BASE)
+  |  bnez AT, ->fff_fallback
+  |.  ld CARG2, 8(BASE)
+  |.endmacro
+  |
+  |.macro .ffunc_n, name	// Caveat: has delay slot!
+  |->ff_ .. name:
+  |  ld CARG1, 0(BASE)
+  |  beqz NARGS8:RC, ->fff_fallback
+  |  // Either ldc1 or the 1st instruction of checknum is in the delay slot.
+  |  .FPU ldc1 FARG1, 0(BASE)
+  |  checknum CARG1, ->fff_fallback
+  |.endmacro
+  |
+  |.macro .ffunc_nn, name	// Caveat: has delay slot!
+  |->ff_ .. name:
+  |  ld CARG1, 0(BASE)
+  |    sltiu AT, NARGS8:RC, 16
+  |   ld CARG2, 8(BASE)
+  |  bnez AT, ->fff_fallback
+  |.  gettp TMP0, CARG1
+  |   gettp TMP1, CARG2
+  |  sltiu TMP0, TMP0, LJ_TISNUM
+  |   sltiu TMP1, TMP1, LJ_TISNUM
+  |  .FPU ldc1 FARG1, 0(BASE)
+  |  and TMP0, TMP0, TMP1
+  |   .FPU ldc1 FARG2, 8(BASE)
+  |  beqz TMP0, ->fff_fallback
+  |.endmacro
+  |
+  |// Inlined GC threshold check. Caveat: uses TMP0 and TMP1 and has delay slot!
+  |// MIPSR6: no delay slot, but a forbidden slot.
+  |.macro ffgccheck
+  |  ld TMP0, DISPATCH_GL(gc.total)(DISPATCH)
+  |  ld TMP1, DISPATCH_GL(gc.threshold)(DISPATCH)
+  |  dsubu AT, TMP0, TMP1
+  |.if MIPSR6
+  |  bgezalc AT, ->fff_gcstep
+  |.else
+  |  bgezal AT, ->fff_gcstep
+  |.endif
+  |.endmacro
+  |
+  |//-- Base library: checks -----------------------------------------------
+  |.ffunc_1 assert
+  |  gettp AT, CARG1
+  |  sltiu AT, AT, LJ_TISTRUECOND
+  |  beqz AT, ->fff_fallback
+  |.  daddiu RA, BASE, -16
+  |  ld PC, FRAME_PC(BASE)
+  |  addiu RD, NARGS8:RC, 8		// Compute (nresults+1)*8.
+  |  daddu TMP2, RA, RD
+  |  daddiu TMP1, BASE, 8
+  |  beq BASE, TMP2, ->fff_res		// Done if exactly 1 argument.
+  |.  sd CARG1, 0(RA)
+  |1:
+  |  ld CRET1, 0(TMP1)
+  |  sd CRET1, -16(TMP1)
+  |  bne TMP1, TMP2, <1
+  |.  daddiu TMP1, TMP1, 8
+  |  b ->fff_res
+  |.  nop
+  |
+  |.ffunc_1 type
+  |  gettp TMP0, CARG1
+  |  sltu TMP1, TISNUM, TMP0
+  |  not TMP2, TMP0
+  |  li TMP3, ~LJ_TISNUM
+  |.if MIPSR6
+  |  selnez TMP2, TMP2, TMP1
+  |  seleqz TMP3, TMP3, TMP1
+  |  or TMP2, TMP2, TMP3
+  |.else
+  |  movz TMP2, TMP3, TMP1
+  |.endif
+  |  dsll TMP2, TMP2, 3
+  |  daddu TMP2, CFUNC:RB, TMP2
+  |  b ->fff_restv
+  |.  ld CARG1, CFUNC:TMP2->upvalue
+  |
+  |//-- Base library: getters and setters ---------------------------------
+  |
+  |.ffunc_1 getmetatable
+  |  gettp TMP2, CARG1
+  |  daddiu TMP0, TMP2, -LJ_TTAB
+  |  daddiu TMP1, TMP2, -LJ_TUDATA
+  |.if MIPSR6
+  |  selnez TMP0, TMP1, TMP0
+  |.else
+  |  movn TMP0, TMP1, TMP0
+  |.endif
+  |  bnez TMP0, >6
+  |.  cleartp TAB:CARG1
+  |1:  // Field metatable must be at same offset for GCtab and GCudata!
+  |  ld TAB:RB, TAB:CARG1->metatable
+  |2:
+  |  ld STR:RC, DISPATCH_GL(gcroot[GCROOT_MMNAME+MM_metatable])(DISPATCH)
+  |  beqz TAB:RB, ->fff_restv
+  |.  li CARG1, LJ_TNIL
+  |  lw TMP0, TAB:RB->hmask
+  |   lw TMP1, STR:RC->sid
+  |    ld NODE:TMP2, TAB:RB->node
+  |  and TMP1, TMP1, TMP0		// idx = str->sid & tab->hmask
+  |  dsll TMP0, TMP1, 5
+  |  dsll TMP1, TMP1, 3
+  |  dsubu TMP1, TMP0, TMP1
+  |  daddu NODE:TMP2, NODE:TMP2, TMP1	// node = tab->node + (idx*32-idx*8)
+  |  li CARG4, LJ_TSTR
+  |  settp STR:RC, CARG4		// Tagged key to look for.
+  |3:  // Rearranged logic, because we expect _not_ to find the key.
+  |  ld TMP0, NODE:TMP2->key
+  |   ld CARG1, NODE:TMP2->val
+  |    ld NODE:TMP2, NODE:TMP2->next
+  |  beq RC, TMP0, >5
+  |.  li AT, LJ_TTAB
+  |  bnez NODE:TMP2, <3
+  |.  nop
+  |4:
+  |  move CARG1, RB
+  |  b ->fff_restv			// Not found, keep default result.
+  |.  settp CARG1, AT
+  |5:
+  |  bne CARG1, TISNIL, ->fff_restv
+  |.  nop
+  |  b <4				// Ditto for nil value.
+  |.  nop
+  |
+  |6:
+  |  sltiu AT, TMP2, LJ_TISNUM
+  |.if MIPSR6
+  |  selnez TMP0, TISNUM, AT
+  |  seleqz AT, TMP2, AT
+  |  or TMP2, TMP0, AT
+  |.else
+  |  movn TMP2, TISNUM, AT
+  |.endif
+  |  dsll TMP2, TMP2, 3
+  |   dsubu TMP0, DISPATCH, TMP2
+  |  b <2
+  |.  ld TAB:RB, DISPATCH_GL(gcroot[GCROOT_BASEMT])-8(TMP0)
+  |
+  |.ffunc_2 setmetatable
+  |  // Fast path: no mt for table yet and not clearing the mt.
+  |  checktp TMP1, CARG1, -LJ_TTAB, ->fff_fallback
+  |  gettp TMP3, CARG2
+  |   ld TAB:TMP0, TAB:TMP1->metatable
+  |   lbu TMP2, TAB:TMP1->marked
+  |  daddiu AT, TMP3, -LJ_TTAB
+  |   cleartp TAB:CARG2
+  |  or AT, AT, TAB:TMP0
+  |  bnez AT, ->fff_fallback
+  |.  andi AT, TMP2, LJ_GC_BLACK	// isblack(table)
+  |  beqz AT, ->fff_restv
+  |.  sd TAB:CARG2, TAB:TMP1->metatable
+  |  barrierback TAB:TMP1, TMP2, TMP0, ->fff_restv
+  |
+  |.ffunc rawget
+  |  ld CARG2, 0(BASE)
+  |  sltiu AT, NARGS8:RC, 16
+  |  load_got lj_tab_get
+  |  gettp TMP0, CARG2
+  |   cleartp CARG2
+  |  daddiu TMP0, TMP0, -LJ_TTAB
+  |  or AT, AT, TMP0
+  |  bnez AT, ->fff_fallback
+  |.  daddiu CARG3, BASE, 8
+  |  call_intern lj_tab_get	// (lua_State *L, GCtab *t, cTValue *key)
+  |.  move CARG1, L
+  |  b ->fff_restv
+  |.  ld CARG1, 0(CRET1)
+  |
+  |//-- Base library: conversions ------------------------------------------
+  |
+  |.ffunc tonumber
+  |  // Only handles the number case inline (without a base argument).
+  |  ld CARG1, 0(BASE)
+  |  xori AT, NARGS8:RC, 8		// Exactly one number argument.
+  |  gettp TMP1, CARG1
+  |  sltu TMP0, TISNUM, TMP1
+  |  or AT, AT, TMP0
+  |  bnez AT, ->fff_fallback
+  |.  nop
+  |  b ->fff_restv
+  |.  nop
+  |
+  |.ffunc_1 tostring
+  |  // Only handles the string or number case inline.
+  |  gettp TMP0, CARG1
+  |  daddiu AT, TMP0, -LJ_TSTR
+  |  // A __tostring method in the string base metatable is ignored.
+  |  beqz AT, ->fff_restv	// String key?
+  |  // Handle numbers inline, unless a number base metatable is present.
+  |.  ld TMP1, DISPATCH_GL(gcroot[GCROOT_BASEMT_NUM])(DISPATCH)
+  |  sltu TMP0, TISNUM, TMP0
+  |  or TMP0, TMP0, TMP1
+  |  bnez TMP0, ->fff_fallback
+  |.  sd BASE, L->base			// Add frame since C call can throw.
+  |.if MIPSR6
+  |  sd PC, SAVE_PC			// Redundant (but a defined value).
+  |  ffgccheck
+  |.else
+  |  ffgccheck
+  |.  sd PC, SAVE_PC			// Redundant (but a defined value).
+  |.endif
+  |  load_got lj_strfmt_number
+  |  move CARG1, L
+  |  call_intern lj_strfmt_number	// (lua_State *L, cTValue *o)
+  |.  move CARG2, BASE
+  |  // Returns GCstr *.
+  |  li AT, LJ_TSTR
+  |  settp CRET1, AT
+  |  b ->fff_restv
+  |.  move CARG1, CRET1
+  |
+  |//-- Base library: iterators -------------------------------------------
+  |
+  |.ffunc_1 next
+  |  checktp CARG1, -LJ_TTAB, ->fff_fallback
+  |  daddu TMP2, BASE, NARGS8:RC
+  |  sd TISNIL, 0(TMP2)			// Set missing 2nd arg to nil.
+  |  load_got lj_tab_next
+  |  ld PC, FRAME_PC(BASE)
+  |  daddiu CARG2, BASE, 8
+  |  call_intern lj_tab_next		// (GCtab *t, cTValue *key, TValue *o)
+  |.  daddiu CARG3, BASE, -16
+  |  // Returns 1=found, 0=end, -1=error.
+  |   daddiu RA, BASE, -16
+  |  bgtz CRET1, ->fff_res		// Found key/value.
+  |.  li RD, (2+1)*8
+  |  beqz CRET1, ->fff_restv		// End of traversal: return nil.
+  |.  move CARG1, TISNIL
+  |   ld CFUNC:RB, FRAME_FUNC(BASE)
+  |   cleartp CFUNC:RB
+  |  b ->fff_fallback			// Invalid key.
+  |.  li RC, 2*8
+  |
+  |.ffunc_1 pairs
+  |  checktp TAB:TMP1, CARG1, -LJ_TTAB, ->fff_fallback
+  |  ld PC, FRAME_PC(BASE)
+#if LJ_52
+  |  ld TAB:TMP2, TAB:TMP1->metatable
+  |  ld TMP0, CFUNC:RB->upvalue[0]
+  |  bnez TAB:TMP2, ->fff_fallback
+#else
+  |  ld TMP0, CFUNC:RB->upvalue[0]
+#endif
+  |.  daddiu RA, BASE, -16
+  |  sd TISNIL, 0(BASE)
+  |   sd CARG1, -8(BASE)
+  |    sd TMP0, 0(RA)
+  |  b ->fff_res
+  |.  li RD, (3+1)*8
+  |
+  |.ffunc_2 ipairs_aux
+  |  checktab CARG1, ->fff_fallback
+  |   checkint CARG2, ->fff_fallback
+  |.  lw TMP0, TAB:CARG1->asize
+  |   ld TMP1, TAB:CARG1->array
+  |    ld PC, FRAME_PC(BASE)
+  |  sextw TMP2, CARG2
+  |  addiu TMP2, TMP2, 1
+  |  sltu AT, TMP2, TMP0
+  |    daddiu RA, BASE, -16
+  |   zextw TMP0, TMP2
+  |   settp TMP0, TISNUM
+  |  beqz AT, >2			// Not in array part?
+  |.  sd TMP0, 0(RA)
+  |  dsll TMP3, TMP2, 3
+  |  daddu TMP3, TMP1, TMP3
+  |  ld TMP1, 0(TMP3)
+  |1:
+  |  beq TMP1, TISNIL, ->fff_res	// End of iteration, return 0 results.
+  |.  li RD, (0+1)*8
+  |  sd TMP1, -8(BASE)
+  |  b ->fff_res
+  |.  li RD, (2+1)*8
+  |2:  // Check for empty hash part first. Otherwise call C function.
+  |  lw TMP0, TAB:CARG1->hmask
+  |  load_got lj_tab_getinth
+  |  beqz TMP0, ->fff_res
+  |.  li RD, (0+1)*8
+  |  call_intern lj_tab_getinth		// (GCtab *t, int32_t key)
+  |.  move CARG2, TMP2
+  |  // Returns cTValue * or NULL.
+  |  beqz CRET1, ->fff_res
+  |.  li RD, (0+1)*8
+  |  b <1
+  |.  ld TMP1, 0(CRET1)
+  |
+  |.ffunc_1 ipairs
+  |  checktp TAB:TMP1, CARG1, -LJ_TTAB, ->fff_fallback
+  |  ld PC, FRAME_PC(BASE)
+#if LJ_52
+  |  ld TAB:TMP2, TAB:TMP1->metatable
+  |  ld CFUNC:TMP0, CFUNC:RB->upvalue[0]
+  |  bnez TAB:TMP2, ->fff_fallback
+#else
+  |  ld TMP0, CFUNC:RB->upvalue[0]
+#endif
+  |  daddiu RA, BASE, -16
+  |  dsll AT, TISNUM, 47
+  |  sd CARG1, -8(BASE)
+  |   sd AT, 0(BASE)
+  |    sd CFUNC:TMP0, 0(RA)
+  |  b ->fff_res
+  |.  li RD, (3+1)*8
+  |
+  |//-- Base library: catch errors ----------------------------------------
+  |
+  |.ffunc pcall
+  |  daddiu NARGS8:RC, NARGS8:RC, -8
+  |  lbu TMP3, DISPATCH_GL(hookmask)(DISPATCH)
+  |  bltz NARGS8:RC, ->fff_fallback
+  |.   move TMP2, BASE
+  |   daddiu BASE, BASE, 16
+  |  // Remember active hook before pcall.
+  |  srl TMP3, TMP3, HOOK_ACTIVE_SHIFT
+  |  andi TMP3, TMP3, 1
+  |  daddiu PC, TMP3, 16+FRAME_PCALL
+  |  beqz NARGS8:RC, ->vm_call_dispatch
+  |1:
+  |.  daddu TMP0, BASE, NARGS8:RC
+  |2:
+  |  ld TMP1, -16(TMP0)
+  |  sd TMP1, -8(TMP0)
+  |  daddiu TMP0, TMP0, -8
+  |  bne TMP0, BASE, <2
+  |.  nop
+  |  b ->vm_call_dispatch
+  |.  nop
+  |
+  |.ffunc xpcall
+  |  daddiu NARGS8:TMP0, NARGS8:RC, -16
+  |  ld CARG1, 0(BASE)
+  |   ld CARG2, 8(BASE)
+  |    bltz NARGS8:TMP0, ->fff_fallback
+  |.    lbu TMP1, DISPATCH_GL(hookmask)(DISPATCH)
+  |  gettp AT, CARG2
+  |  daddiu AT, AT, -LJ_TFUNC
+  |  bnez AT, ->fff_fallback		// Traceback must be a function.
+  |.   move TMP2, BASE
+  |  move NARGS8:RC, NARGS8:TMP0
+  |   daddiu BASE, BASE, 24
+  |  // Remember active hook before pcall.
+  |  srl TMP3, TMP3, HOOK_ACTIVE_SHIFT
+  |   sd CARG2, 0(TMP2)			// Swap function and traceback.
+  |  andi TMP3, TMP3, 1
+  |   sd CARG1, 8(TMP2)
+  |  beqz NARGS8:RC, ->vm_call_dispatch
+  |.  daddiu PC, TMP3, 24+FRAME_PCALL
+  |  b <1
+  |.  nop
+  |
+  |//-- Coroutine library --------------------------------------------------
+  |
+  |.macro coroutine_resume_wrap, resume
+  |.if resume
+  |.ffunc_1 coroutine_resume
+  |  checktp CARG1, CARG1, -LJ_TTHREAD, ->fff_fallback
+  |.else
+  |.ffunc coroutine_wrap_aux
+  |  ld L:CARG1, CFUNC:RB->upvalue[0].gcr
+  |  cleartp L:CARG1
+  |.endif
+  |  lbu TMP0, L:CARG1->status
+  |   ld TMP1, L:CARG1->cframe
+  |    ld CARG2, L:CARG1->top
+  |    ld TMP2, L:CARG1->base
+  |  addiu AT, TMP0, -LUA_YIELD
+  |    daddu CARG3, CARG2, TMP0
+  |   daddiu TMP3, CARG2, 8
+  |.if MIPSR6
+  |  seleqz CARG2, CARG2, AT
+  |  selnez TMP3, TMP3, AT
+  |  bgtz AT, ->fff_fallback		// st > LUA_YIELD?
+  |.  or CARG2, TMP3, CARG2
+  |.else
+  |  bgtz AT, ->fff_fallback		// st > LUA_YIELD?
+  |.  movn CARG2, TMP3, AT
+  |.endif
+  |   xor TMP2, TMP2, CARG3
+  |  bnez TMP1, ->fff_fallback		// cframe != 0?
+  |.  or AT, TMP2, TMP0
+  |  ld TMP0, L:CARG1->maxstack
+  |  beqz AT, ->fff_fallback		// base == top && st == 0?
+  |.  ld PC, FRAME_PC(BASE)
+  |  daddu TMP2, CARG2, NARGS8:RC
+  |  sltu AT, TMP0, TMP2
+  |  bnez AT, ->fff_fallback		// Stack overflow?
+  |.  sd PC, SAVE_PC
+  |   sd BASE, L->base
+  |1:
+  |.if resume
+  |  daddiu BASE, BASE, 8		// Keep resumed thread in stack for GC.
+  |  daddiu NARGS8:RC, NARGS8:RC, -8
+  |  daddiu TMP2, TMP2, -8
+  |.endif
+  |  sd TMP2, L:CARG1->top
+  |  daddu TMP1, BASE, NARGS8:RC
+  |  move CARG3, CARG2
+  |  sd BASE, L->top
+  |2:  // Move args to coroutine.
+  |   ld CRET1, 0(BASE)
+  |  sltu AT, BASE, TMP1
+  |  beqz AT, >3
+  |.  daddiu BASE, BASE, 8
+  |   sd CRET1, 0(CARG3)
+  |  b <2
+  |.  daddiu CARG3, CARG3, 8
+  |3:
+  |  bal ->vm_resume			// (lua_State *L, TValue *base, 0, 0)
+  |.  move L:RA, L:CARG1
+  |  // Returns thread status.
+  |4:
+  |  ld TMP2, L:RA->base
+  |   sltiu AT, CRET1, LUA_YIELD+1
+  |  ld TMP3, L:RA->top
+  |    li_vmstate INTERP
+  |  ld BASE, L->base
+  |    sd L, DISPATCH_GL(cur_L)(DISPATCH)
+  |    st_vmstate
+  |   beqz AT, >8
+  |. dsubu RD, TMP3, TMP2
+  |   ld TMP0, L->maxstack
+  |  beqz RD, >6			// No results?
+  |.  daddu TMP1, BASE, RD
+  |  sltu AT, TMP0, TMP1
+  |  bnez AT, >9			// Need to grow stack?
+  |.  daddu TMP3, TMP2, RD
+  |  sd TMP2, L:RA->top			// Clear coroutine stack.
+  |  move TMP1, BASE
+  |5:  // Move results from coroutine.
+  |   ld CRET1, 0(TMP2)
+  |  daddiu TMP2, TMP2, 8
+  |  sltu AT, TMP2, TMP3
+  |   sd CRET1, 0(TMP1)
+  |  bnez AT, <5
+  |.  daddiu TMP1, TMP1, 8
+  |6:
+  |  andi TMP0, PC, FRAME_TYPE
+  |.if resume
+  |  mov_true TMP1
+  |   daddiu RA, BASE, -8
+  |  sd TMP1, -8(BASE)			// Prepend true to results.
+  |  daddiu RD, RD, 16
+  |.else
+  |  move RA, BASE
+  |  daddiu RD, RD, 8
+  |.endif
+  |7:
+  |  sd PC, SAVE_PC
+  |  beqz TMP0, ->BC_RET_Z
+  |.  move MULTRES, RD
+  |  b ->vm_return
+  |.  nop
+  |
+  |8:  // Coroutine returned with error (at co->top-1).
+  |.if resume
+  |  daddiu TMP3, TMP3, -8
+  |   mov_false TMP1
+  |  ld CRET1, 0(TMP3)
+  |   sd TMP3, L:RA->top		// Remove error from coroutine stack.
+  |    li RD, (2+1)*8
+  |   sd TMP1, -8(BASE)			// Prepend false to results.
+  |    daddiu RA, BASE, -8
+  |  sd CRET1, 0(BASE)			// Copy error message.
+  |  b <7
+  |.  andi TMP0, PC, FRAME_TYPE
+  |.else
+  |  load_got lj_ffh_coroutine_wrap_err
+  |  move CARG2, L:RA
+  |  call_intern lj_ffh_coroutine_wrap_err  // (lua_State *L, lua_State *co)
+  |.  move CARG1, L
+  |.endif
+  |
+  |9:  // Handle stack expansion on return from yield.
+  |  load_got lj_state_growstack
+  |  srl CARG2, RD, 3
+  |  call_intern lj_state_growstack	// (lua_State *L, int n)
+  |.  move CARG1, L
+  |  b <4
+  |.  li CRET1, 0
+  |.endmacro
+  |
+  |  coroutine_resume_wrap 1		// coroutine.resume
+  |  coroutine_resume_wrap 0		// coroutine.wrap
+  |
+  |.ffunc coroutine_yield
+  |  ld TMP0, L->cframe
+  |   daddu TMP1, BASE, NARGS8:RC
+  |   sd BASE, L->base
+  |  andi TMP0, TMP0, CFRAME_RESUME
+  |   sd TMP1, L->top
+  |  beqz TMP0, ->fff_fallback
+  |.   li CRET1, LUA_YIELD
+  |  sd r0, L->cframe
+  |  b ->vm_leave_unw
+  |.   sb CRET1, L->status
+  |
+  |//-- Math library -------------------------------------------------------
+  |
+  |.ffunc_1 math_abs
+  |  gettp CARG2, CARG1
+  |  daddiu AT, CARG2, -LJ_TISNUM
+  |  bnez AT, >1
+  |.  sextw TMP1, CARG1
+  |  sra TMP0, TMP1, 31			// Extract sign.
+  |  xor TMP1, TMP1, TMP0
+  |  dsubu CARG1, TMP1, TMP0
+  |  dsll TMP3, CARG1, 32
+  |  bgez TMP3, ->fff_restv
+  |.  settp CARG1, TISNUM
+  |  li CARG1, 0x41e0			// 2^31 as a double.
+  |  b ->fff_restv
+  |.  dsll CARG1, CARG1, 48
+  |1:
+  |  sltiu AT, CARG2, LJ_TISNUM
+  |  beqz AT, ->fff_fallback
+  |.  dextm CARG1, CARG1, 0, 30
+  |// fallthrough
+  |
+  |->fff_restv:
+  |  // CARG1 = TValue result.
+  |  ld PC, FRAME_PC(BASE)
+  |  daddiu RA, BASE, -16
+  |   sd CARG1, -16(BASE)
+  |->fff_res1:
+  |  // RA = results, PC = return.
+  |  li RD, (1+1)*8
+  |->fff_res:
+  |  // RA = results, RD = (nresults+1)*8, PC = return.
+  |  andi TMP0, PC, FRAME_TYPE
+  |  bnez TMP0, ->vm_return
+  |.  move MULTRES, RD
+  |  lw INS, -4(PC)
+  |  decode_RB8a RB, INS
+  |  decode_RB8b RB
+  |5:
+  |  sltu AT, RD, RB
+  |  bnez AT, >6			// More results expected?
+  |.  decode_RA8a TMP0, INS
+  |  decode_RA8b TMP0
+  |  ins_next1
+  |  // Adjust BASE. KBASE is assumed to be set for the calling frame.
+  |   dsubu BASE, RA, TMP0
+  |  ins_next2
+  |
+  |6:  // Fill up results with nil.
+  |  daddu TMP1, RA, RD
+  |   daddiu RD, RD, 8
+  |  b <5
+  |.  sd TISNIL, -8(TMP1)
+  |
+  |.macro math_extern, func
+  |  .ffunc_n math_ .. func
+  |  load_got func
+  |  call_extern
+  |.  nop
+  |  b ->fff_resn
+  |.  nop
+  |.endmacro
+  |
+  |.macro math_extern2, func
+  |  .ffunc_nn math_ .. func
+  |.  load_got func
+  |  call_extern
+  |.  nop
+  |  b ->fff_resn
+  |.  nop
+  |.endmacro
+  |
+  |// TODO: Return integer type if result is integer (own sf implementation).
+  |.macro math_round, func
+  |->ff_math_ .. func:
+  |  ld CARG1, 0(BASE)
+  |  beqz NARGS8:RC, ->fff_fallback
+  |.  gettp TMP0, CARG1
+  |  beq TMP0, TISNUM, ->fff_restv
+  |.  sltu AT, TMP0, TISNUM
+  |  beqz AT, ->fff_fallback
+  |.if FPU
+  |.  ldc1 FARG1, 0(BASE)
+  |  bal ->vm_ .. func
+  |.  nop
+  |.else
+  |.  load_got func
+  |  call_extern
+  |.  nop
+  |.endif
+  |  b ->fff_resn
+  |.  nop
+  |.endmacro
+  |
+  |  math_round floor
+  |  math_round ceil
+  |
+  |.ffunc math_log
+  |  li AT, 8
+  |  bne NARGS8:RC, AT, ->fff_fallback	// Exactly 1 argument.
+  |.  ld CARG1, 0(BASE)
+  |  checknum CARG1, ->fff_fallback
+  |.  load_got log
+  |.if FPU
+  |  call_extern
+  |.  ldc1 FARG1, 0(BASE)
+  |.else
+  |  call_extern
+  |.  nop
+  |.endif
+  |  b ->fff_resn
+  |.  nop
+  |
+  |  math_extern log10
+  |  math_extern exp
+  |  math_extern sin
+  |  math_extern cos
+  |  math_extern tan
+  |  math_extern asin
+  |  math_extern acos
+  |  math_extern atan
+  |  math_extern sinh
+  |  math_extern cosh
+  |  math_extern tanh
+  |  math_extern2 pow
+  |  math_extern2 atan2
+  |  math_extern2 fmod
+  |
+  |.if FPU
+  |.ffunc_n math_sqrt
+  |.  sqrt.d FRET1, FARG1
+  |// fallthrough to ->fff_resn
+  |.else
+  |  math_extern sqrt
+  |.endif
+  |
+  |->fff_resn:
+  |  ld PC, FRAME_PC(BASE)
+  |  daddiu RA, BASE, -16
+  |  b ->fff_res1
+  |.if FPU
+  |.  sdc1 FRET1, 0(RA)
+  |.else
+  |.  sd CRET1, 0(RA)
+  |.endif
+  |
+  |
+  |.ffunc_2 math_ldexp
+  |  checknum CARG1, ->fff_fallback
+  |  checkint CARG2, ->fff_fallback
+  |.  load_got ldexp
+  |  .FPU ldc1 FARG1, 0(BASE)
+  |  call_extern
+  |.  lw CARG2, 8+LO(BASE)
+  |  b ->fff_resn
+  |.  nop
+  |
+  |.ffunc_n math_frexp
+  |  load_got frexp
+  |   ld PC, FRAME_PC(BASE)
+  |  call_extern
+  |.  daddiu CARG2, DISPATCH, DISPATCH_GL(tmptv)
+  |   lw TMP1, DISPATCH_GL(tmptv)(DISPATCH)
+  |  daddiu RA, BASE, -16
+  |.if FPU
+  |   mtc1 TMP1, FARG2
+  |  sdc1 FRET1, 0(RA)
+  |   cvt.d.w FARG2, FARG2
+  |   sdc1 FARG2, 8(RA)
+  |.else
+  |  sd CRET1, 0(RA)
+  |  zextw TMP1, TMP1
+  |  settp TMP1, TISNUM
+  |  sd TMP1, 8(RA)
+  |.endif
+  |  b ->fff_res
+  |.  li RD, (2+1)*8
+  |
+  |.ffunc_n math_modf
+  |  load_got modf
+  |   ld PC, FRAME_PC(BASE)
+  |  call_extern
+  |.  daddiu CARG2, BASE, -16
+  |  daddiu RA, BASE, -16
+  |.if FPU
+  |  sdc1 FRET1, -8(BASE)
+  |.else
+  |  sd CRET1, -8(BASE)
+  |.endif
+  |  b ->fff_res
+  |.  li RD, (2+1)*8
+  |
+  |.macro math_minmax, name, intins, intinsc, fpins
+  |  .ffunc_1 name
+  |  daddu TMP3, BASE, NARGS8:RC
+  |  checkint CARG1, >5
+  |.  daddiu TMP2, BASE, 8
+  |1:  // Handle integers.
+  |  beq TMP2, TMP3, ->fff_restv
+  |.  ld CARG2, 0(TMP2)
+  |  checkint CARG2, >3
+  |.  sextw CARG1, CARG1
+  |  lw CARG2, LO(TMP2)
+  |.  slt AT, CARG1, CARG2
+  |.if MIPSR6
+  |  intins TMP1, CARG2, AT
+  |  intinsc CARG1, CARG1, AT
+  |  or CARG1, CARG1, TMP1
+  |.else
+  |  intins CARG1, CARG2, AT
+  |.endif
+  |  daddiu TMP2, TMP2, 8
+  |  zextw CARG1, CARG1
+  |  b <1
+  |.  settp CARG1, TISNUM
+  |
+  |3:  // Convert intermediate result to number and continue with number loop.
+  |  checknum CARG2, ->fff_fallback
+  |.if FPU
+  |.  mtc1 CARG1, FRET1
+  |  cvt.d.w FRET1, FRET1
+  |  b >7
+  |.  ldc1 FARG1, 0(TMP2)
+  |.else
+  |.  nop
+  |  bal ->vm_sfi2d_1
+  |.  nop
+  |  b >7
+  |.  nop
+  |.endif
+  |
+  |5:
+  |  .FPU ldc1 FRET1, 0(BASE)
+  |  checknum CARG1, ->fff_fallback
+  |6:  // Handle numbers.
+  |.  ld CARG2, 0(TMP2)
+  |  beq TMP2, TMP3, ->fff_resn
+  |.if FPU
+  |  ldc1 FARG1, 0(TMP2)
+  |.else
+  |  move CRET1, CARG1
+  |.endif
+  |  checknum CARG2, >8
+  |.  nop
+  |7:
+  |.if FPU
+  |.if MIPSR6
+  |  fpins FRET1, FRET1, FARG1
+  |.else
+  |.if fpins  // ismax
+  |  c.olt.d FARG1, FRET1
+  |.else
+  |  c.olt.d FRET1, FARG1
+  |.endif
+  |  movf.d FRET1, FARG1
+  |.endif
+  |.else
+  |.if fpins  // ismax
+  |  bal ->vm_sfcmpogt
+  |.else
+  |  bal ->vm_sfcmpolt
+  |.endif
+  |.  nop
+  |.if MIPSR6
+  |  seleqz AT, CARG2, CRET1
+  |  selnez CARG1, CARG1, CRET1
+  |  or CARG1, CARG1, AT
+  |.else
+  |  movz CARG1, CARG2, CRET1
+  |.endif
+  |.endif
+  |  b <6
+  |.  daddiu TMP2, TMP2, 8
+  |
+  |8:  // Convert integer to number and continue with number loop.
+  |  checkint CARG2, ->fff_fallback
+  |.if FPU
+  |.  lwc1 FARG1, LO(TMP2)
+  |  b <7
+  |.  cvt.d.w FARG1, FARG1
+  |.else
+  |.  lw CARG2, LO(TMP2)
+  |  bal ->vm_sfi2d_2
+  |.  nop
+  |  b <7
+  |.  nop
+  |.endif
+  |
+  |.endmacro
+  |
+  |.if MIPSR6
+  |  math_minmax math_min, seleqz, selnez, min.d
+  |  math_minmax math_max, selnez, seleqz, max.d
+  |.else
+  |  math_minmax math_min, movz, _, 0
+  |  math_minmax math_max, movn, _, 1
+  |.endif
+  |
+  |//-- String library -----------------------------------------------------
+  |
+  |.ffunc string_byte			// Only handle the 1-arg case here.
+  |  ld CARG1, 0(BASE)
+  |  gettp TMP0, CARG1
+  |  xori AT, NARGS8:RC, 8
+  |  daddiu TMP0, TMP0, -LJ_TSTR
+  |  or AT, AT, TMP0
+  |  bnez AT, ->fff_fallback		// Need exactly 1 string argument.
+  |.  cleartp STR:CARG1
+  |  lw TMP0, STR:CARG1->len
+  |    daddiu RA, BASE, -16
+  |    ld PC, FRAME_PC(BASE)
+  |  sltu RD, r0, TMP0
+  |   lbu TMP1, STR:CARG1[1]		// Access is always ok (NUL at end).
+  |  addiu RD, RD, 1
+  |  sll RD, RD, 3			// RD = ((str->len != 0)+1)*8
+  |  settp TMP1, TISNUM
+  |  b ->fff_res
+  |.  sd TMP1, 0(RA)
+  |
+  |.ffunc string_char			// Only handle the 1-arg case here.
+  |  ffgccheck
+  |.if not MIPSR6
+  |.  nop
+  |.endif
+  |  ld CARG1, 0(BASE)
+  |  gettp TMP0, CARG1
+  |  xori AT, NARGS8:RC, 8		// Exactly 1 argument.
+  |  daddiu TMP0, TMP0, -LJ_TISNUM	// Integer.
+  |  li TMP1, 255
+  |   sextw CARG1, CARG1
+  |  or AT, AT, TMP0
+  |   sltu TMP1, TMP1, CARG1		// !(255 < n).
+  |   or AT, AT, TMP1
+  |  bnez AT, ->fff_fallback
+  |.  li CARG3, 1
+  |  daddiu CARG2, sp, TMPD_OFS
+  |  sb CARG1, TMPD
+  |->fff_newstr:
+  |  load_got lj_str_new
+  |   sd BASE, L->base
+  |   sd PC, SAVE_PC
+  |  call_intern lj_str_new		// (lua_State *L, char *str, size_t l)
+  |.  move CARG1, L
+  |  // Returns GCstr *.
+  |  ld BASE, L->base
+  |->fff_resstr:
+  |  li AT, LJ_TSTR
+  |  settp CRET1, AT
+  |  b ->fff_restv
+  |.  move CARG1, CRET1
+  |
+  |.ffunc string_sub
+  |  ffgccheck
+  |.if not MIPSR6
+  |.  nop
+  |.endif
+  |  addiu AT, NARGS8:RC, -16
+  |  ld TMP0, 0(BASE)
+  |  bltz AT, ->fff_fallback
+  |.  gettp TMP3, TMP0
+  |  cleartp STR:CARG1, TMP0
+  |  ld CARG2, 8(BASE)
+  |  beqz AT, >1
+  |.  li CARG4, -1
+  |  ld CARG3, 16(BASE)
+  |  checkint CARG3, ->fff_fallback
+  |.  sextw CARG4, CARG3
+  |1:
+  |  checkint CARG2, ->fff_fallback
+  |.  li AT, LJ_TSTR
+  |  bne TMP3, AT, ->fff_fallback
+  |.  sextw CARG3, CARG2
+  |  lw CARG2, STR:CARG1->len
+  |  // STR:CARG1 = str, CARG2 = str->len, CARG3 = start, CARG4 = end
+  |  slt AT, CARG4, r0
+  |  addiu TMP0, CARG2, 1
+  |  addu TMP1, CARG4, TMP0
+  |   slt TMP3, CARG3, r0
+  |.if MIPSR6
+  |  seleqz CARG4, CARG4, AT
+  |  selnez TMP1, TMP1, AT
+  |  or CARG4, TMP1, CARG4		// if (end < 0) end += len+1
+  |.else
+  |  movn CARG4, TMP1, AT		// if (end < 0) end += len+1
+  |.endif
+  |   addu TMP1, CARG3, TMP0
+  |.if MIPSR6
+  |   selnez TMP1, TMP1, TMP3
+  |   seleqz CARG3, CARG3, TMP3
+  |   or CARG3, TMP1, CARG3		// if (start < 0) start += len+1
+  |   li TMP2, 1
+  |  slt AT, CARG4, r0
+  |   slt TMP3, r0, CARG3
+  |  seleqz CARG4, CARG4, AT		// if (end < 0) end = 0
+  |   selnez CARG3, CARG3, TMP3
+  |   seleqz TMP2, TMP2, TMP3
+  |   or CARG3, TMP2, CARG3		// if (start < 1) start = 1
+  |  slt AT, CARG2, CARG4
+  |  seleqz CARG4, CARG4, AT
+  |  selnez CARG2, CARG2, AT
+  |  or CARG4, CARG2, CARG4		// if (end > len) end = len
+  |.else
+  |   movn CARG3, TMP1, TMP3		// if (start < 0) start += len+1
+  |   li TMP2, 1
+  |  slt AT, CARG4, r0
+  |   slt TMP3, r0, CARG3
+  |  movn CARG4, r0, AT			// if (end < 0) end = 0
+  |   movz CARG3, TMP2, TMP3		// if (start < 1) start = 1
+  |  slt AT, CARG2, CARG4
+  |  movn CARG4, CARG2, AT		// if (end > len) end = len
+  |.endif
+  |   daddu CARG2, STR:CARG1, CARG3
+  |  subu CARG3, CARG4, CARG3		// len = end - start
+  |   daddiu CARG2, CARG2, sizeof(GCstr)-1
+  |  bgez CARG3, ->fff_newstr
+  |.  addiu CARG3, CARG3, 1		// len++
+  |->fff_emptystr:  // Return empty string.
+  |  li AT, LJ_TSTR
+  |  daddiu STR:CARG1, DISPATCH, DISPATCH_GL(strempty)
+  |  b ->fff_restv
+  |.  settp CARG1, AT
+  |
+  |.macro ffstring_op, name
+  |  .ffunc string_ .. name
+  |  ffgccheck
+  |.  nop
+  |  beqz NARGS8:RC, ->fff_fallback
+  |.  ld CARG2, 0(BASE)
+  |  checkstr STR:CARG2, ->fff_fallback
+  |  daddiu SBUF:CARG1, DISPATCH, DISPATCH_GL(tmpbuf)
+  |  load_got lj_buf_putstr_ .. name
+  |  ld TMP0, SBUF:CARG1->b
+  |   sd L, SBUF:CARG1->L
+  |   sd BASE, L->base
+  |  sd TMP0, SBUF:CARG1->w
+  |  call_intern extern lj_buf_putstr_ .. name
+  |.  sd PC, SAVE_PC
+  |  load_got lj_buf_tostr
+  |  call_intern lj_buf_tostr
+  |.  move SBUF:CARG1, SBUF:CRET1
+  |  b ->fff_resstr
+  |.  ld BASE, L->base
+  |.endmacro
+  |
+  |ffstring_op reverse
+  |ffstring_op lower
+  |ffstring_op upper
+  |
+  |//-- Bit library --------------------------------------------------------
+  |
+  |->vm_tobit_fb:
+  |  beqz TMP1, ->fff_fallback
+  |.if FPU
+  |.  ldc1 FARG1, 0(BASE)
+  |  add.d FARG1, FARG1, TOBIT
+  |  mfc1 CRET1, FARG1
+  |  jr ra
+  |.  zextw CRET1, CRET1
+  |.else
+  |// FP number to bit conversion for soft-float.
+  |->vm_tobit:
+  |  dsll TMP0, CARG1, 1
+  |  li CARG3, 1076
+  |  dsrl AT, TMP0, 53
+  |  dsubu CARG3, CARG3, AT
+  |  sltiu AT, CARG3, 54
+  |  beqz AT, >1
+  |.  dextm TMP0, TMP0, 0, 20
+  |  dinsu TMP0, AT, 21, 21
+  |  slt AT, CARG1, r0
+  |  dsrlv CRET1, TMP0, CARG3
+  |  dsubu TMP0, r0, CRET1
+  |.if MIPSR6
+  |  selnez TMP0, TMP0, AT
+  |  seleqz CRET1, CRET1, AT
+  |  or CRET1, CRET1, TMP0
+  |.else
+  |  movn CRET1, TMP0, AT
+  |.endif
+  |  jr ra
+  |.  zextw CRET1, CRET1
+  |1:
+  |  jr ra
+  |.  move CRET1, r0
+  |
+  |// FP number to int conversion with a check for soft-float.
+  |// Modifies CARG1, CRET1, CRET2, TMP0, AT.
+  |->vm_tointg:
+  |.if JIT
+  |  dsll CRET2, CARG1, 1
+  |  beqz CRET2, >2
+  |.  li TMP0, 1076
+  |  dsrl AT, CRET2, 53
+  |  dsubu TMP0, TMP0, AT
+  |  sltiu AT, TMP0, 54
+  |  beqz AT, >1
+  |.  dextm CRET2, CRET2, 0, 20
+  |  dinsu CRET2, AT, 21, 21
+  |  slt AT, CARG1, r0
+  |  dsrlv CRET1, CRET2, TMP0
+  |  dsubu CARG1, r0, CRET1
+  |.if MIPSR6
+  |  seleqz CRET1, CRET1, AT
+  |  selnez CARG1, CARG1, AT
+  |  or CRET1, CRET1, CARG1
+  |.else
+  |  movn CRET1, CARG1, AT
+  |.endif
+  |  li CARG1, 64
+  |  subu TMP0, CARG1, TMP0
+  |  dsllv CRET2, CRET2, TMP0	// Integer check.
+  |  sextw AT, CRET1
+  |  xor AT, CRET1, AT		// Range check.
+  |.if MIPSR6
+  |  seleqz AT, AT, CRET2
+  |  selnez CRET2, CRET2, CRET2
+  |  jr ra
+  |.  or CRET2, AT, CRET2
+  |.else
+  |  jr ra
+  |.  movz CRET2, AT, CRET2
+  |.endif
+  |1:
+  |  jr ra
+  |.  li CRET2, 1
+  |2:
+  |  jr ra
+  |.  move CRET1, r0
+  |.endif
+  |.endif
+  |
+  |.macro .ffunc_bit, name
+  |  .ffunc_1 bit_..name
+  |  gettp TMP0, CARG1
+  |  beq TMP0, TISNUM, >6
+  |.  zextw CRET1, CARG1
+  |  bal ->vm_tobit_fb
+  |.  sltiu TMP1, TMP0, LJ_TISNUM
+  |6:
+  |.endmacro
+  |
+  |.macro .ffunc_bit_op, name, bins
+  |  .ffunc_bit name
+  |  daddiu TMP2, BASE, 8
+  |  daddu TMP3, BASE, NARGS8:RC
+  |1:
+  |  beq TMP2, TMP3, ->fff_resi
+  |.  ld CARG1, 0(TMP2)
+  |  gettp TMP0, CARG1
+  |.if FPU
+  |  bne TMP0, TISNUM, >2
+  |.  daddiu TMP2, TMP2, 8
+  |  zextw CARG1, CARG1
+  |  b <1
+  |.  bins CRET1, CRET1, CARG1
+  |2:
+  |   ldc1 FARG1, -8(TMP2)
+  |  sltiu AT, TMP0, LJ_TISNUM
+  |  beqz AT, ->fff_fallback
+  |.  add.d FARG1, FARG1, TOBIT
+  |  mfc1 CARG1, FARG1
+  |  zextw CARG1, CARG1
+  |  b <1
+  |.  bins CRET1, CRET1, CARG1
+  |.else
+  |  beq TMP0, TISNUM, >2
+  |.  move CRET2, CRET1
+  |  bal ->vm_tobit_fb
+  |.  sltiu TMP1, TMP0, LJ_TISNUM
+  |  move CARG1, CRET2
+  |2:
+  |  zextw CARG1, CARG1
+  |  bins CRET1, CRET1, CARG1
+  |  b <1
+  |.  daddiu TMP2, TMP2, 8
+  |.endif
+  |.endmacro
+  |
+  |.ffunc_bit_op band, and
+  |.ffunc_bit_op bor, or
+  |.ffunc_bit_op bxor, xor
+  |
+  |.ffunc_bit bswap
+  |  dsrl TMP0, CRET1, 8
+  |   dsrl TMP1, CRET1, 24
+  |  andi TMP2, TMP0, 0xff00
+  |   dins TMP1, CRET1, 24, 31
+  |  dins TMP2, TMP0, 16, 23
+  |  b ->fff_resi
+  |.  or CRET1, TMP1, TMP2
+  |
+  |.ffunc_bit bnot
+  |  not CRET1, CRET1
+  |  b ->fff_resi
+  |.  zextw CRET1, CRET1
+  |
+  |.macro .ffunc_bit_sh, name, shins, shmod
+  |  .ffunc_2 bit_..name
+  |  gettp TMP0, CARG1
+  |  beq TMP0, TISNUM, >1
+  |.  nop
+  |  bal ->vm_tobit_fb
+  |.  sltiu TMP1, TMP0, LJ_TISNUM
+  |  move CARG1, CRET1
+  |1:
+  |  gettp TMP0, CARG2
+  |  bne TMP0, TISNUM, ->fff_fallback
+  |.  zextw CARG2, CARG2
+  |  sextw CARG1, CARG1
+  |.if shmod == 1
+  |  negu CARG2, CARG2
+  |.endif
+  |  shins CRET1, CARG1, CARG2
+  |  b ->fff_resi
+  |.  zextw CRET1, CRET1
+  |.endmacro
+  |
+  |.ffunc_bit_sh lshift, sllv, 0
+  |.ffunc_bit_sh rshift, srlv, 0
+  |.ffunc_bit_sh arshift, srav, 0
+  |.ffunc_bit_sh rol, rotrv, 1
+  |.ffunc_bit_sh ror, rotrv, 0
+  |
+  |.ffunc_bit tobit
+  |->fff_resi:
+  |  ld PC, FRAME_PC(BASE)
+  |  daddiu RA, BASE, -16
+  |  settp CRET1, TISNUM
+  |  b ->fff_res1
+  |.  sd CRET1, -16(BASE)
+  |
+  |//-----------------------------------------------------------------------
+  |->fff_fallback:			// Call fast function fallback handler.
+  |  // BASE = new base, RB = CFUNC, RC = nargs*8
+  |  ld TMP3, CFUNC:RB->f
+  |    daddu TMP1, BASE, NARGS8:RC
+  |   ld PC, FRAME_PC(BASE)		// Fallback may overwrite PC.
+  |    daddiu TMP0, TMP1, 8*LUA_MINSTACK
+  |     ld TMP2, L->maxstack
+  |   sd PC, SAVE_PC			// Redundant (but a defined value).
+  |  sltu AT, TMP2, TMP0
+  |     sd BASE, L->base
+  |    sd TMP1, L->top
+  |  bnez AT, >5			// Need to grow stack.
+  |.  move CFUNCADDR, TMP3
+  |  jalr TMP3				// (lua_State *L)
+  |.  move CARG1, L
+  |  // Either throws an error, or recovers and returns -1, 0 or nresults+1.
+  |  ld BASE, L->base
+  |   sll RD, CRET1, 3
+  |  bgtz CRET1, ->fff_res		// Returned nresults+1?
+  |.  daddiu RA, BASE, -16
+  |1:  // Returned 0 or -1: retry fast path.
+  |   ld LFUNC:RB, FRAME_FUNC(BASE)
+  |  ld TMP0, L->top
+  |   cleartp LFUNC:RB
+  |  bnez CRET1, ->vm_call_tail		// Returned -1?
+  |.  dsubu NARGS8:RC, TMP0, BASE
+  |  ins_callt				// Returned 0: retry fast path.
+  |
+  |// Reconstruct previous base for vmeta_call during tailcall.
+  |->vm_call_tail:
+  |  andi TMP0, PC, FRAME_TYPE
+  |   li AT, -4
+  |  bnez TMP0, >3
+  |.  and TMP1, PC, AT
+  |  lbu TMP1, OFS_RA(PC)
+  |  sll TMP1, TMP1, 3
+  |  addiu TMP1, TMP1, 16
+  |3:
+  |  b ->vm_call_dispatch		// Resolve again for tailcall.
+  |.  dsubu TMP2, BASE, TMP1
+  |
+  |5:  // Grow stack for fallback handler.
+  |  load_got lj_state_growstack
+  |  li CARG2, LUA_MINSTACK
+  |  call_intern lj_state_growstack	// (lua_State *L, int n)
+  |.  move CARG1, L
+  |  ld BASE, L->base
+  |  b <1
+  |.  li CRET1, 0			// Force retry.
+  |
+  |->fff_gcstep:			// Call GC step function.
+  |  // BASE = new base, RC = nargs*8
+  |  move MULTRES, ra
+  |  load_got lj_gc_step
+  |   sd BASE, L->base
+  |  daddu TMP0, BASE, NARGS8:RC
+  |   sd PC, SAVE_PC			// Redundant (but a defined value).
+  |  sd TMP0, L->top
+  |  call_intern lj_gc_step		// (lua_State *L)
+  |.  move CARG1, L
+  |   ld BASE, L->base
+  |  move ra, MULTRES
+  |    ld TMP0, L->top
+  |  ld CFUNC:RB, FRAME_FUNC(BASE)
+  |  cleartp CFUNC:RB
+  |  jr ra
+  |.  dsubu NARGS8:RC, TMP0, BASE
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Special dispatch targets -------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |->vm_record:				// Dispatch target for recording phase.
+  |.if JIT
+  |  lbu TMP3, DISPATCH_GL(hookmask)(DISPATCH)
+  |  andi AT, TMP3, HOOK_VMEVENT	// No recording while in vmevent.
+  |  bnez AT, >5
+  |  // Decrement the hookcount for consistency, but always do the call.
+  |.  lw TMP2, DISPATCH_GL(hookcount)(DISPATCH)
+  |  andi AT, TMP3, HOOK_ACTIVE
+  |  bnez AT, >1
+  |.  addiu TMP2, TMP2, -1
+  |  andi AT, TMP3, LUA_MASKLINE|LUA_MASKCOUNT
+  |  beqz AT, >1
+  |.  nop
+  |  b >1
+  |.  sw TMP2, DISPATCH_GL(hookcount)(DISPATCH)
+  |.endif
+  |
+  |->vm_rethook:			// Dispatch target for return hooks.
+  |  lbu TMP3, DISPATCH_GL(hookmask)(DISPATCH)
+  |  andi AT, TMP3, HOOK_ACTIVE		// Hook already active?
+  |  beqz AT, >1
+  |5:  // Re-dispatch to static ins.
+  |.  ld AT, GG_DISP2STATIC(TMP0)	// Assumes TMP0 holds DISPATCH+OP*4.
+  |  jr AT
+  |.  nop
+  |
+  |->vm_inshook:			// Dispatch target for instr/line hooks.
+  |  lbu TMP3, DISPATCH_GL(hookmask)(DISPATCH)
+  |  lw TMP2, DISPATCH_GL(hookcount)(DISPATCH)
+  |  andi AT, TMP3, HOOK_ACTIVE		// Hook already active?
+  |  bnez AT, <5
+  |.  andi AT, TMP3, LUA_MASKLINE|LUA_MASKCOUNT
+  |  beqz AT, <5
+  |.  addiu TMP2, TMP2, -1
+  |  beqz TMP2, >1
+  |.  sw TMP2, DISPATCH_GL(hookcount)(DISPATCH)
+  |  andi AT, TMP3, LUA_MASKLINE
+  |  beqz AT, <5
+  |1:
+  |.  load_got lj_dispatch_ins
+  |   sw MULTRES, SAVE_MULTRES
+  |  move CARG2, PC
+  |   sd BASE, L->base
+  |  // SAVE_PC must hold the _previous_ PC. The callee updates it with PC.
+  |  call_intern lj_dispatch_ins	// (lua_State *L, const BCIns *pc)
+  |.  move CARG1, L
+  |3:
+  |  ld BASE, L->base
+  |4:  // Re-dispatch to static ins.
+  |  lw INS, -4(PC)
+  |  decode_OP8a TMP1, INS
+  |  decode_OP8b TMP1
+  |  daddu TMP0, DISPATCH, TMP1
+  |   decode_RD8a RD, INS
+  |  ld AT, GG_DISP2STATIC(TMP0)
+  |   decode_RA8a RA, INS
+  |   decode_RD8b RD
+  |  jr AT
+  |   decode_RA8b RA
+  |
+  |->cont_hook:				// Continue from hook yield.
+  |  daddiu PC, PC, 4
+  |  b <4
+  |.  lw MULTRES, -24+LO(RB)		// Restore MULTRES for *M ins.
+  |
+  |->vm_hotloop:			// Hot loop counter underflow.
+  |.if JIT
+  |  ld LFUNC:TMP1, FRAME_FUNC(BASE)
+  |   daddiu CARG1, DISPATCH, GG_DISP2J
+  |  cleartp LFUNC:TMP1
+  |   sd PC, SAVE_PC
+  |  ld TMP1, LFUNC:TMP1->pc
+  |   move CARG2, PC
+  |   sd L, DISPATCH_J(L)(DISPATCH)
+  |  lbu TMP1, PC2PROTO(framesize)(TMP1)
+  |  load_got lj_trace_hot
+  |   sd BASE, L->base
+  |  dsll TMP1, TMP1, 3
+  |  daddu TMP1, BASE, TMP1
+  |  call_intern lj_trace_hot		// (jit_State *J, const BCIns *pc)
+  |.  sd TMP1, L->top
+  |  b <3
+  |.  nop
+  |.endif
+  |
+  |
+  |->vm_callhook:			// Dispatch target for call hooks.
+  |.if JIT
+  |  b >1
+  |.endif
+  |.  move CARG2, PC
+  |
+  |->vm_hotcall:			// Hot call counter underflow.
+  |.if JIT
+  |  ori CARG2, PC, 1
+  |1:
+  |.endif
+  |  load_got lj_dispatch_call
+  |  daddu TMP0, BASE, RC
+  |   sd PC, SAVE_PC
+  |   sd BASE, L->base
+  |  dsubu RA, RA, BASE
+  |   sd TMP0, L->top
+  |  call_intern lj_dispatch_call	// (lua_State *L, const BCIns *pc)
+  |.  move CARG1, L
+  |  // Returns ASMFunction.
+  |  ld BASE, L->base
+  |   ld TMP0, L->top
+  |   sd r0, SAVE_PC			// Invalidate for subsequent line hook.
+  |  dsubu NARGS8:RC, TMP0, BASE
+  |  daddu RA, BASE, RA
+  |  ld LFUNC:RB, FRAME_FUNC(BASE)
+  |  cleartp LFUNC:RB
+  |  jr CRET1
+  |.  lw INS, -4(PC)
+  |
+  |->cont_stitch:			// Trace stitching.
+  |.if JIT
+  |  // RA = resultptr, RB = meta base
+  |  lw INS, -4(PC)
+  |    ld TRACE:TMP2, -40(RB)		// Save previous trace.
+  |  decode_RA8a RC, INS
+  |   daddiu AT, MULTRES, -8
+  |    cleartp TRACE:TMP2
+  |  decode_RA8b RC
+  |   beqz AT, >2
+  |. daddu RC, BASE, RC			// Call base.
+  |1:  // Move results down.
+  |  ld CARG1, 0(RA)
+  |   daddiu AT, AT, -8
+  |    daddiu RA, RA, 8
+  |  sd CARG1, 0(RC)
+  |   bnez AT, <1
+  |.   daddiu RC, RC, 8
+  |2:
+  |   decode_RA8a RA, INS
+  |    decode_RB8a RB, INS
+  |   decode_RA8b RA
+  |    decode_RB8b RB
+  |   daddu RA, RA, RB
+  |   daddu RA, BASE, RA
+  |3:
+  |   sltu AT, RC, RA
+  |   bnez AT, >9			// More results wanted?
+  |.   nop
+  |
+  |  lhu TMP3, TRACE:TMP2->traceno
+  |  lhu RD, TRACE:TMP2->link
+  |  beq RD, TMP3, ->cont_nop		// Blacklisted.
+  |.  load_got lj_dispatch_stitch
+  |  bnez RD, =>BC_JLOOP		// Jump to stitched trace.
+  |.  sll RD, RD, 3
+  |
+  |  // Stitch a new trace to the previous trace.
+  |  sw TMP3, DISPATCH_J(exitno)(DISPATCH)
+  |  sd L, DISPATCH_J(L)(DISPATCH)
+  |  sd BASE, L->base
+  |  daddiu CARG1, DISPATCH, GG_DISP2J
+  |  call_intern lj_dispatch_stitch	// (jit_State *J, const BCIns *pc)
+  |.  move CARG2, PC
+  |  b ->cont_nop
+  |.  ld BASE, L->base
+  |
+  |9:
+  |  sd TISNIL, 0(RC)
+  |  b <3
+  |.  daddiu RC, RC, 8
+  |.endif
+  |
+  |->vm_profhook:			// Dispatch target for profiler hook.
+#if LJ_HASPROFILE
+  |  load_got lj_dispatch_profile
+  |   sw MULTRES, SAVE_MULTRES
+  |  move CARG2, PC
+  |   sd BASE, L->base
+  |  call_intern lj_dispatch_profile	// (lua_State *L, const BCIns *pc)
+  |.  move CARG1, L
+  |  // HOOK_PROFILE is off again, so re-dispatch to dynamic instruction.
+  |  daddiu PC, PC, -4
+  |  b ->cont_nop
+  |.  ld BASE, L->base
+#endif
+  |
