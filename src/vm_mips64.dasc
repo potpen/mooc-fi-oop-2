@@ -5377,3 +5377,162 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   daddu TMP1, BASE, RC
     |  ld TMP2, L->maxstack
     |   settp LFUNC:RB, TMP0
+    |  daddu TMP0, RA, RC
+    |   sd LFUNC:RB, 0(TMP1)		// Store (tagged) copy of LFUNC.
+    |   daddiu TMP3, RC, 16+FRAME_VARG
+    |  sltu AT, TMP0, TMP2
+    |    ld KBASE, -4+PC2PROTO(k)(PC)
+    |  beqz AT, ->vm_growstack_l
+    |.  sd TMP3, 8(TMP1)		// Store delta + FRAME_VARG.
+    |  lbu TMP2, -4+PC2PROTO(numparams)(PC)
+    |   move RA, BASE
+    |   move RC, TMP1
+    |  ins_next1
+    |  beqz TMP2, >3
+    |.  daddiu BASE, TMP1, 16
+    |1:
+    |  ld TMP0, 0(RA)
+    |  sltu AT, RA, RC			// Less args than parameters?
+    |  move CARG1, TMP0
+    |.if MIPSR6
+    |  selnez TMP0, TMP0, AT
+    |  seleqz TMP3, TISNIL, AT
+    |  or TMP0, TMP0, TMP3
+    |  seleqz TMP3, CARG1, AT
+    |  selnez CARG1, TISNIL, AT
+    |  or CARG1, CARG1, TMP3
+    |.else
+    |  movz TMP0, TISNIL, AT		// Clear missing parameters.
+    |  movn CARG1, TISNIL, AT		// Clear old fixarg slot (help the GC).
+    |.endif
+    |    addiu TMP2, TMP2, -1
+    |  sd TMP0, 16(TMP1)
+    |    daddiu TMP1, TMP1, 8
+    |  sd CARG1, 0(RA)
+    |  bnez TMP2, <1
+    |.   daddiu RA, RA, 8
+    |3:
+    |  ins_next2
+    break;
+
+  case BC_FUNCC:
+  case BC_FUNCCW:
+    |  // BASE = new base, RA = BASE+framesize*8, RB = CFUNC, RC = nargs*8
+    if (op == BC_FUNCC) {
+      |  ld CFUNCADDR, CFUNC:RB->f
+    } else {
+      |  ld CFUNCADDR, DISPATCH_GL(wrapf)(DISPATCH)
+    }
+    |  daddu TMP1, RA, NARGS8:RC
+    |  ld TMP2, L->maxstack
+    |   daddu RC, BASE, NARGS8:RC
+    |  sd BASE, L->base
+    |  sltu AT, TMP2, TMP1
+    |   sd RC, L->top
+    |    li_vmstate C
+    if (op == BC_FUNCCW) {
+      |  ld CARG2, CFUNC:RB->f
+    }
+    |  bnez AT, ->vm_growstack_c	// Need to grow stack.
+    |.  move CARG1, L
+    |  jalr CFUNCADDR			// (lua_State *L [, lua_CFunction f])
+    |.   st_vmstate
+    |  // Returns nresults.
+    |  ld BASE, L->base
+    |   sll RD, CRET1, 3
+    |  ld TMP1, L->top
+    |    li_vmstate INTERP
+    |  ld PC, FRAME_PC(BASE)		// Fetch PC of caller.
+    |   dsubu RA, TMP1, RD		// RA = L->top - nresults*8
+    |    sd L, DISPATCH_GL(cur_L)(DISPATCH)
+    |  b ->vm_returnc
+    |.   st_vmstate
+    break;
+
+  /* ---------------------------------------------------------------------- */
+
+  default:
+    fprintf(stderr, "Error: undefined opcode BC_%s\n", bc_names[op]);
+    exit(2);
+    break;
+  }
+}
+
+static int build_backend(BuildCtx *ctx)
+{
+  int op;
+
+  dasm_growpc(Dst, BC__MAX);
+
+  build_subroutines(ctx);
+
+  |.code_op
+  for (op = 0; op < BC__MAX; op++)
+    build_ins(ctx, (BCOp)op, op);
+
+  return BC__MAX;
+}
+
+/* Emit pseudo frame-info for all assembler functions. */
+static void emit_asm_debug(BuildCtx *ctx)
+{
+  int fcofs = (int)((uint8_t *)ctx->glob[GLOB_vm_ffi_call] - ctx->code);
+  int i;
+  switch (ctx->mode) {
+  case BUILD_elfasm:
+    fprintf(ctx->fp, "\t.section .debug_frame,\"\",@progbits\n");
+    fprintf(ctx->fp,
+	".Lframe0:\n"
+	"\t.4byte .LECIE0-.LSCIE0\n"
+	".LSCIE0:\n"
+	"\t.4byte 0xffffffff\n"
+	"\t.byte 0x1\n"
+	"\t.string \"\"\n"
+	"\t.uleb128 0x1\n"
+	"\t.sleb128 -4\n"
+	"\t.byte 31\n"
+	"\t.byte 0xc\n\t.uleb128 29\n\t.uleb128 0\n"
+	"\t.align 2\n"
+	".LECIE0:\n\n");
+    fprintf(ctx->fp,
+	".LSFDE0:\n"
+	"\t.4byte .LEFDE0-.LASFDE0\n"
+	".LASFDE0:\n"
+	"\t.4byte .Lframe0\n"
+	"\t.8byte .Lbegin\n"
+	"\t.8byte %d\n"
+	"\t.byte 0xe\n\t.uleb128 %d\n"
+	"\t.byte 0x9f\n\t.sleb128 2*5\n"
+	"\t.byte 0x9e\n\t.sleb128 2*6\n",
+	fcofs, CFRAME_SIZE);
+    for (i = 23; i >= 16; i--)
+      fprintf(ctx->fp, "\t.byte %d\n\t.uleb128 %d\n", 0x80+i, 2*(30-i));
+#if !LJ_SOFTFP
+    for (i = 31; i >= 24; i--)
+      fprintf(ctx->fp, "\t.byte %d\n\t.uleb128 %d\n", 0x80+32+i, 2*(46-i));
+#endif
+    fprintf(ctx->fp,
+	"\t.align 2\n"
+	".LEFDE0:\n\n");
+#if LJ_HASFFI
+    fprintf(ctx->fp,
+	".LSFDE1:\n"
+	"\t.4byte .LEFDE1-.LASFDE1\n"
+	".LASFDE1:\n"
+	"\t.4byte .Lframe0\n"
+	"\t.4byte lj_vm_ffi_call\n"
+	"\t.4byte %d\n"
+	"\t.byte 0x9f\n\t.uleb128 2*1\n"
+	"\t.byte 0x90\n\t.uleb128 2*2\n"
+	"\t.byte 0xd\n\t.uleb128 0x10\n"
+	"\t.align 2\n"
+	".LEFDE1:\n\n", (int)ctx->codesz - fcofs);
+#endif
+#if !LJ_NO_UNWIND
+    /* NYI */
+#endif
+    break;
+  default:
+    break;
+  }
+}
