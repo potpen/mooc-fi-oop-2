@@ -4054,3 +4054,1440 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     ||}
     |.endif
     |  crand 4*cr0+lt, 4*cr0+lt, 4*cr1+lt
+    |   ins_arithfallback bge
+    |.if "fpins" == "fpmod_"
+    |  b ->BC_MODVN_Z			// Avoid 3 copies. It's slow anyway.
+    |.else
+    |.if FPU
+    |  fpins f0, f14, f15
+    |  stfdx f0, BASE, RA
+    |.else
+    |.if "fpcall" == "sfpmod"
+    |  sfpmod
+    |.else
+    |  blex fpcall
+    |.endif
+    |  stwux CRET1, RA, BASE
+    |  stw CRET2, 4(RA)
+    |.endif
+    |  ins_next1
+    |  b <2
+    |.endif
+    |.endmacro
+    |
+    |.macro ins_arith, intins, fpins, fpcall
+    |.if DUALNUM
+    |  ins_arithdn intins, fpins, fpcall
+    |.else
+    |  ins_arithfp fpins
+    |.endif
+    |.endmacro
+
+  case BC_ADDVN: case BC_ADDNV: case BC_ADDVV:
+    |.if GPR64
+    |.macro addo32., y, a, b
+    |  // Need to check overflow for (a<<32) + (b<<32).
+    |  rldicr TMP0, a, 32, 31
+    |  rldicr TMP1, b, 32, 31
+    |  addo. TMP0, TMP0, TMP1
+    |  add y, a, b
+    |.endmacro
+    |  ins_arith addo32., fadd, __adddf3
+    |.else
+    |  ins_arith addo., fadd, __adddf3
+    |.endif
+    break;
+  case BC_SUBVN: case BC_SUBNV: case BC_SUBVV:
+    |.if GPR64
+    |.macro subo32., y, a, b
+    |  // Need to check overflow for (a<<32) - (b<<32).
+    |  rldicr TMP0, a, 32, 31
+    |  rldicr TMP1, b, 32, 31
+    |  subo. TMP0, TMP0, TMP1
+    |  sub y, a, b
+    |.endmacro
+    |  ins_arith subo32., fsub, __subdf3
+    |.else
+    |  ins_arith subo., fsub, __subdf3
+    |.endif
+    break;
+  case BC_MULVN: case BC_MULNV: case BC_MULVV:
+    |  ins_arith mullwo., fmul, __muldf3
+    break;
+  case BC_DIVVN: case BC_DIVNV: case BC_DIVVV:
+    |  ins_arithfp fdiv
+    break;
+  case BC_MODVN:
+    |  ins_arith intmod, fpmod, sfpmod
+    break;
+  case BC_MODNV: case BC_MODVV:
+    |  ins_arith intmod, fpmod_, sfpmod
+    break;
+  case BC_POW:
+    |  // NYI: (partial) integer arithmetic.
+    |  lwzx CARG1, BASE, RB
+    |  lwzx CARG3, BASE, RC
+    |.if FPU
+    |   lfdx FARG1, BASE, RB
+    |   lfdx FARG2, BASE, RC
+    |.else
+    |   add TMP1, BASE, RB
+    |   add TMP2, BASE, RC
+    |   lwz CARG2, 4(TMP1)
+    |   lwz CARG4, 4(TMP2)
+    |.endif
+    |  checknum cr0, CARG1
+    |  checknum cr1, CARG3
+    |  crand 4*cr0+lt, 4*cr0+lt, 4*cr1+lt
+    |  bge ->vmeta_arith_vv
+    |  blex pow
+    |  ins_next1
+    |.if FPU
+    |  stfdx FARG1, BASE, RA
+    |.else
+    |  stwux CARG1, RA, BASE
+    |  stw CARG2, 4(RA)
+    |.endif
+    |  ins_next2
+    break;
+
+  case BC_CAT:
+    |  // RA = dst*8, RB = src_start*8, RC = src_end*8
+    |  sub CARG3, RC, RB
+    |   stp BASE, L->base
+    |  add CARG2, BASE, RC
+    |  mr SAVE0, RB
+    |->BC_CAT_Z:
+    |   stw PC, SAVE_PC
+    |  mr CARG1, L
+    |  srwi CARG3, CARG3, 3
+    |  bl extern lj_meta_cat		// (lua_State *L, TValue *top, int left)
+    |  // Returns NULL (finished) or TValue * (metamethod).
+    |  cmplwi CRET1, 0
+    |   lp BASE, L->base
+    |  bne ->vmeta_binop
+    |  ins_next1
+    |.if FPU
+    |  lfdx f0, BASE, SAVE0		// Copy result from RB to RA.
+    |  stfdx f0, BASE, RA
+    |.else
+    |  lwzux TMP0, SAVE0, BASE
+    |  lwz TMP1, 4(SAVE0)
+    |  stwux TMP0, RA, BASE
+    |  stw TMP1, 4(RA)
+    |.endif
+    |  ins_next2
+    break;
+
+  /* -- Constant ops ------------------------------------------------------ */
+
+  case BC_KSTR:
+    |  // RA = dst*8, RD = str_const*8 (~)
+    |  srwi TMP1, RD, 1
+    |  subfic TMP1, TMP1, -4
+    |  ins_next1
+    |  lwzx TMP0, KBASE, TMP1		// KBASE-4-str_const*4
+    |  li TMP2, LJ_TSTR
+    |  stwux TMP2, RA, BASE
+    |  stw TMP0, 4(RA)
+    |  ins_next2
+    break;
+  case BC_KCDATA:
+    |.if FFI
+    |  // RA = dst*8, RD = cdata_const*8 (~)
+    |  srwi TMP1, RD, 1
+    |  subfic TMP1, TMP1, -4
+    |  ins_next1
+    |  lwzx TMP0, KBASE, TMP1		// KBASE-4-cdata_const*4
+    |  li TMP2, LJ_TCDATA
+    |  stwux TMP2, RA, BASE
+    |  stw TMP0, 4(RA)
+    |  ins_next2
+    |.endif
+    break;
+  case BC_KSHORT:
+    |  // RA = dst*8, RD = int16_literal*8
+    |.if DUALNUM
+    |  slwi RD, RD, 13
+    |  srawi RD, RD, 16
+    |  ins_next1
+    |   stwux TISNUM, RA, BASE
+    |   stw RD, 4(RA)
+    |  ins_next2
+    |.else
+    |  // The soft-float approach is faster.
+    |  slwi RD, RD, 13
+    |  srawi TMP1, RD, 31
+    |  xor TMP2, TMP1, RD
+    |  sub TMP2, TMP2, TMP1		// TMP2 = abs(x)
+    |  cntlzw TMP3, TMP2
+    |  subfic TMP1, TMP3, 0x40d		// TMP1 = exponent-1
+    |   slw TMP2, TMP2, TMP3		// TMP2 = left aligned mantissa
+    |    subfic TMP3, RD, 0
+    |  slwi TMP1, TMP1, 20
+    |   rlwimi RD, TMP2, 21, 1, 31	// hi = sign(x) | (mantissa>>11)
+    |    subfe TMP0, TMP0, TMP0
+    |   add RD, RD, TMP1		// hi = hi + exponent-1
+    |    and RD, RD, TMP0		// hi = x == 0 ? 0 : hi
+    |  ins_next1
+    |    stwux RD, RA, BASE
+    |    stw ZERO, 4(RA)
+    |  ins_next2
+    |.endif
+    break;
+  case BC_KNUM:
+    |  // RA = dst*8, RD = num_const*8
+    |  ins_next1
+    |.if FPU
+    |  lfdx f0, KBASE, RD
+    |  stfdx f0, BASE, RA
+    |.else
+    |  lwzux TMP0, RD, KBASE
+    |  lwz TMP1, 4(RD)
+    |  stwux TMP0, RA, BASE
+    |  stw TMP1, 4(RA)
+    |.endif
+    |  ins_next2
+    break;
+  case BC_KPRI:
+    |  // RA = dst*8, RD = primitive_type*8 (~)
+    |  srwi TMP1, RD, 3
+    |  not TMP0, TMP1
+    |  ins_next1
+    |  stwx TMP0, BASE, RA
+    |  ins_next2
+    break;
+  case BC_KNIL:
+    |  // RA = base*8, RD = end*8
+    |  stwx TISNIL, BASE, RA
+    |   addi RA, RA, 8
+    |1:
+    |  stwx TISNIL, BASE, RA
+    |  cmpw RA, RD
+    |   addi RA, RA, 8
+    |  blt <1
+    |  ins_next_
+    break;
+
+  /* -- Upvalue and function ops ------------------------------------------ */
+
+  case BC_UGET:
+    |  // RA = dst*8, RD = uvnum*8
+    |  lwz LFUNC:RB, FRAME_FUNC(BASE)
+    |   srwi RD, RD, 1
+    |   addi RD, RD, offsetof(GCfuncL, uvptr)
+    |  lwzx UPVAL:RB, LFUNC:RB, RD
+    |  ins_next1
+    |  lwz TMP1, UPVAL:RB->v
+    |.if FPU
+    |  lfd f0, 0(TMP1)
+    |  stfdx f0, BASE, RA
+    |.else
+    |  lwz TMP2, 0(TMP1)
+    |  lwz TMP3, 4(TMP1)
+    |  stwux TMP2, RA, BASE
+    |  stw TMP3, 4(RA)
+    |.endif
+    |  ins_next2
+    break;
+  case BC_USETV:
+    |  // RA = uvnum*8, RD = src*8
+    |  lwz LFUNC:RB, FRAME_FUNC(BASE)
+    |    srwi RA, RA, 1
+    |    addi RA, RA, offsetof(GCfuncL, uvptr)
+    |.if FPU
+    |   lfdux f0, RD, BASE
+    |.else
+    |   lwzux CARG1, RD, BASE
+    |   lwz CARG3, 4(RD)
+    |.endif
+    |  lwzx UPVAL:RB, LFUNC:RB, RA
+    |  lbz TMP3, UPVAL:RB->marked
+    |   lwz CARG2, UPVAL:RB->v
+    |  andix. TMP3, TMP3, LJ_GC_BLACK	// isblack(uv)
+    |    lbz TMP0, UPVAL:RB->closed
+    |   lwz TMP2, 0(RD)
+    |.if FPU
+    |   stfd f0, 0(CARG2)
+    |.else
+    |   stw CARG1, 0(CARG2)
+    |   stw CARG3, 4(CARG2)
+    |.endif
+    |    cmplwi cr1, TMP0, 0
+    |   lwz TMP1, 4(RD)
+    |  cror 4*cr0+eq, 4*cr0+eq, 4*cr1+eq
+    |   subi TMP2, TMP2, (LJ_TNUMX+1)
+    |  bne >2				// Upvalue is closed and black?
+    |1:
+    |  ins_next
+    |
+    |2:  // Check if new value is collectable.
+    |  cmplwi TMP2, LJ_TISGCV - (LJ_TNUMX+1)
+    |  bge <1				// tvisgcv(v)
+    |  lbz TMP3, GCOBJ:TMP1->gch.marked
+    |  andix. TMP3, TMP3, LJ_GC_WHITES	// iswhite(v)
+    |   la CARG1, GG_DISP2G(DISPATCH)
+    |  // Crossed a write barrier. Move the barrier forward.
+    |  beq <1
+    |  bl extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |  b <1
+    break;
+  case BC_USETS:
+    |  // RA = uvnum*8, RD = str_const*8 (~)
+    |  lwz LFUNC:RB, FRAME_FUNC(BASE)
+    |   srwi TMP1, RD, 1
+    |    srwi RA, RA, 1
+    |   subfic TMP1, TMP1, -4
+    |    addi RA, RA, offsetof(GCfuncL, uvptr)
+    |   lwzx STR:TMP1, KBASE, TMP1	// KBASE-4-str_const*4
+    |  lwzx UPVAL:RB, LFUNC:RB, RA
+    |  lbz TMP3, UPVAL:RB->marked
+    |   lwz CARG2, UPVAL:RB->v
+    |  andix. TMP3, TMP3, LJ_GC_BLACK	// isblack(uv)
+    |   lbz TMP3, STR:TMP1->marked
+    |   lbz TMP2, UPVAL:RB->closed
+    |   li TMP0, LJ_TSTR
+    |   stw STR:TMP1, 4(CARG2)
+    |   stw TMP0, 0(CARG2)
+    |  bne >2
+    |1:
+    |  ins_next
+    |
+    |2:  // Check if string is white and ensure upvalue is closed.
+    |  andix. TMP3, TMP3, LJ_GC_WHITES	// iswhite(str)
+    |   cmplwi cr1, TMP2, 0
+    |  cror 4*cr0+eq, 4*cr0+eq, 4*cr1+eq
+    |   la CARG1, GG_DISP2G(DISPATCH)
+    |  // Crossed a write barrier. Move the barrier forward.
+    |  beq <1
+    |  bl extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
+    |  b <1
+    break;
+  case BC_USETN:
+    |  // RA = uvnum*8, RD = num_const*8
+    |  lwz LFUNC:RB, FRAME_FUNC(BASE)
+    |   srwi RA, RA, 1
+    |   addi RA, RA, offsetof(GCfuncL, uvptr)
+    |.if FPU
+    |    lfdx f0, KBASE, RD
+    |.else
+    |    lwzux TMP2, RD, KBASE
+    |    lwz TMP3, 4(RD)
+    |.endif
+    |  lwzx UPVAL:RB, LFUNC:RB, RA
+    |  ins_next1
+    |  lwz TMP1, UPVAL:RB->v
+    |.if FPU
+    |  stfd f0, 0(TMP1)
+    |.else
+    |  stw TMP2, 0(TMP1)
+    |  stw TMP3, 4(TMP1)
+    |.endif
+    |  ins_next2
+    break;
+  case BC_USETP:
+    |  // RA = uvnum*8, RD = primitive_type*8 (~)
+    |  lwz LFUNC:RB, FRAME_FUNC(BASE)
+    |   srwi RA, RA, 1
+    |    srwi TMP0, RD, 3
+    |   addi RA, RA, offsetof(GCfuncL, uvptr)
+    |    not TMP0, TMP0
+    |  lwzx UPVAL:RB, LFUNC:RB, RA
+    |  ins_next1
+    |  lwz TMP1, UPVAL:RB->v
+    |  stw TMP0, 0(TMP1)
+    |  ins_next2
+    break;
+
+  case BC_UCLO:
+    |  // RA = level*8, RD = target
+    |  lwz TMP1, L->openupval
+    |  branch_RD			// Do this first since RD is not saved.
+    |   stp BASE, L->base
+    |  cmplwi TMP1, 0
+    |   mr CARG1, L
+    |  beq >1
+    |   add CARG2, BASE, RA
+    |  bl extern lj_func_closeuv	// (lua_State *L, TValue *level)
+    |  lp BASE, L->base
+    |1:
+    |  ins_next
+    break;
+
+  case BC_FNEW:
+    |  // RA = dst*8, RD = proto_const*8 (~) (holding function prototype)
+    |  srwi TMP1, RD, 1
+    |   stp BASE, L->base
+    |  subfic TMP1, TMP1, -4
+    |   stw PC, SAVE_PC
+    |  lwzx CARG2, KBASE, TMP1		// KBASE-4-tab_const*4
+    |   mr CARG1, L
+    |  lwz CARG3, FRAME_FUNC(BASE)
+    |  // (lua_State *L, GCproto *pt, GCfuncL *parent)
+    |  bl extern lj_func_newL_gc
+    |  // Returns GCfuncL *.
+    |  lp BASE, L->base
+    |   li TMP0, LJ_TFUNC
+    |  stwux TMP0, RA, BASE
+    |  stw LFUNC:CRET1, 4(RA)
+    |  ins_next
+    break;
+
+  /* -- Table ops --------------------------------------------------------- */
+
+  case BC_TNEW:
+  case BC_TDUP:
+    |  // RA = dst*8, RD = (hbits|asize)*8 | tab_const*8 (~)
+    |  lwz TMP0, DISPATCH_GL(gc.total)(DISPATCH)
+    |   mr CARG1, L
+    |  lwz TMP1, DISPATCH_GL(gc.threshold)(DISPATCH)
+    |   stp BASE, L->base
+    |  cmplw TMP0, TMP1
+    |   stw PC, SAVE_PC
+    |  bge >5
+    |1:
+    if (op == BC_TNEW) {
+      |  rlwinm CARG2, RD, 29, 21, 31
+      |  rlwinm CARG3, RD, 18, 27, 31
+      |  cmpwi CARG2, 0x7ff; beq >3
+      |2:
+      |  bl extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_t hbits)
+      |  // Returns Table *.
+    } else {
+      |  srwi TMP1, RD, 1
+      |  subfic TMP1, TMP1, -4
+      |  lwzx CARG2, KBASE, TMP1		// KBASE-4-tab_const*4
+      |  bl extern lj_tab_dup  // (lua_State *L, Table *kt)
+      |  // Returns Table *.
+    }
+    |  lp BASE, L->base
+    |   li TMP0, LJ_TTAB
+    |  stwux TMP0, RA, BASE
+    |  stw TAB:CRET1, 4(RA)
+    |  ins_next
+    if (op == BC_TNEW) {
+      |3:
+      |  li CARG2, 0x801
+      |  b <2
+    }
+    |5:
+    |  mr SAVE0, RD
+    |  bl extern lj_gc_step_fixtop  // (lua_State *L)
+    |  mr RD, SAVE0
+    |  mr CARG1, L
+    |  b <1
+    break;
+
+  case BC_GGET:
+    |  // RA = dst*8, RD = str_const*8 (~)
+  case BC_GSET:
+    |  // RA = src*8, RD = str_const*8 (~)
+    |  lwz LFUNC:TMP2, FRAME_FUNC(BASE)
+    |   srwi TMP1, RD, 1
+    |  lwz TAB:RB, LFUNC:TMP2->env
+    |   subfic TMP1, TMP1, -4
+    |   lwzx STR:RC, KBASE, TMP1	// KBASE-4-str_const*4
+    if (op == BC_GGET) {
+      |  b ->BC_TGETS_Z
+    } else {
+      |  b ->BC_TSETS_Z
+    }
+    break;
+
+  case BC_TGETV:
+    |  // RA = dst*8, RB = table*8, RC = key*8
+    |  lwzux CARG1, RB, BASE
+    |  lwzux CARG2, RC, BASE
+    |   lwz TAB:RB, 4(RB)
+    |.if DUALNUM
+    |   lwz RC, 4(RC)
+    |.else
+    |   lfd f0, 0(RC)
+    |.endif
+    |  checktab CARG1
+    |   checknum cr1, CARG2
+    |  bne ->vmeta_tgetv
+    |.if DUALNUM
+    |  lwz TMP0, TAB:RB->asize
+    |   bne cr1, >5
+    |   lwz TMP1, TAB:RB->array
+    |  cmplw TMP0, RC
+    |   slwi TMP2, RC, 3
+    |.else
+    |   bge cr1, >5
+    |  // Convert number key to integer, check for integerness and range.
+    |  fctiwz f1, f0
+    |    fadd f2, f0, TOBIT
+    |  stfd f1, TMPD
+    |   lwz TMP0, TAB:RB->asize
+    |    fsub f2, f2, TOBIT
+    |  lwz TMP2, TMPD_LO
+    |   lwz TMP1, TAB:RB->array
+    |    fcmpu cr1, f0, f2
+    |  cmplw cr0, TMP0, TMP2
+    |  crand 4*cr0+gt, 4*cr0+gt, 4*cr1+eq
+    |   slwi TMP2, TMP2, 3
+    |.endif
+    |  ble ->vmeta_tgetv		// Integer key and in array part?
+    |  lwzx TMP0, TMP1, TMP2
+    |.if FPU
+    |   lfdx f14, TMP1, TMP2
+    |.else
+    |   lwzux SAVE0, TMP1, TMP2
+    |   lwz SAVE1, 4(TMP1)
+    |.endif
+    |  checknil TMP0; beq >2
+    |1:
+    |  ins_next1
+    |.if FPU
+    |   stfdx f14, BASE, RA
+    |.else
+    |   stwux SAVE0, RA, BASE
+    |   stw SAVE1, 4(RA)
+    |.endif
+    |  ins_next2
+    |
+    |2:  // Check for __index if table value is nil.
+    |  lwz TAB:TMP2, TAB:RB->metatable
+    |  cmplwi TAB:TMP2, 0
+    |  beq <1				// No metatable: done.
+    |  lbz TMP0, TAB:TMP2->nomm
+    |  andix. TMP0, TMP0, 1<<MM_index
+    |  bne <1				// 'no __index' flag set: done.
+    |  b ->vmeta_tgetv
+    |
+    |5:
+    |  checkstr CARG2; bne ->vmeta_tgetv
+    |.if not DUALNUM
+    |  lwz STR:RC, 4(RC)
+    |.endif
+    |  b ->BC_TGETS_Z			// String key?
+    break;
+  case BC_TGETS:
+    |  // RA = dst*8, RB = table*8, RC = str_const*8 (~)
+    |  lwzux CARG1, RB, BASE
+    |   srwi TMP1, RC, 1
+    |    lwz TAB:RB, 4(RB)
+    |   subfic TMP1, TMP1, -4
+    |  checktab CARG1
+    |   lwzx STR:RC, KBASE, TMP1	// KBASE-4-str_const*4
+    |  bne ->vmeta_tgets1
+    |->BC_TGETS_Z:
+    |  // TAB:RB = GCtab *, STR:RC = GCstr *, RA = dst*8
+    |  lwz TMP0, TAB:RB->hmask
+    |  lwz TMP1, STR:RC->sid
+    |  lwz NODE:TMP2, TAB:RB->node
+    |  and TMP1, TMP1, TMP0		// idx = str->sid & tab->hmask
+    |  slwi TMP0, TMP1, 5
+    |  slwi TMP1, TMP1, 3
+    |  sub TMP1, TMP0, TMP1
+    |  add NODE:TMP2, NODE:TMP2, TMP1	// node = tab->node + (idx*32-idx*8)
+    |1:
+    |  lwz CARG1, NODE:TMP2->key
+    |   lwz TMP0, 4+offsetof(Node, key)(NODE:TMP2)
+    |    lwz CARG2, NODE:TMP2->val
+    |     lwz TMP1, 4+offsetof(Node, val)(NODE:TMP2)
+    |  checkstr CARG1; bne >4
+    |   cmpw TMP0, STR:RC; bne >4
+    |    checknil CARG2; beq >5		// Key found, but nil value?
+    |3:
+    |    stwux CARG2, RA, BASE
+    |     stw TMP1, 4(RA)
+    |  ins_next
+    |
+    |4:  // Follow hash chain.
+    |  lwz NODE:TMP2, NODE:TMP2->next
+    |  cmplwi NODE:TMP2, 0
+    |  bne <1
+    |  // End of hash chain: key not found, nil result.
+    |   li CARG2, LJ_TNIL
+    |
+    |5:  // Check for __index if table value is nil.
+    |  lwz TAB:TMP2, TAB:RB->metatable
+    |  cmplwi TAB:TMP2, 0
+    |  beq <3				// No metatable: done.
+    |  lbz TMP0, TAB:TMP2->nomm
+    |  andix. TMP0, TMP0, 1<<MM_index
+    |  bne <3				// 'no __index' flag set: done.
+    |  b ->vmeta_tgets
+    break;
+  case BC_TGETB:
+    |  // RA = dst*8, RB = table*8, RC = index*8
+    |  lwzux CARG1, RB, BASE
+    |   srwi TMP0, RC, 3
+    |   lwz TAB:RB, 4(RB)
+    |  checktab CARG1; bne ->vmeta_tgetb
+    |  lwz TMP1, TAB:RB->asize
+    |   lwz TMP2, TAB:RB->array
+    |  cmplw TMP0, TMP1; bge ->vmeta_tgetb
+    |.if FPU
+    |  lwzx TMP1, TMP2, RC
+    |   lfdx f0, TMP2, RC
+    |.else
+    |  lwzux TMP1, TMP2, RC
+    |   lwz TMP3, 4(TMP2)
+    |.endif
+    |  checknil TMP1; beq >5
+    |1:
+    |  ins_next1
+    |.if FPU
+    |   stfdx f0, BASE, RA
+    |.else
+    |   stwux TMP1, RA, BASE
+    |   stw TMP3, 4(RA)
+    |.endif
+    |  ins_next2
+    |
+    |5:  // Check for __index if table value is nil.
+    |  lwz TAB:TMP2, TAB:RB->metatable
+    |  cmplwi TAB:TMP2, 0
+    |  beq <1				// No metatable: done.
+    |  lbz TMP2, TAB:TMP2->nomm
+    |  andix. TMP2, TMP2, 1<<MM_index
+    |  bne <1				// 'no __index' flag set: done.
+    |  b ->vmeta_tgetb			// Caveat: preserve TMP0!
+    break;
+  case BC_TGETR:
+    |  // RA = dst*8, RB = table*8, RC = key*8
+    |  add RB, BASE, RB
+    |  lwz TAB:CARG1, 4(RB)
+    |.if DUALNUM
+    |  add RC, BASE, RC
+    |  lwz TMP0, TAB:CARG1->asize
+    |  lwz CARG2, 4(RC)
+    |   lwz TMP1, TAB:CARG1->array
+    |.else
+    |  lfdx f0, BASE, RC
+    |  lwz TMP0, TAB:CARG1->asize
+    |  toint CARG2, f0
+    |   lwz TMP1, TAB:CARG1->array
+    |.endif
+    |  cmplw TMP0, CARG2
+    |   slwi TMP2, CARG2, 3
+    |  ble ->vmeta_tgetr		// In array part?
+    |.if FPU
+    |   lfdx f14, TMP1, TMP2
+    |.else
+    |   lwzux SAVE0, TMP2, TMP1
+    |   lwz SAVE1, 4(TMP2)
+    |.endif
+    |->BC_TGETR_Z:
+    |  ins_next1
+    |.if FPU
+    |   stfdx f14, BASE, RA
+    |.else
+    |   stwux SAVE0, RA, BASE
+    |   stw SAVE1, 4(RA)
+    |.endif
+    |  ins_next2
+    break;
+
+  case BC_TSETV:
+    |  // RA = src*8, RB = table*8, RC = key*8
+    |  lwzux CARG1, RB, BASE
+    |  lwzux CARG2, RC, BASE
+    |   lwz TAB:RB, 4(RB)
+    |.if DUALNUM
+    |   lwz RC, 4(RC)
+    |.else
+    |   lfd f0, 0(RC)
+    |.endif
+    |  checktab CARG1
+    |   checknum cr1, CARG2
+    |  bne ->vmeta_tsetv
+    |.if DUALNUM
+    |  lwz TMP0, TAB:RB->asize
+    |   bne cr1, >5
+    |   lwz TMP1, TAB:RB->array
+    |  cmplw TMP0, RC
+    |   slwi TMP0, RC, 3
+    |.else
+    |   bge cr1, >5
+    |  // Convert number key to integer, check for integerness and range.
+    |  fctiwz f1, f0
+    |    fadd f2, f0, TOBIT
+    |  stfd f1, TMPD
+    |   lwz TMP0, TAB:RB->asize
+    |    fsub f2, f2, TOBIT
+    |  lwz TMP2, TMPD_LO
+    |   lwz TMP1, TAB:RB->array
+    |    fcmpu cr1, f0, f2
+    |  cmplw cr0, TMP0, TMP2
+    |  crand 4*cr0+gt, 4*cr0+gt, 4*cr1+eq
+    |   slwi TMP0, TMP2, 3
+    |.endif
+    |  ble ->vmeta_tsetv		// Integer key and in array part?
+    |   lwzx TMP2, TMP1, TMP0
+    |  lbz TMP3, TAB:RB->marked
+    |.if FPU
+    |    lfdx f14, BASE, RA
+    |.else
+    |    add SAVE1, BASE, RA
+    |    lwz SAVE0, 0(SAVE1)
+    |    lwz SAVE1, 4(SAVE1)
+    |.endif
+    |   checknil TMP2; beq >3
+    |1:
+    |  andix. TMP2, TMP3, LJ_GC_BLACK	// isblack(table)
+    |.if FPU
+    |    stfdx f14, TMP1, TMP0
+    |.else
+    |    stwux SAVE0, TMP1, TMP0
+    |    stw SAVE1, 4(TMP1)
+    |.endif
+    |  bne >7
+    |2:
+    |  ins_next
+    |
+    |3:  // Check for __newindex if previous value is nil.
+    |  lwz TAB:TMP2, TAB:RB->metatable
+    |  cmplwi TAB:TMP2, 0
+    |  beq <1				// No metatable: done.
+    |  lbz TMP2, TAB:TMP2->nomm
+    |  andix. TMP2, TMP2, 1<<MM_newindex
+    |  bne <1				// 'no __newindex' flag set: done.
+    |  b ->vmeta_tsetv
+    |
+    |5:
+    |  checkstr CARG2; bne ->vmeta_tsetv
+    |.if not DUALNUM
+    |  lwz STR:RC, 4(RC)
+    |.endif
+    |  b ->BC_TSETS_Z			// String key?
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:RB, TMP3, TMP0
+    |  b <2
+    break;
+  case BC_TSETS:
+    |  // RA = src*8, RB = table*8, RC = str_const*8 (~)
+    |  lwzux CARG1, RB, BASE
+    |   srwi TMP1, RC, 1
+    |    lwz TAB:RB, 4(RB)
+    |   subfic TMP1, TMP1, -4
+    |  checktab CARG1
+    |   lwzx STR:RC, KBASE, TMP1	// KBASE-4-str_const*4
+    |  bne ->vmeta_tsets1
+    |->BC_TSETS_Z:
+    |  // TAB:RB = GCtab *, STR:RC = GCstr *, RA = src*8
+    |  lwz TMP0, TAB:RB->hmask
+    |  lwz TMP1, STR:RC->sid
+    |  lwz NODE:TMP2, TAB:RB->node
+    |    stb ZERO, TAB:RB->nomm		// Clear metamethod cache.
+    |  and TMP1, TMP1, TMP0		// idx = str->sid & tab->hmask
+    |.if FPU
+    |    lfdx f14, BASE, RA
+    |.else
+    |    add CARG2, BASE, RA
+    |    lwz SAVE0, 0(CARG2)
+    |    lwz SAVE1, 4(CARG2)
+    |.endif
+    |  slwi TMP0, TMP1, 5
+    |  slwi TMP1, TMP1, 3
+    |  sub TMP1, TMP0, TMP1
+    |    lbz TMP3, TAB:RB->marked
+    |  add NODE:TMP2, NODE:TMP2, TMP1	// node = tab->node + (idx*32-idx*8)
+    |1:
+    |  lwz CARG1, NODE:TMP2->key
+    |   lwz TMP0, 4+offsetof(Node, key)(NODE:TMP2)
+    |    lwz CARG2, NODE:TMP2->val
+    |     lwz NODE:TMP1, NODE:TMP2->next
+    |  checkstr CARG1; bne >5
+    |   cmpw TMP0, STR:RC; bne >5
+    |    checknil CARG2; beq >4		// Key found, but nil value?
+    |2:
+    |  andix. TMP0, TMP3, LJ_GC_BLACK	// isblack(table)
+    |.if FPU
+    |    stfd f14, NODE:TMP2->val
+    |.else
+    |    stw SAVE0, NODE:TMP2->val.u32.hi
+    |    stw SAVE1, NODE:TMP2->val.u32.lo
+    |.endif
+    |  bne >7
+    |3:
+    |  ins_next
+    |
+    |4:  // Check for __newindex if previous value is nil.
+    |  lwz TAB:TMP1, TAB:RB->metatable
+    |  cmplwi TAB:TMP1, 0
+    |  beq <2				// No metatable: done.
+    |  lbz TMP0, TAB:TMP1->nomm
+    |  andix. TMP0, TMP0, 1<<MM_newindex
+    |  bne <2				// 'no __newindex' flag set: done.
+    |  b ->vmeta_tsets
+    |
+    |5:  // Follow hash chain.
+    |  cmplwi NODE:TMP1, 0
+    |   mr NODE:TMP2, NODE:TMP1
+    |  bne <1
+    |  // End of hash chain: key not found, add a new one.
+    |
+    |  // But check for __newindex first.
+    |  lwz TAB:TMP1, TAB:RB->metatable
+    |   la CARG3, DISPATCH_GL(tmptv)(DISPATCH)
+    |   stw PC, SAVE_PC
+    |   mr CARG1, L
+    |  cmplwi TAB:TMP1, 0
+    |   stp BASE, L->base
+    |  beq >6				// No metatable: continue.
+    |  lbz TMP0, TAB:TMP1->nomm
+    |  andix. TMP0, TMP0, 1<<MM_newindex
+    |  beq ->vmeta_tsets		// 'no __newindex' flag NOT set: check.
+    |6:
+    |  li TMP0, LJ_TSTR
+    |   stw STR:RC, 4(CARG3)
+    |   mr CARG2, TAB:RB
+    |  stw TMP0, 0(CARG3)
+    |  bl extern lj_tab_newkey		// (lua_State *L, GCtab *t, TValue *k)
+    |  // Returns TValue *.
+    |  lp BASE, L->base
+    |.if FPU
+    |  stfd f14, 0(CRET1)
+    |.else
+    |  stw SAVE0, 0(CRET1)
+    |  stw SAVE1, 4(CRET1)
+    |.endif
+    |  b <3				// No 2nd write barrier needed.
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:RB, TMP3, TMP0
+    |  b <3
+    break;
+  case BC_TSETB:
+    |  // RA = src*8, RB = table*8, RC = index*8
+    |  lwzux CARG1, RB, BASE
+    |   srwi TMP0, RC, 3
+    |   lwz TAB:RB, 4(RB)
+    |  checktab CARG1; bne ->vmeta_tsetb
+    |  lwz TMP1, TAB:RB->asize
+    |   lwz TMP2, TAB:RB->array
+    |    lbz TMP3, TAB:RB->marked
+    |  cmplw TMP0, TMP1
+    |.if FPU
+    |   lfdx f14, BASE, RA
+    |.else
+    |   add CARG2, BASE, RA
+    |   lwz SAVE0, 0(CARG2)
+    |   lwz SAVE1, 4(CARG2)
+    |.endif
+    |  bge ->vmeta_tsetb
+    |  lwzx TMP1, TMP2, RC
+    |  checknil TMP1; beq >5
+    |1:
+    |  andix. TMP0, TMP3, LJ_GC_BLACK	// isblack(table)
+    |.if FPU
+    |   stfdx f14, TMP2, RC
+    |.else
+    |   stwux SAVE0, RC, TMP2
+    |   stw SAVE1, 4(RC)
+    |.endif
+    |  bne >7
+    |2:
+    |  ins_next
+    |
+    |5:  // Check for __newindex if previous value is nil.
+    |  lwz TAB:TMP1, TAB:RB->metatable
+    |  cmplwi TAB:TMP1, 0
+    |  beq <1				// No metatable: done.
+    |  lbz TMP1, TAB:TMP1->nomm
+    |  andix. TMP1, TMP1, 1<<MM_newindex
+    |  bne <1				// 'no __newindex' flag set: done.
+    |  b ->vmeta_tsetb			// Caveat: preserve TMP0!
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:RB, TMP3, TMP0
+    |  b <2
+    break;
+  case BC_TSETR:
+    |  // RA = dst*8, RB = table*8, RC = key*8
+    |  add RB, BASE, RB
+    |  lwz TAB:CARG2, 4(RB)
+    |.if DUALNUM
+    |  add RC, BASE, RC
+    |    lbz TMP3, TAB:CARG2->marked
+    |  lwz TMP0, TAB:CARG2->asize
+    |  lwz CARG3, 4(RC)
+    |   lwz TMP1, TAB:CARG2->array
+    |.else
+    |  lfdx f0, BASE, RC
+    |    lbz TMP3, TAB:CARG2->marked
+    |  lwz TMP0, TAB:CARG2->asize
+    |  toint CARG3, f0
+    |   lwz TMP1, TAB:CARG2->array
+    |.endif
+    |  andix. TMP2, TMP3, LJ_GC_BLACK	// isblack(table)
+    |  bne >7
+    |2:
+    |  cmplw TMP0, CARG3
+    |   slwi TMP2, CARG3, 3
+    |.if FPU
+    |   lfdx f14, BASE, RA
+    |.else
+    |  lwzux SAVE0, RA, BASE
+    |  lwz SAVE1, 4(RA)
+    |.endif
+    |  ble ->vmeta_tsetr		// In array part?
+    |  ins_next1
+    |.if FPU
+    |   stfdx f14, TMP1, TMP2
+    |.else
+    |   stwux SAVE0, TMP1, TMP2
+    |   stw SAVE1, 4(TMP1)
+    |.endif
+    |  ins_next2
+    |
+    |7:  // Possible table write barrier for the value. Skip valiswhite check.
+    |  barrierback TAB:CARG2, TMP3, TMP2
+    |  b <2
+    break;
+
+
+  case BC_TSETM:
+    |  // RA = base*8 (table at base-1), RD = num_const*8 (start index)
+    |  add RA, BASE, RA
+    |1:
+    |   add TMP3, KBASE, RD
+    |  lwz TAB:CARG2, -4(RA)		// Guaranteed to be a table.
+    |    addic. TMP0, MULTRES, -8
+    |   lwz TMP3, 4(TMP3)		// Integer constant is in lo-word.
+    |    srwi CARG3, TMP0, 3
+    |    beq >4				// Nothing to copy?
+    |  add CARG3, CARG3, TMP3
+    |  lwz TMP2, TAB:CARG2->asize
+    |   slwi TMP1, TMP3, 3
+    |    lbz TMP3, TAB:CARG2->marked
+    |  cmplw CARG3, TMP2
+    |   add TMP2, RA, TMP0
+    |   lwz TMP0, TAB:CARG2->array
+    |  bgt >5
+    |   add TMP1, TMP1, TMP0
+    |    andix. TMP0, TMP3, LJ_GC_BLACK	// isblack(table)
+    |3:  // Copy result slots to table.
+    |.if FPU
+    |   lfd f0, 0(RA)
+    |.else
+    |   lwz SAVE0, 0(RA)
+    |   lwz SAVE1, 4(RA)
+    |.endif
+    |  addi RA, RA, 8
+    |  cmpw cr1, RA, TMP2
+    |.if FPU
+    |   stfd f0, 0(TMP1)
+    |.else
+    |   stw SAVE0, 0(TMP1)
+    |   stw SAVE1, 4(TMP1)
+    |.endif
+    |    addi TMP1, TMP1, 8
+    |  blt cr1, <3
+    |  bne >7
+    |4:
+    |  ins_next
+    |
+    |5:  // Need to resize array part.
+    |   stp BASE, L->base
+    |  mr CARG1, L
+    |   stw PC, SAVE_PC
+    |  mr SAVE0, RD
+    |  bl extern lj_tab_reasize		// (lua_State *L, GCtab *t, int nasize)
+    |  // Must not reallocate the stack.
+    |  mr RD, SAVE0
+    |  b <1
+    |
+    |7:  // Possible table write barrier for any value. Skip valiswhite check.
+    |  barrierback TAB:CARG2, TMP3, TMP0
+    |  b <4
+    break;
+
+  /* -- Calls and vararg handling ----------------------------------------- */
+
+  case BC_CALLM:
+    |  // RA = base*8, (RB = (nresults+1)*8,) RC = extra_nargs*8
+    |  add NARGS8:RC, NARGS8:RC, MULTRES
+    |  // Fall through. Assumes BC_CALL follows.
+    break;
+  case BC_CALL:
+    |  // RA = base*8, (RB = (nresults+1)*8,) RC = (nargs+1)*8
+    |  mr TMP2, BASE
+    |  lwzux TMP0, BASE, RA
+    |   lwz LFUNC:RB, 4(BASE)
+    |    subi NARGS8:RC, NARGS8:RC, 8
+    |   addi BASE, BASE, 8
+    |  checkfunc TMP0; bne ->vmeta_call
+    |  ins_call
+    break;
+
+  case BC_CALLMT:
+    |  // RA = base*8, (RB = 0,) RC = extra_nargs*8
+    |  add NARGS8:RC, NARGS8:RC, MULTRES
+    |  // Fall through. Assumes BC_CALLT follows.
+    break;
+  case BC_CALLT:
+    |  // RA = base*8, (RB = 0,) RC = (nargs+1)*8
+    |  lwzux TMP0, RA, BASE
+    |   lwz LFUNC:RB, 4(RA)
+    |    subi NARGS8:RC, NARGS8:RC, 8
+    |    lwz TMP1, FRAME_PC(BASE)
+    |  checkfunc TMP0
+    |   addi RA, RA, 8
+    |  bne ->vmeta_callt
+    |->BC_CALLT_Z:
+    |  andix. TMP0, TMP1, FRAME_TYPE	// Caveat: preserve cr0 until the crand.
+    |   lbz TMP3, LFUNC:RB->ffid
+    |    xori TMP2, TMP1, FRAME_VARG
+    |    cmplwi cr1, NARGS8:RC, 0
+    |  bne >7
+    |1:
+    |  stw LFUNC:RB, FRAME_FUNC(BASE)	// Copy function down, but keep PC.
+    |  li TMP2, 0
+    |   cmplwi cr7, TMP3, 1		// (> FF_C) Calling a fast function?
+    |    beq cr1, >3
+    |2:
+    |  addi TMP3, TMP2, 8
+    |.if FPU
+    |   lfdx f0, RA, TMP2
+    |.else
+    |   add CARG3, RA, TMP2
+    |   lwz CARG1, 0(CARG3)
+    |   lwz CARG2, 4(CARG3)
+    |.endif
+    |  cmplw cr1, TMP3, NARGS8:RC
+    |.if FPU
+    |   stfdx f0, BASE, TMP2
+    |.else
+    |   stwux CARG1, TMP2, BASE
+    |   stw CARG2, 4(TMP2)
+    |.endif
+    |  mr TMP2, TMP3
+    |  bne cr1, <2
+    |3:
+    |  crand 4*cr0+eq, 4*cr0+eq, 4*cr7+gt
+    |  beq >5
+    |4:
+    |  ins_callt
+    |
+    |5:  // Tailcall to a fast function with a Lua frame below.
+    |  lwz INS, -4(TMP1)
+    |  decode_RA8 RA, INS
+    |  sub TMP1, BASE, RA
+    |  lwz LFUNC:TMP1, FRAME_FUNC-8(TMP1)
+    |  lwz TMP1, LFUNC:TMP1->pc
+    |  lwz KBASE, PC2PROTO(k)(TMP1)	// Need to prepare KBASE.
+    |  b <4
+    |
+    |7:  // Tailcall from a vararg function.
+    |  andix. TMP0, TMP2, FRAME_TYPEP
+    |  bne <1				// Vararg frame below?
+    |  sub BASE, BASE, TMP2		// Relocate BASE down.
+    |  lwz TMP1, FRAME_PC(BASE)
+    |  andix. TMP0, TMP1, FRAME_TYPE
+    |  b <1
+    break;
+
+  case BC_ITERC:
+    |  // RA = base*8, (RB = (nresults+1)*8, RC = (nargs+1)*8 ((2+1)*8))
+    |  mr TMP2, BASE
+    |  add BASE, BASE, RA
+    |  lwz TMP1, -24(BASE)
+    |   lwz LFUNC:RB, -20(BASE)
+    |.if FPU
+    |    lfd f1, -8(BASE)
+    |    lfd f0, -16(BASE)
+    |.else
+    |    lwz CARG1, -8(BASE)
+    |    lwz CARG2, -4(BASE)
+    |    lwz CARG3, -16(BASE)
+    |    lwz CARG4, -12(BASE)
+    |.endif
+    |  stw TMP1, 0(BASE)		// Copy callable.
+    |   stw LFUNC:RB, 4(BASE)
+    |  checkfunc TMP1
+    |     li NARGS8:RC, 16		// Iterators get 2 arguments.
+    |.if FPU
+    |    stfd f1, 16(BASE)		// Copy control var.
+    |    stfdu f0, 8(BASE)		// Copy state.
+    |.else
+    |    stw CARG1, 16(BASE)		// Copy control var.
+    |    stw CARG2, 20(BASE)
+    |    stwu CARG3, 8(BASE)		// Copy state.
+    |    stw CARG4, 4(BASE)
+    |.endif
+    |  bne ->vmeta_call
+    |  ins_call
+    break;
+
+  case BC_ITERN:
+    |  // RA = base*8, (RB = (nresults+1)*8, RC = (nargs+1)*8 (2+1)*8)
+    |.if JIT
+    |  // NYI on big-endian
+    |.endif
+    |->vm_IITERN:
+    |  add RA, BASE, RA
+    |  lwz TAB:RB, -12(RA)
+    |  lwz RC, -4(RA)			// Get index from control var.
+    |  lwz TMP0, TAB:RB->asize
+    |  lwz TMP1, TAB:RB->array
+    |   addi PC, PC, 4
+    |1:  // Traverse array part.
+    |  cmplw RC, TMP0
+    |   slwi TMP3, RC, 3
+    |  bge >5				// Index points after array part?
+    |  lwzx TMP2, TMP1, TMP3
+    |.if FPU
+    |   lfdx f0, TMP1, TMP3
+    |.else
+    |   lwzux CARG1, TMP3, TMP1
+    |   lwz CARG2, 4(TMP3)
+    |.endif
+    |  checknil TMP2
+    |     lwz INS, -4(PC)
+    |  beq >4
+    |.if DUALNUM
+    |   stw RC, 4(RA)
+    |   stw TISNUM, 0(RA)
+    |.else
+    |   tonum_u f1, RC
+    |.endif
+    |    addi RC, RC, 1
+    |     addis TMP3, PC, -(BCBIAS_J*4 >> 16)
+    |.if FPU
+    |  stfd f0, 8(RA)
+    |.else
+    |  stw CARG1, 8(RA)
+    |  stw CARG2, 12(RA)
+    |.endif
+    |     decode_RD4 TMP1, INS
+    |    stw RC, -4(RA)			// Update control var.
+    |     add PC, TMP1, TMP3
+    |.if not DUALNUM
+    |   stfd f1, 0(RA)
+    |.endif
+    |3:
+    |  ins_next
+    |
+    |4:  // Skip holes in array part.
+    |  addi RC, RC, 1
+    |  b <1
+    |
+    |5:  // Traverse hash part.
+    |  lwz TMP1, TAB:RB->hmask
+    |  sub RC, RC, TMP0
+    |   lwz TMP2, TAB:RB->node
+    |6:
+    |  cmplw RC, TMP1			// End of iteration? Branch to ITERL+1.
+    |   slwi TMP3, RC, 5
+    |  bgty <3
+    |   slwi RB, RC, 3
+    |   sub TMP3, TMP3, RB
+    |  lwzx RB, TMP2, TMP3
+    |.if FPU
+    |  lfdx f0, TMP2, TMP3
+    |.else
+    |  add CARG3, TMP2, TMP3
+    |  lwz CARG1, 0(CARG3)
+    |  lwz CARG2, 4(CARG3)
+    |.endif
+    |   add NODE:TMP3, TMP2, TMP3
+    |  checknil RB
+    |     lwz INS, -4(PC)
+    |  beq >7
+    |.if FPU
+    |   lfd f1, NODE:TMP3->key
+    |.else
+    |   lwz CARG3, NODE:TMP3->key.u32.hi
+    |   lwz CARG4, NODE:TMP3->key.u32.lo
+    |.endif
+    |     addis TMP2, PC, -(BCBIAS_J*4 >> 16)
+    |.if FPU
+    |  stfd f0, 8(RA)
+    |.else
+    |  stw CARG1, 8(RA)
+    |  stw CARG2, 12(RA)
+    |.endif
+    |    add RC, RC, TMP0
+    |     decode_RD4 TMP1, INS
+    |.if FPU
+    |   stfd f1, 0(RA)
+    |.else
+    |   stw CARG3, 0(RA)
+    |   stw CARG4, 4(RA)
+    |.endif
+    |    addi RC, RC, 1
+    |     add PC, TMP1, TMP2
+    |    stw RC, -4(RA)			// Update control var.
+    |  b <3
+    |
+    |7:  // Skip holes in hash part.
+    |  addi RC, RC, 1
+    |  b <6
+    break;
+
+  case BC_ISNEXT:
+    |  // RA = base*8, RD = target (points to ITERN)
+    |  add RA, BASE, RA
+    |  lwz TMP0, -24(RA)
+    |  lwz CFUNC:TMP1, -20(RA)
+    |   lwz TMP2, -16(RA)
+    |    lwz TMP3, -8(RA)
+    |   cmpwi cr0, TMP2, LJ_TTAB
+    |  cmpwi cr1, TMP0, LJ_TFUNC
+    |    cmpwi cr6, TMP3, LJ_TNIL
+    |  bne cr1, >5
+    |  lbz TMP1, CFUNC:TMP1->ffid
+    |   crand 4*cr0+eq, 4*cr0+eq, 4*cr6+eq
+    |  cmpwi cr7, TMP1, FF_next_N
+    |    srwi TMP0, RD, 1
+    |  crand 4*cr0+eq, 4*cr0+eq, 4*cr7+eq
+    |    add TMP3, PC, TMP0
+    |  bne cr0, >5
+    |  lus TMP1, (LJ_KEYINDEX >> 16)
+    |  ori TMP1, TMP1, (LJ_KEYINDEX & 0xffff)
+    |  stw ZERO, -4(RA)			// Initialize control var.
+    |  stw TMP1, -8(RA)
+    |    addis PC, TMP3, -(BCBIAS_J*4 >> 16)
+    |1:
+    |  ins_next
+    |5:  // Despecialize bytecode if any of the checks fail.
+    |  li TMP0, BC_JMP
+    |   li TMP1, BC_ITERC
+    |  stb TMP0, -1(PC)
+    |    addis PC, TMP3, -(BCBIAS_J*4 >> 16)
+    |  // NYI on big-endian: unpatch JLOOP.
+    |   stb TMP1, 3(PC)
+    |  b <1
+    break;
+
+  case BC_VARG:
+    |  // RA = base*8, RB = (nresults+1)*8, RC = numparams*8
+    |  lwz TMP0, FRAME_PC(BASE)
+    |  add RC, BASE, RC
+    |   add RA, BASE, RA
+    |  addi RC, RC, FRAME_VARG
+    |   add TMP2, RA, RB
+    |  subi TMP3, BASE, 8		// TMP3 = vtop
+    |  sub RC, RC, TMP0			// RC = vbase
+    |  // Note: RC may now be even _above_ BASE if nargs was < numparams.
+    |  cmplwi cr1, RB, 0
+    |.if PPE
+    |   sub TMP1, TMP3, RC
+    |   cmpwi TMP1, 0
+    |.else
+    |   sub. TMP1, TMP3, RC
+    |.endif
+    |  beq cr1, >5			// Copy all varargs?
+    |   subi TMP2, TMP2, 16
+    |   ble >2				// No vararg slots?
+    |1:  // Copy vararg slots to destination slots.
+    |.if FPU
+    |  lfd f0, 0(RC)
+    |.else
+    |  lwz CARG1, 0(RC)
+    |  lwz CARG2, 4(RC)
+    |.endif
+    |   addi RC, RC, 8
+    |.if FPU
+    |  stfd f0, 0(RA)
+    |.else
+    |  stw CARG1, 0(RA)
+    |  stw CARG2, 4(RA)
+    |.endif
+    |  cmplw RA, TMP2
+    |   cmplw cr1, RC, TMP3
+    |  bge >3				// All destination slots filled?
+    |    addi RA, RA, 8
+    |   blt cr1, <1			// More vararg slots?
+    |2:  // Fill up remainder with nil.
+    |  stw TISNIL, 0(RA)
+    |  cmplw RA, TMP2
+    |   addi RA, RA, 8
+    |  blt <2
+    |3:
+    |  ins_next
+    |
+    |5:  // Copy all varargs.
+    |  lwz TMP0, L->maxstack
+    |   li MULTRES, 8			// MULTRES = (0+1)*8
+    |  bley <3				// No vararg slots?
+    |  add TMP2, RA, TMP1
+    |  cmplw TMP2, TMP0
+    |   addi MULTRES, TMP1, 8
+    |  bgt >7
+    |6:
+    |.if FPU
+    |  lfd f0, 0(RC)
+    |.else
+    |  lwz CARG1, 0(RC)
+    |  lwz CARG2, 4(RC)
+    |.endif
+    |   addi RC, RC, 8
+    |.if FPU
+    |  stfd f0, 0(RA)
+    |.else
+    |  stw CARG1, 0(RA)
+    |  stw CARG2, 4(RA)
+    |.endif
+    |  cmplw RC, TMP3
+    |   addi RA, RA, 8
+    |  blt <6				// More vararg slots?
+    |  b <3
+    |
+    |7:  // Grow stack for varargs.
+    |  mr CARG1, L
+    |   stp RA, L->top
+    |  sub SAVE0, RC, BASE		// Need delta, because BASE may change.
+    |   stp BASE, L->base
+    |  sub RA, RA, BASE
+    |   stw PC, SAVE_PC
+    |  srwi CARG2, TMP1, 3
+    |  bl extern lj_state_growstack	// (lua_State *L, int n)
+    |  lp BASE, L->base
+    |  add RA, BASE, RA
+    |  add RC, BASE, SAVE0
+    |  subi TMP3, BASE, 8
+    |  b <6
+    break;
+
+  /* -- Returns ----------------------------------------------------------- */
+
+  case BC_RETM:
+    |  // RA = results*8, RD = extra_nresults*8
+    |  add RD, RD, MULTRES		// MULTRES >= 8, so RD >= 8.
+    |  // Fall through. Assumes BC_RET follows.
+    break;
+
+  case BC_RET:
+    |  // RA = results*8, RD = (nresults+1)*8
+    |  lwz PC, FRAME_PC(BASE)
+    |   add RA, BASE, RA
+    |    mr MULTRES, RD
+    |1:
+    |  andix. TMP0, PC, FRAME_TYPE
+    |   xori TMP1, PC, FRAME_VARG
+    |  bne ->BC_RETV_Z
+    |
+    |->BC_RET_Z:
+    |  // BASE = base, RA = resultptr, RD = (nresults+1)*8, PC = return
+    |   lwz INS, -4(PC)
+    |  cmpwi RD, 8
+    |   subi TMP2, BASE, 8
+    |   subi RC, RD, 8
+    |   decode_RB8 RB, INS
+    |  beq >3
+    |   li TMP1, 0
+    |2:
+    |  addi TMP3, TMP1, 8
+    |.if FPU
+    |   lfdx f0, RA, TMP1
+    |.else
+    |   add CARG3, RA, TMP1
+    |   lwz CARG1, 0(CARG3)
+    |   lwz CARG2, 4(CARG3)
+    |.endif
+    |  cmpw TMP3, RC
+    |.if FPU
+    |   stfdx f0, TMP2, TMP1
+    |.else
+    |   add CARG3, TMP2, TMP1
+    |   stw CARG1, 0(CARG3)
+    |   stw CARG2, 4(CARG3)
+    |.endif
+    |  beq >3
+    |  addi TMP1, TMP3, 8
+    |.if FPU
+    |   lfdx f1, RA, TMP3
+    |.else
+    |   add CARG3, RA, TMP3
+    |   lwz CARG1, 0(CARG3)
+    |   lwz CARG2, 4(CARG3)
+    |.endif
+    |  cmpw TMP1, RC
+    |.if FPU
+    |   stfdx f1, TMP2, TMP3
+    |.else
+    |   add CARG3, TMP2, TMP3
+    |   stw CARG1, 0(CARG3)
+    |   stw CARG2, 4(CARG3)
+    |.endif
+    |  bne <2
+    |3:
+    |5:
+    |  cmplw RB, RD
+    |   decode_RA8 RA, INS
+    |  bgt >6
+    |   sub BASE, TMP2, RA
+    |  lwz LFUNC:TMP1, FRAME_FUNC(BASE)
+    |  ins_next1
+    |  lwz TMP1, LFUNC:TMP1->pc
+    |  lwz KBASE, PC2PROTO(k)(TMP1)
+    |  ins_next2
+    |
+    |6:  // Fill up results with nil.
+    |  subi TMP1, RD, 8
+    |   addi RD, RD, 8
+    |  stwx TISNIL, TMP2, TMP1
+    |  b <5
+    |
+    |->BC_RETV_Z:  // Non-standard return case.
+    |  andix. TMP2, TMP1, FRAME_TYPEP
+    |  bne ->vm_return
+    |  // Return from vararg function: relocate BASE down.
+    |  sub BASE, BASE, TMP1
+    |  lwz PC, FRAME_PC(BASE)
+    |  b <1
+    break;
+
+  case BC_RET0: case BC_RET1:
+    |  // RA = results*8, RD = (nresults+1)*8
+    |  lwz PC, FRAME_PC(BASE)
+    |   add RA, BASE, RA
+    |    mr MULTRES, RD
+    |  andix. TMP0, PC, FRAME_TYPE
+    |   xori TMP1, PC, FRAME_VARG
+    |  bney ->BC_RETV_Z
+    |
+    |  lwz INS, -4(PC)
+    |   subi TMP2, BASE, 8
+    |  decode_RB8 RB, INS
+    if (op == BC_RET1) {
+      |.if FPU
+      |  lfd f0, 0(RA)
+      |  stfd f0, 0(TMP2)
+      |.else
+      |  lwz CARG1, 0(RA)
+      |  lwz CARG2, 4(RA)
+      |  stw CARG1, 0(TMP2)
+      |  stw CARG2, 4(TMP2)
+      |.endif
+    }
+    |5:
+    |  cmplw RB, RD
+    |   decode_RA8 RA, INS
+    |  bgt >6
+    |   sub BASE, TMP2, RA
+    |  lwz LFUNC:TMP1, FRAME_FUNC(BASE)
+    |  ins_next1
+    |  lwz TMP1, LFUNC:TMP1->pc
+    |  lwz KBASE, PC2PROTO(k)(TMP1)
+    |  ins_next2
+    |
+    |6:  // Fill up results with nil.
+    |  subi TMP1, RD, 8
+    |   addi RD, RD, 8
+    |  stwx TISNIL, TMP2, TMP1
+    |  b <5
+    break;
+
+  /* -- Loops and branches ------------------------------------------------ */
+
+  case BC_FORL:
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_IFORL follows.
+    break;
+
+  case BC_JFORI:
+  case BC_JFORL:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_FORI:
