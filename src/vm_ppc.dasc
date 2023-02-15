@@ -5491,3 +5491,551 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     break;
 #endif
   case BC_FORI:
+  case BC_IFORL:
+    |  // RA = base*8, RD = target (after end of loop or start of loop)
+    vk = (op == BC_IFORL || op == BC_JFORL);
+    |.if DUALNUM
+    |  // Integer loop.
+    |  lwzux TMP1, RA, BASE
+    |   lwz CARG1, FORL_IDX*8+4(RA)
+    |  cmplw cr0, TMP1, TISNUM
+    if (vk) {
+      |   lwz CARG3, FORL_STEP*8+4(RA)
+      |  bne >9
+      |.if GPR64
+      |  // Need to check overflow for (a<<32) + (b<<32).
+      |  rldicr TMP0, CARG1, 32, 31
+      |  rldicr TMP2, CARG3, 32, 31
+      |  add CARG1, CARG1, CARG3
+      |  addo. TMP0, TMP0, TMP2
+      |.else
+      |  addo. CARG1, CARG1, CARG3
+      |.endif
+      |    cmpwi cr6, CARG3, 0
+      |   lwz CARG2, FORL_STOP*8+4(RA)
+      |  bso >6
+      |4:
+      |  stw CARG1, FORL_IDX*8+4(RA)
+    } else {
+      |  lwz SAVE0, FORL_STEP*8(RA)
+      |   lwz CARG3, FORL_STEP*8+4(RA)
+      |  lwz TMP2, FORL_STOP*8(RA)
+      |   lwz CARG2, FORL_STOP*8+4(RA)
+      |  cmplw cr7, SAVE0, TISNUM
+      |  cmplw cr1, TMP2, TISNUM
+      |  crand 4*cr0+eq, 4*cr0+eq, 4*cr7+eq
+      |  crand 4*cr0+eq, 4*cr0+eq, 4*cr1+eq
+      |    cmpwi cr6, CARG3, 0
+      |  bne >9
+    }
+    |    blt cr6, >5
+    |  cmpw CARG1, CARG2
+    |1:
+    |   stw TISNUM, FORL_EXT*8(RA)
+    if (op != BC_JFORL) {
+      |  srwi RD, RD, 1
+    }
+    |   stw CARG1, FORL_EXT*8+4(RA)
+    if (op != BC_JFORL) {
+      |  add RD, PC, RD
+    }
+    if (op == BC_FORI) {
+      |  bgt >3  // See FP loop below.
+    } else if (op == BC_JFORI) {
+      |  addis PC, RD, -(BCBIAS_J*4 >> 16)
+      |  bley >7
+    } else if (op == BC_IFORL) {
+      |  bgt >2
+      |  addis PC, RD, -(BCBIAS_J*4 >> 16)
+    } else {
+      |  bley =>BC_JLOOP
+    }
+    |2:
+    |  ins_next
+    |5:  // Invert check for negative step.
+    |  cmpw CARG2, CARG1
+    |  b <1
+    if (vk) {
+      |6:  // Potential overflow.
+      |  checkov TMP0, <4		// Ignore unrelated overflow.
+      |  b <2
+    }
+    |.endif
+    if (vk) {
+      |.if DUALNUM
+      |9:  // FP loop.
+      |.if FPU
+      |  lfd f1, FORL_IDX*8(RA)
+      |.else
+      |  lwz CARG1, FORL_IDX*8(RA)
+      |  lwz CARG2, FORL_IDX*8+4(RA)
+      |.endif
+      |.else
+      |  lfdux f1, RA, BASE
+      |.endif
+      |.if FPU
+      |  lfd f3, FORL_STEP*8(RA)
+      |  lfd f2, FORL_STOP*8(RA)
+      |  fadd f1, f1, f3
+      |  stfd f1, FORL_IDX*8(RA)
+      |.else
+      |  lwz CARG3, FORL_STEP*8(RA)
+      |  lwz CARG4, FORL_STEP*8+4(RA)
+      |  mr SAVE1, RD
+      |  blex __adddf3
+      |  mr RD, SAVE1
+      |  stw CRET1, FORL_IDX*8(RA)
+      |  stw CRET2, FORL_IDX*8+4(RA)
+      |  lwz CARG3, FORL_STOP*8(RA)
+      |  lwz CARG4, FORL_STOP*8+4(RA)
+      |.endif
+      |   lwz SAVE0, FORL_STEP*8(RA)
+    } else {
+      |.if DUALNUM
+      |9:  // FP loop.
+      |.else
+      |  lwzux TMP1, RA, BASE
+      |  lwz SAVE0, FORL_STEP*8(RA)
+      |  lwz TMP2, FORL_STOP*8(RA)
+      |  cmplw cr0, TMP1, TISNUM
+      |  cmplw cr7, SAVE0, TISNUM
+      |  cmplw cr1, TMP2, TISNUM
+      |.endif
+      |.if FPU
+      |   lfd f1, FORL_IDX*8(RA)
+      |.else
+      |   lwz CARG1, FORL_IDX*8(RA)
+      |   lwz CARG2, FORL_IDX*8+4(RA)
+      |.endif
+      |  crand 4*cr0+lt, 4*cr0+lt, 4*cr7+lt
+      |  crand 4*cr0+lt, 4*cr0+lt, 4*cr1+lt
+      |.if FPU
+      |   lfd f2, FORL_STOP*8(RA)
+      |.else
+      |   lwz CARG3, FORL_STOP*8(RA)
+      |   lwz CARG4, FORL_STOP*8+4(RA)
+      |.endif
+      |  bge ->vmeta_for
+    }
+    |  cmpwi cr6, SAVE0, 0
+    if (op != BC_JFORL) {
+      |  srwi RD, RD, 1
+    }
+    |.if FPU
+    |   stfd f1, FORL_EXT*8(RA)
+    |.else
+    |   stw CARG1, FORL_EXT*8(RA)
+    |   stw CARG2, FORL_EXT*8+4(RA)
+    |.endif
+    if (op != BC_JFORL) {
+      |  add RD, PC, RD
+    }
+    |.if FPU
+    |  fcmpu cr0, f1, f2
+    |.else
+    |  mr SAVE1, RD
+    |  blex __ledf2
+    |  cmpwi CRET1, 0
+    |  mr RD, SAVE1
+    |.endif
+    if (op == BC_JFORI) {
+      |  addis PC, RD, -(BCBIAS_J*4 >> 16)
+    }
+    |  blt cr6, >5
+    if (op == BC_FORI) {
+      |  bgt >3
+    } else if (op == BC_IFORL) {
+      |.if DUALNUM
+      |  bgty <2
+      |.else
+      |  bgt >2
+      |.endif
+      |1:
+      |  addis PC, RD, -(BCBIAS_J*4 >> 16)
+    } else if (op == BC_JFORI) {
+      |  bley >7
+    } else {
+      |  bley =>BC_JLOOP
+    }
+    |.if DUALNUM
+    |  b <2
+    |.else
+    |2:
+    |  ins_next
+    |.endif
+    |5:  // Negative step.
+    if (op == BC_FORI) {
+      |  bge <2
+      |3:  // Used by integer loop, too.
+      |  addis PC, RD, -(BCBIAS_J*4 >> 16)
+    } else if (op == BC_IFORL) {
+      |  bgey <1
+    } else if (op == BC_JFORI) {
+      |  bgey >7
+    } else {
+      |  bgey =>BC_JLOOP
+    }
+    |  b <2
+    if (op == BC_JFORI) {
+      |7:
+      |  lwz INS, -4(PC)
+      |  decode_RD8 RD, INS
+      |  b =>BC_JLOOP
+    }
+    break;
+
+  case BC_ITERL:
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_IITERL follows.
+    break;
+
+  case BC_JITERL:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_IITERL:
+    |  // RA = base*8, RD = target
+    |  lwzux TMP1, RA, BASE
+    |   lwz TMP2, 4(RA)
+    |  checknil TMP1; beq >1		// Stop if iterator returned nil.
+    if (op == BC_JITERL) {
+      |  stw TMP1, -8(RA)
+      |   stw TMP2, -4(RA)
+      |  b =>BC_JLOOP
+    } else {
+      |  branch_RD			// Otherwise save control var + branch.
+      |  stw TMP1, -8(RA)
+      |   stw TMP2, -4(RA)
+    }
+    |1:
+    |  ins_next
+    break;
+
+  case BC_LOOP:
+    |  // RA = base*8, RD = target (loop extent)
+    |  // Note: RA/RD is only used by trace recorder to determine scope/extent
+    |  // This opcode does NOT jump, it's only purpose is to detect a hot loop.
+    |.if JIT
+    |  hotloop
+    |.endif
+    |  // Fall through. Assumes BC_ILOOP follows.
+    break;
+
+  case BC_ILOOP:
+    |  // RA = base*8, RD = target (loop extent)
+    |  ins_next
+    break;
+
+  case BC_JLOOP:
+    |.if JIT
+    |  // RA = base*8 (ignored), RD = traceno*8
+    |  lwz TMP1, DISPATCH_J(trace)(DISPATCH)
+    |  srwi RD, RD, 1
+    |  // Traces on PPC don't store the trace number, so use 0.
+    |   stw ZERO, DISPATCH_GL(vmstate)(DISPATCH)
+    |  lwzx TRACE:TMP2, TMP1, RD
+    |  clrso TMP1
+    |  lp TMP2, TRACE:TMP2->mcode
+    |   stw BASE, DISPATCH_GL(jit_base)(DISPATCH)
+    |  mtctr TMP2
+    |   addi JGL, DISPATCH, GG_DISP2G+32768
+    |   stw L, DISPATCH_GL(tmpbuf.L)(DISPATCH)
+    |  bctr
+    |.endif
+    break;
+
+  case BC_JMP:
+    |  // RA = base*8 (only used by trace recorder), RD = target
+    |  branch_RD
+    |  ins_next
+    break;
+
+  /* -- Function headers -------------------------------------------------- */
+
+  case BC_FUNCF:
+    |.if JIT
+    |  hotcall
+    |.endif
+  case BC_FUNCV:  /* NYI: compiled vararg functions. */
+    |  // Fall through. Assumes BC_IFUNCF/BC_IFUNCV follow.
+    break;
+
+  case BC_JFUNCF:
+#if !LJ_HASJIT
+    break;
+#endif
+  case BC_IFUNCF:
+    |  // BASE = new base, RA = BASE+framesize*8, RB = LFUNC, RC = nargs*8
+    |  lwz TMP2, L->maxstack
+    |   lbz TMP1, -4+PC2PROTO(numparams)(PC)
+    |    lwz KBASE, -4+PC2PROTO(k)(PC)
+    |  cmplw RA, TMP2
+    |   slwi TMP1, TMP1, 3
+    |  bgt ->vm_growstack_l
+    if (op != BC_JFUNCF) {
+      |  ins_next1
+    }
+    |2:
+    |  cmplw NARGS8:RC, TMP1		// Check for missing parameters.
+    |  blt >3
+    if (op == BC_JFUNCF) {
+      |  decode_RD8 RD, INS
+      |  b =>BC_JLOOP
+    } else {
+      |  ins_next2
+    }
+    |
+    |3:  // Clear missing parameters.
+    |  stwx TISNIL, BASE, NARGS8:RC
+    |  addi NARGS8:RC, NARGS8:RC, 8
+    |  b <2
+    break;
+
+  case BC_JFUNCV:
+#if !LJ_HASJIT
+    break;
+#endif
+    |  NYI  // NYI: compiled vararg functions
+    break;  /* NYI: compiled vararg functions. */
+
+  case BC_IFUNCV:
+    |  // BASE = new base, RA = BASE+framesize*8, RB = LFUNC, RC = nargs*8
+    |  lwz TMP2, L->maxstack
+    |   add TMP1, BASE, RC
+    |  add TMP0, RA, RC
+    |   stw LFUNC:RB, 4(TMP1)		// Store copy of LFUNC.
+    |   addi TMP3, RC, 8+FRAME_VARG
+    |    lwz KBASE, -4+PC2PROTO(k)(PC)
+    |  cmplw TMP0, TMP2
+    |   stw TMP3, 0(TMP1)		// Store delta + FRAME_VARG.
+    |  bge ->vm_growstack_l
+    |  lbz TMP2, -4+PC2PROTO(numparams)(PC)
+    |   mr RA, BASE
+    |   mr RC, TMP1
+    |  ins_next1
+    |  cmpwi TMP2, 0
+    |   addi BASE, TMP1, 8
+    |  beq >3
+    |1:
+    |  cmplw RA, RC			// Less args than parameters?
+    |   lwz TMP0, 0(RA)
+    |   lwz TMP3, 4(RA)
+    |  bge >4
+    |    stw TISNIL, 0(RA)		// Clear old fixarg slot (help the GC).
+    |    addi RA, RA, 8
+    |2:
+    |  addic. TMP2, TMP2, -1
+    |   stw TMP0, 8(TMP1)
+    |   stw TMP3, 12(TMP1)
+    |    addi TMP1, TMP1, 8
+    |  bne <1
+    |3:
+    |  ins_next2
+    |
+    |4:  // Clear missing parameters.
+    |  li TMP0, LJ_TNIL
+    |  b <2
+    break;
+
+  case BC_FUNCC:
+  case BC_FUNCCW:
+    |  // BASE = new base, RA = BASE+framesize*8, RB = CFUNC, RC = nargs*8
+    if (op == BC_FUNCC) {
+      |  lp RD, CFUNC:RB->f
+    } else {
+      |  lp RD, DISPATCH_GL(wrapf)(DISPATCH)
+    }
+    |   add TMP1, RA, NARGS8:RC
+    |   lwz TMP2, L->maxstack
+    |  .toc lp TMP3, 0(RD)
+    |    add RC, BASE, NARGS8:RC
+    |   stp BASE, L->base
+    |   cmplw TMP1, TMP2
+    |    stp RC, L->top
+    |     li_vmstate C
+    |.if TOC
+    |  mtctr TMP3
+    |.else
+    |  mtctr RD
+    |.endif
+    if (op == BC_FUNCCW) {
+      |  lp CARG2, CFUNC:RB->f
+    }
+    |  mr CARG1, L
+    |   bgt ->vm_growstack_c		// Need to grow stack.
+    |  .toc lp TOCREG, TOC_OFS(RD)
+    |  .tocenv lp ENVREG, ENV_OFS(RD)
+    |     st_vmstate
+    |  bctrl				// (lua_State *L [, lua_CFunction f])
+    |  // Returns nresults.
+    |  lp BASE, L->base
+    |  .toc ld TOCREG, SAVE_TOC
+    |   slwi RD, CRET1, 3
+    |  lp TMP1, L->top
+    |    li_vmstate INTERP
+    |  lwz PC, FRAME_PC(BASE)		// Fetch PC of caller.
+    |    stw L, DISPATCH_GL(cur_L)(DISPATCH)
+    |   sub RA, TMP1, RD		// RA = L->top - nresults*8
+    |    st_vmstate
+    |  b ->vm_returnc
+    break;
+
+  /* ---------------------------------------------------------------------- */
+
+  default:
+    fprintf(stderr, "Error: undefined opcode BC_%s\n", bc_names[op]);
+    exit(2);
+    break;
+  }
+}
+
+static int build_backend(BuildCtx *ctx)
+{
+  int op;
+
+  dasm_growpc(Dst, BC__MAX);
+
+  build_subroutines(ctx);
+
+  |.code_op
+  for (op = 0; op < BC__MAX; op++)
+    build_ins(ctx, (BCOp)op, op);
+
+  return BC__MAX;
+}
+
+/* Emit pseudo frame-info for all assembler functions. */
+static void emit_asm_debug(BuildCtx *ctx)
+{
+  int fcofs = (int)((uint8_t *)ctx->glob[GLOB_vm_ffi_call] - ctx->code);
+  int i;
+  switch (ctx->mode) {
+  case BUILD_elfasm:
+    fprintf(ctx->fp, "\t.section .debug_frame,\"\",@progbits\n");
+    fprintf(ctx->fp,
+	".Lframe0:\n"
+	"\t.long .LECIE0-.LSCIE0\n"
+	".LSCIE0:\n"
+	"\t.long 0xffffffff\n"
+	"\t.byte 0x1\n"
+	"\t.string \"\"\n"
+	"\t.uleb128 0x1\n"
+	"\t.sleb128 -4\n"
+	"\t.byte 65\n"
+	"\t.byte 0xc\n\t.uleb128 1\n\t.uleb128 0\n"
+	"\t.align 2\n"
+	".LECIE0:\n\n");
+    fprintf(ctx->fp,
+	".LSFDE0:\n"
+	"\t.long .LEFDE0-.LASFDE0\n"
+	".LASFDE0:\n"
+	"\t.long .Lframe0\n"
+	"\t.long .Lbegin\n"
+	"\t.long %d\n"
+	"\t.byte 0xe\n\t.uleb128 %d\n"
+	"\t.byte 0x11\n\t.uleb128 65\n\t.sleb128 -1\n"
+	"\t.byte 0x5\n\t.uleb128 70\n\t.uleb128 55\n",
+	fcofs, CFRAME_SIZE);
+    for (i = 14; i <= 31; i++)
+      fprintf(ctx->fp,
+	"\t.byte %d\n\t.uleb128 %d\n"
+	"\t.byte %d\n\t.uleb128 %d\n",
+	0x80+i, 37+(31-i), 0x80+32+i, 2+2*(31-i));
+    fprintf(ctx->fp,
+	"\t.align 2\n"
+	".LEFDE0:\n\n");
+#if LJ_HASFFI
+    fprintf(ctx->fp,
+	".LSFDE1:\n"
+	"\t.long .LEFDE1-.LASFDE1\n"
+	".LASFDE1:\n"
+	"\t.long .Lframe0\n"
+#if LJ_TARGET_PS3
+	"\t.long .lj_vm_ffi_call\n"
+#else
+	"\t.long lj_vm_ffi_call\n"
+#endif
+	"\t.long %d\n"
+	"\t.byte 0x11\n\t.uleb128 65\n\t.sleb128 -1\n"
+	"\t.byte 0x8e\n\t.uleb128 2\n"
+	"\t.byte 0xd\n\t.uleb128 0xe\n"
+	"\t.align 2\n"
+	".LEFDE1:\n\n", (int)ctx->codesz - fcofs);
+#endif
+#if !LJ_NO_UNWIND
+    fprintf(ctx->fp, "\t.section .eh_frame,\"a\",@progbits\n");
+    fprintf(ctx->fp,
+	".Lframe1:\n"
+	"\t.long .LECIE1-.LSCIE1\n"
+	".LSCIE1:\n"
+	"\t.long 0\n"
+	"\t.byte 0x1\n"
+	"\t.string \"zPR\"\n"
+	"\t.uleb128 0x1\n"
+	"\t.sleb128 -4\n"
+	"\t.byte 65\n"
+	"\t.uleb128 6\n"			/* augmentation length */
+	"\t.byte 0x1b\n"			/* pcrel|sdata4 */
+	"\t.long lj_err_unwind_dwarf-.\n"
+	"\t.byte 0x1b\n"			/* pcrel|sdata4 */
+	"\t.byte 0xc\n\t.uleb128 1\n\t.uleb128 0\n"
+	"\t.align 2\n"
+	".LECIE1:\n\n");
+    fprintf(ctx->fp,
+	".LSFDE2:\n"
+	"\t.long .LEFDE2-.LASFDE2\n"
+	".LASFDE2:\n"
+	"\t.long .LASFDE2-.Lframe1\n"
+	"\t.long .Lbegin-.\n"
+	"\t.long %d\n"
+	"\t.uleb128 0\n"			/* augmentation length */
+	"\t.byte 0xe\n\t.uleb128 %d\n"
+	"\t.byte 0x11\n\t.uleb128 65\n\t.sleb128 -1\n"
+	"\t.byte 0x5\n\t.uleb128 70\n\t.uleb128 55\n",
+	fcofs, CFRAME_SIZE);
+    for (i = 14; i <= 31; i++)
+      fprintf(ctx->fp,
+	"\t.byte %d\n\t.uleb128 %d\n"
+	"\t.byte %d\n\t.uleb128 %d\n",
+	0x80+i, 37+(31-i), 0x80+32+i, 2+2*(31-i));
+    fprintf(ctx->fp,
+	"\t.align 2\n"
+	".LEFDE2:\n\n");
+#if LJ_HASFFI
+    fprintf(ctx->fp,
+	".Lframe2:\n"
+	"\t.long .LECIE2-.LSCIE2\n"
+	".LSCIE2:\n"
+	"\t.long 0\n"
+	"\t.byte 0x1\n"
+	"\t.string \"zR\"\n"
+	"\t.uleb128 0x1\n"
+	"\t.sleb128 -4\n"
+	"\t.byte 65\n"
+	"\t.uleb128 1\n"			/* augmentation length */
+	"\t.byte 0x1b\n"			/* pcrel|sdata4 */
+	"\t.byte 0xc\n\t.uleb128 1\n\t.uleb128 0\n"
+	"\t.align 2\n"
+	".LECIE2:\n\n");
+    fprintf(ctx->fp,
+	".LSFDE3:\n"
+	"\t.long .LEFDE3-.LASFDE3\n"
+	".LASFDE3:\n"
+	"\t.long .LASFDE3-.Lframe2\n"
+	"\t.long lj_vm_ffi_call-.\n"
+	"\t.long %d\n"
+	"\t.uleb128 0\n"			/* augmentation length */
+	"\t.byte 0x11\n\t.uleb128 65\n\t.sleb128 -1\n"
+	"\t.byte 0x8e\n\t.uleb128 2\n"
+	"\t.byte 0xd\n\t.uleb128 0xe\n"
+	"\t.align 2\n"
+	".LEFDE3:\n\n", (int)ctx->codesz - fcofs);
+#endif
+#endif
+    break;
+  default:
+    break;
+  }
+}
