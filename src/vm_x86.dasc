@@ -1,0 +1,192 @@
+
+|// Low-level VM code for x86 CPUs.
+|// Bytecode interpreter, fast functions and helper functions.
+|// Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
+|
+|.if P64
+|.arch x64
+|.else
+|.arch x86
+|.endif
+|.section code_op, code_sub
+|
+|.actionlist build_actionlist
+|.globals GLOB_
+|.globalnames globnames
+|.externnames extnames
+|
+|//-----------------------------------------------------------------------
+|
+|.if P64
+|.define X64, 1
+|.if WIN
+|.define X64WIN, 1
+|.endif
+|.endif
+|
+|// Fixed register assignments for the interpreter.
+|// This is very fragile and has many dependencies. Caveat emptor.
+|.define BASE,		edx		// Not C callee-save, refetched anyway.
+|.if not X64
+|.define KBASE,		edi		// Must be C callee-save.
+|.define KBASEa,	KBASE
+|.define PC,		esi		// Must be C callee-save.
+|.define PCa,		PC
+|.define DISPATCH,	ebx		// Must be C callee-save.
+|.elif X64WIN
+|.define KBASE,		edi		// Must be C callee-save.
+|.define KBASEa,	rdi
+|.define PC,		esi		// Must be C callee-save.
+|.define PCa,		rsi
+|.define DISPATCH,	ebx		// Must be C callee-save.
+|.else
+|.define KBASE,		r15d		// Must be C callee-save.
+|.define KBASEa,	r15
+|.define PC,		ebx		// Must be C callee-save.
+|.define PCa,		rbx
+|.define DISPATCH,	r14d		// Must be C callee-save.
+|.endif
+|
+|.define RA,		ecx
+|.define RAH,		ch
+|.define RAL,		cl
+|.define RB,		ebp		// Must be ebp (C callee-save).
+|.define RC,		eax		// Must be eax.
+|.define RCW,		ax
+|.define RCH,		ah
+|.define RCL,		al
+|.define OP,		RB
+|.define RD,		RC
+|.define RDW,		RCW
+|.define RDL,		RCL
+|.if X64
+|.define RAa, rcx
+|.define RBa, rbp
+|.define RCa, rax
+|.define RDa, rax
+|.else
+|.define RAa, RA
+|.define RBa, RB
+|.define RCa, RC
+|.define RDa, RD
+|.endif
+|
+|.if not X64
+|.define FCARG1,	ecx		// x86 fastcall arguments.
+|.define FCARG2,	edx
+|.elif X64WIN
+|.define CARG1,		rcx		// x64/WIN64 C call arguments.
+|.define CARG2,		rdx
+|.define CARG3,		r8
+|.define CARG4,		r9
+|.define CARG1d,	ecx
+|.define CARG2d,	edx
+|.define CARG3d,	r8d
+|.define CARG4d,	r9d
+|.define FCARG1,	CARG1d		// Upwards compatible to x86 fastcall.
+|.define FCARG2,	CARG2d
+|.else
+|.define CARG1,		rdi		// x64/POSIX C call arguments.
+|.define CARG2,		rsi
+|.define CARG3,		rdx
+|.define CARG4,		rcx
+|.define CARG5,		r8
+|.define CARG6,		r9
+|.define CARG1d,	edi
+|.define CARG2d,	esi
+|.define CARG3d,	edx
+|.define CARG4d,	ecx
+|.define CARG5d,	r8d
+|.define CARG6d,	r9d
+|.define FCARG1,	CARG1d		// Simulate x86 fastcall.
+|.define FCARG2,	CARG2d
+|.endif
+|
+|// Type definitions. Some of these are only used for documentation.
+|.type L,		lua_State
+|.type GL,		global_State
+|.type TVALUE,		TValue
+|.type GCOBJ,		GCobj
+|.type STR,		GCstr
+|.type TAB,		GCtab
+|.type LFUNC,		GCfuncL
+|.type CFUNC,		GCfuncC
+|.type PROTO,		GCproto
+|.type UPVAL,		GCupval
+|.type NODE,		Node
+|.type NARGS,		int
+|.type TRACE,		GCtrace
+|.type SBUF,		SBuf
+|
+|// Stack layout while in interpreter. Must match with lj_frame.h.
+|//-----------------------------------------------------------------------
+|.if not X64		// x86 stack layout.
+|
+|.if WIN
+|
+|.define CFRAME_SPACE,	aword*9			// Delta for esp (see <--).
+|.macro saveregs_
+|  push edi; push esi; push ebx
+|  push extern lj_err_unwind_win
+|  fs; push dword [0]
+|  fs; mov [0], esp
+|  sub esp, CFRAME_SPACE
+|.endmacro
+|.macro restoreregs
+|  add esp, CFRAME_SPACE
+|  fs; pop dword [0]
+|  pop edi	// Short for esp += 4.
+|  pop ebx; pop esi; pop edi; pop ebp
+|.endmacro
+|
+|.else
+|
+|.define CFRAME_SPACE,	aword*7			// Delta for esp (see <--).
+|.macro saveregs_
+|  push edi; push esi; push ebx
+|  sub esp, CFRAME_SPACE
+|.endmacro
+|.macro restoreregs
+|  add esp, CFRAME_SPACE
+|  pop ebx; pop esi; pop edi; pop ebp
+|.endmacro
+|
+|.endif
+|
+|.macro saveregs
+|  push ebp; saveregs_
+|.endmacro
+|
+|.if WIN
+|.define SAVE_ERRF,	aword [esp+aword*19]	// vm_pcall/vm_cpcall only.
+|.define SAVE_NRES,	aword [esp+aword*18]
+|.define SAVE_CFRAME,	aword [esp+aword*17]
+|.define SAVE_L,	aword [esp+aword*16]
+|//----- 16 byte aligned, ^^^ arguments from C caller
+|.define SAVE_RET,	aword [esp+aword*15]	//<-- esp entering interpreter.
+|.define SAVE_R4,	aword [esp+aword*14]
+|.define SAVE_R3,	aword [esp+aword*13]
+|.define SAVE_R2,	aword [esp+aword*12]
+|//----- 16 byte aligned
+|.define SAVE_R1,	aword [esp+aword*11]
+|.define SEH_FUNC,	aword [esp+aword*10]
+|.define SEH_NEXT,	aword [esp+aword*9]	//<-- esp after register saves.
+|.define UNUSED2,	aword [esp+aword*8]
+|//----- 16 byte aligned
+|.define UNUSED1,	aword [esp+aword*7]
+|.define SAVE_PC,	aword [esp+aword*6]
+|.define TMP2,		aword [esp+aword*5]
+|.define TMP1,		aword [esp+aword*4]
+|//----- 16 byte aligned
+|.define ARG4,		aword [esp+aword*3]
+|.define ARG3,		aword [esp+aword*2]
+|.define ARG2,		aword [esp+aword*1]
+|.define ARG1,		aword [esp]		//<-- esp while in interpreter.
+|//----- 16 byte aligned, ^^^ arguments for C callee
+|.else
+|.define SAVE_ERRF,	aword [esp+aword*15]	// vm_pcall/vm_cpcall only.
+|.define SAVE_NRES,	aword [esp+aword*14]
+|.define SAVE_CFRAME,	aword [esp+aword*13]
+|.define SAVE_L,	aword [esp+aword*12]
+|//----- 16 byte aligned, ^^^ arguments from C caller
+|.define SAVE_RET,	aword [esp+aword*11]	//<-- esp entering interpreter.
