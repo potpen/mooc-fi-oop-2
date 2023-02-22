@@ -3062,3 +3062,1375 @@ static void build_subroutines(BuildCtx *ctx)
   |  pop edx
   |  mov ecx, edx
   |  xor edx, 0x00200000		// Toggle ID bit in flags.
+  |  push edx
+  |  popfd
+  |  pushfd
+  |  pop edx
+  |  xor eax, eax			// Zero means no features supported.
+  |  cmp ecx, edx
+  |  jz >1				// No ID toggle means no CPUID support.
+  |  mov eax, [esp+4]			// Argument 1 is function number.
+  |  push edi
+  |  push ebx
+  |  xor ecx, ecx
+  |  cpuid
+  |  mov edi, [esp+16]			// Argument 2 is result area.
+  |  mov [edi], eax
+  |  mov [edi+4], ebx
+  |  mov [edi+8], ecx
+  |  mov [edi+12], edx
+  |  pop ebx
+  |  pop edi
+  |1:
+  |  ret
+  |.endif
+  |
+  |.define NEXT_TAB,		TAB:FCARG1
+  |.define NEXT_IDX,		FCARG2
+  |.define NEXT_PTR,		RCa
+  |.define NEXT_PTRd,		RC
+  |.macro NEXT_RES_IDXL, op2;	lea edx, [NEXT_IDX+op2]; .endmacro
+  |.if X64
+  |.define NEXT_TMP,		CARG3d
+  |.define NEXT_TMPq,		CARG3
+  |.define NEXT_ASIZE,		CARG4d
+  |.macro NEXT_ENTER;		.endmacro
+  |.macro NEXT_LEAVE;		ret; .endmacro
+  |.if X64WIN
+  |.define NEXT_RES_PTR,	[rsp+aword*5]
+  |.macro NEXT_RES_IDX, op2;	add NEXT_IDX, op2; .endmacro
+  |.else
+  |.define NEXT_RES_PTR,	[rsp+aword*1]
+  |.macro NEXT_RES_IDX, op2;	lea edx, [NEXT_IDX+op2]; .endmacro
+  |.endif
+  |.else
+  |.define NEXT_ASIZE,		esi
+  |.define NEXT_TMP,		edi
+  |.macro NEXT_ENTER;		push esi; push edi; .endmacro
+  |.macro NEXT_LEAVE;		pop edi; pop esi; ret; .endmacro
+  |.define NEXT_RES_PTR,	[esp+dword*3]
+  |.macro NEXT_RES_IDX, op2;	add NEXT_IDX, op2; .endmacro
+  |.endif
+  |
+  |// TValue *lj_vm_next(GCtab *t, uint32_t idx)
+  |// Next idx returned in edx.
+  |->vm_next:
+  |.if JIT
+  |  NEXT_ENTER
+  |  mov NEXT_ASIZE, NEXT_TAB->asize
+  |1:  // Traverse array part.
+  |  cmp NEXT_IDX, NEXT_ASIZE;  jae >5
+  |  mov NEXT_TMP, NEXT_TAB->array
+  |  cmp dword [NEXT_TMP+NEXT_IDX*8+4], LJ_TNIL;  je >2
+  |  lea NEXT_PTR, NEXT_RES_PTR
+  |.if X64
+  |  mov NEXT_TMPq, qword [NEXT_TMP+NEXT_IDX*8]
+  |  mov qword [NEXT_PTR], NEXT_TMPq
+  |.else
+  |  mov NEXT_ASIZE, dword [NEXT_TMP+NEXT_IDX*8+4]
+  |  mov NEXT_TMP, dword [NEXT_TMP+NEXT_IDX*8]
+  |  mov dword [NEXT_PTR+4], NEXT_ASIZE
+  |  mov dword [NEXT_PTR], NEXT_TMP
+  |.endif
+  |.if DUALNUM
+  |  mov dword [NEXT_PTR+dword*3], LJ_TISNUM
+  |  mov dword [NEXT_PTR+dword*2], NEXT_IDX
+  |.else
+  |  cvtsi2sd xmm0, NEXT_IDX
+  |  movsd qword [NEXT_PTR+dword*2], xmm0
+  |.endif
+  |  NEXT_RES_IDX 1
+  |  NEXT_LEAVE
+  |2:  // Skip holes in array part.
+  |  add NEXT_IDX, 1
+  |  jmp <1
+  |
+  |5:  // Traverse hash part.
+  |  sub NEXT_IDX, NEXT_ASIZE
+  |6:
+  |  cmp NEXT_IDX, NEXT_TAB->hmask; ja >9
+  |  imul NEXT_PTRd, NEXT_IDX, #NODE
+  |  add NODE:NEXT_PTRd, dword NEXT_TAB->node
+  |  cmp dword NODE:NEXT_PTR->val.it, LJ_TNIL; je >7
+  |  NEXT_RES_IDXL NEXT_ASIZE+1
+  |  NEXT_LEAVE
+  |7:  // Skip holes in hash part.
+  |  add NEXT_IDX, 1
+  |  jmp <6
+  |
+  |9:  // End of iteration. Set the key to nil (not the value).
+  |  NEXT_RES_IDX NEXT_ASIZE
+  |  lea NEXT_PTR, NEXT_RES_PTR
+  |  mov dword [NEXT_PTR+dword*3], LJ_TNIL
+  |  NEXT_LEAVE
+  |.endif
+  |
+  |//-----------------------------------------------------------------------
+  |//-- Assertions ---------------------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |->assert_bad_for_arg_type:
+#ifdef LUA_USE_ASSERT
+  |  int3
+#endif
+  |  int3
+  |
+  |//-----------------------------------------------------------------------
+  |//-- FFI helper functions -----------------------------------------------
+  |//-----------------------------------------------------------------------
+  |
+  |// Handler for callback functions. Callback slot number in ah/al.
+  |->vm_ffi_callback:
+  |.if FFI
+  |.type CTSTATE, CTState, PC
+  |.if not X64
+  |  sub esp, 16			// Leave room for SAVE_ERRF etc.
+  |.endif
+  |  saveregs_	// ebp/rbp already saved. ebp now holds global_State *.
+  |  lea DISPATCH, [ebp+GG_G2DISP]
+  |  mov CTSTATE, GL:ebp->ctype_state
+  |  movzx eax, ax
+  |  mov CTSTATE->cb.slot, eax
+  |.if X64
+  |  mov CTSTATE->cb.gpr[0], CARG1
+  |  mov CTSTATE->cb.gpr[1], CARG2
+  |  mov CTSTATE->cb.gpr[2], CARG3
+  |  mov CTSTATE->cb.gpr[3], CARG4
+  |  movsd qword CTSTATE->cb.fpr[0], xmm0
+  |  movsd qword CTSTATE->cb.fpr[1], xmm1
+  |  movsd qword CTSTATE->cb.fpr[2], xmm2
+  |  movsd qword CTSTATE->cb.fpr[3], xmm3
+  |.if X64WIN
+  |  lea rax, [rsp+CFRAME_SIZE+4*8]
+  |.else
+  |  lea rax, [rsp+CFRAME_SIZE]
+  |  mov CTSTATE->cb.gpr[4], CARG5
+  |  mov CTSTATE->cb.gpr[5], CARG6
+  |  movsd qword CTSTATE->cb.fpr[4], xmm4
+  |  movsd qword CTSTATE->cb.fpr[5], xmm5
+  |  movsd qword CTSTATE->cb.fpr[6], xmm6
+  |  movsd qword CTSTATE->cb.fpr[7], xmm7
+  |.endif
+  |  mov CTSTATE->cb.stack, rax
+  |  mov CARG2, rsp
+  |.else
+  |  lea eax, [esp+CFRAME_SIZE+16]
+  |  mov CTSTATE->cb.gpr[0], FCARG1
+  |  mov CTSTATE->cb.gpr[1], FCARG2
+  |  mov CTSTATE->cb.stack, eax
+  |  mov FCARG1, [esp+CFRAME_SIZE+12]	// Move around misplaced retaddr/ebp.
+  |  mov FCARG2, [esp+CFRAME_SIZE+8]
+  |  mov SAVE_RET, FCARG1
+  |  mov SAVE_R4, FCARG2
+  |  mov FCARG2, esp
+  |.endif
+  |  mov SAVE_PC, CTSTATE		// Any value outside of bytecode is ok.
+  |  mov FCARG1, CTSTATE
+  |  call extern lj_ccallback_enter@8	// (CTState *cts, void *cf)
+  |  // lua_State * returned in eax (RD).
+  |  set_vmstate INTERP
+  |  mov BASE, L:RD->base
+  |  mov RD, L:RD->top
+  |  sub RD, BASE
+  |  mov LFUNC:RB, [BASE-8]
+  |  shr RD, 3
+  |  add RD, 1
+  |  ins_callt
+  |.endif
+  |
+  |->cont_ffi_callback:			// Return from FFI callback.
+  |.if FFI
+  |  mov L:RA, SAVE_L
+  |  mov CTSTATE, [DISPATCH+DISPATCH_GL(ctype_state)]
+  |  mov aword CTSTATE->L, L:RAa
+  |  mov L:RA->base, BASE
+  |  mov L:RA->top, RB
+  |  mov FCARG1, CTSTATE
+  |  mov FCARG2, RC
+  |  call extern lj_ccallback_leave@8	// (CTState *cts, TValue *o)
+  |.if X64
+  |  mov rax, CTSTATE->cb.gpr[0]
+  |  movsd xmm0, qword CTSTATE->cb.fpr[0]
+  |  jmp ->vm_leave_unw
+  |.else
+  |  mov L:RB, SAVE_L
+  |  mov eax, CTSTATE->cb.gpr[0]
+  |  mov edx, CTSTATE->cb.gpr[1]
+  |  cmp dword CTSTATE->cb.gpr[2], 1
+  |  jb >7
+  |  je >6
+  |  fld qword CTSTATE->cb.fpr[0].d
+  |  jmp >7
+  |6:
+  |  fld dword CTSTATE->cb.fpr[0].f
+  |7:
+  |  mov ecx, L:RB->top
+  |  movzx ecx, word [ecx+6]		// Get stack adjustment and copy up.
+  |  mov SAVE_L, ecx			// Must be one slot above SAVE_RET
+  |  restoreregs
+  |  pop ecx				// Move return addr from SAVE_RET.
+  |  add esp, [esp]			// Adjust stack.
+  |  add esp, 16
+  |  push ecx
+  |  ret
+  |.endif
+  |.endif
+  |
+  |->vm_ffi_call@4:			// Call C function via FFI.
+  |  // Caveat: needs special frame unwinding, see below.
+  |.if FFI
+  |.if X64
+  |  .type CCSTATE, CCallState, rbx
+  |  push rbp; mov rbp, rsp; push rbx; mov CCSTATE, CARG1
+  |.else
+  |  .type CCSTATE, CCallState, ebx
+  |  push ebp; mov ebp, esp; push ebx; mov CCSTATE, FCARG1
+  |.endif
+  |
+  |  // Readjust stack.
+  |.if X64
+  |  mov eax, CCSTATE->spadj
+  |  sub rsp, rax
+  |.else
+  |  sub esp, CCSTATE->spadj
+  |.if WIN
+  |  mov CCSTATE->spadj, esp
+  |.endif
+  |.endif
+  |
+  |  // Copy stack slots.
+  |  movzx ecx, byte CCSTATE->nsp
+  |  sub ecx, 1
+  |  js >2
+  |1:
+  |.if X64
+  |  mov rax, [CCSTATE+rcx*8+offsetof(CCallState, stack)]
+  |  mov [rsp+rcx*8+CCALL_SPS_EXTRA*8], rax
+  |.else
+  |  mov eax, [CCSTATE+ecx*4+offsetof(CCallState, stack)]
+  |  mov [esp+ecx*4], eax
+  |.endif
+  |  sub ecx, 1
+  |  jns <1
+  |2:
+  |
+  |.if X64
+  |  movzx eax, byte CCSTATE->nfpr
+  |  mov CARG1, CCSTATE->gpr[0]
+  |  mov CARG2, CCSTATE->gpr[1]
+  |  mov CARG3, CCSTATE->gpr[2]
+  |  mov CARG4, CCSTATE->gpr[3]
+  |.if not X64WIN
+  |  mov CARG5, CCSTATE->gpr[4]
+  |  mov CARG6, CCSTATE->gpr[5]
+  |.endif
+  |  test eax, eax; jz >5
+  |  movaps xmm0, CCSTATE->fpr[0]
+  |  movaps xmm1, CCSTATE->fpr[1]
+  |  movaps xmm2, CCSTATE->fpr[2]
+  |  movaps xmm3, CCSTATE->fpr[3]
+  |.if not X64WIN
+  |  cmp eax, 4; jbe >5
+  |  movaps xmm4, CCSTATE->fpr[4]
+  |  movaps xmm5, CCSTATE->fpr[5]
+  |  movaps xmm6, CCSTATE->fpr[6]
+  |  movaps xmm7, CCSTATE->fpr[7]
+  |.endif
+  |5:
+  |.else
+  |  mov FCARG1, CCSTATE->gpr[0]
+  |  mov FCARG2, CCSTATE->gpr[1]
+  |.endif
+  |
+  |  call aword CCSTATE->func
+  |
+  |.if X64
+  |  mov CCSTATE->gpr[0], rax
+  |  movaps CCSTATE->fpr[0], xmm0
+  |.if not X64WIN
+  |  mov CCSTATE->gpr[1], rdx
+  |  movaps CCSTATE->fpr[1], xmm1
+  |.endif
+  |.else
+  |  mov CCSTATE->gpr[0], eax
+  |  mov CCSTATE->gpr[1], edx
+  |  cmp byte CCSTATE->resx87, 1
+  |  jb >7
+  |  je >6
+  |  fstp qword CCSTATE->fpr[0].d[0]
+  |  jmp >7
+  |6:
+  |  fstp dword CCSTATE->fpr[0].f[0]
+  |7:
+  |.if WIN
+  |  sub CCSTATE->spadj, esp
+  |.endif
+  |.endif
+  |
+  |.if X64
+  |  mov rbx, [rbp-8]; leave; ret
+  |.else
+  |  mov ebx, [ebp-4]; leave; ret
+  |.endif
+  |.endif
+  |// Note: vm_ffi_call must be the last function in this object file!
+  |
+  |//-----------------------------------------------------------------------
+}
+
+/* Generate the code for a single instruction. */
+static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+{
+  int vk = 0;
+  |// Note: aligning all instructions does not pay off.
+  |=>defop:
+
+  switch (op) {
+
+  /* -- Comparison ops ---------------------------------------------------- */
+
+  /* Remember: all ops branch for a true comparison, fall through otherwise. */
+
+  |.macro jmp_comp, lt, ge, le, gt, target
+  ||switch (op) {
+  ||case BC_ISLT:
+  |   lt target
+  ||break;
+  ||case BC_ISGE:
+  |   ge target
+  ||break;
+  ||case BC_ISLE:
+  |   le target
+  ||break;
+  ||case BC_ISGT:
+  |   gt target
+  ||break;
+  ||default: break;  /* Shut up GCC. */
+  ||}
+  |.endmacro
+
+  case BC_ISLT: case BC_ISGE: case BC_ISLE: case BC_ISGT:
+    |  // RA = src1, RD = src2, JMP with RD = target
+    |  ins_AD
+    |.if DUALNUM
+    |  checkint RA, >7
+    |  checkint RD, >8
+    |  mov RB, dword [BASE+RA*8]
+    |  add PC, 4
+    |  cmp RB, dword [BASE+RD*8]
+    |  jmp_comp jge, jl, jg, jle, >9
+    |6:
+    |  movzx RD, PC_RD
+    |  branchPC RD
+    |9:
+    |  ins_next
+    |
+    |7:  // RA is not an integer.
+    |  ja ->vmeta_comp
+    |  // RA is a number.
+    |  cmp dword [BASE+RD*8+4], LJ_TISNUM; jb >1; jne ->vmeta_comp
+    |  // RA is a number, RD is an integer.
+    |  cvtsi2sd xmm0, dword [BASE+RD*8]
+    |  jmp >2
+    |
+    |8:  // RA is an integer, RD is not an integer.
+    |  ja ->vmeta_comp
+    |  // RA is an integer, RD is a number.
+    |  cvtsi2sd xmm1, dword [BASE+RA*8]
+    |  movsd xmm0, qword [BASE+RD*8]
+    |  add PC, 4
+    |  ucomisd xmm0, xmm1
+    |  jmp_comp jbe, ja, jb, jae, <9
+    |  jmp <6
+    |.else
+    |  checknum RA, ->vmeta_comp
+    |  checknum RD, ->vmeta_comp
+    |.endif
+    |1:
+    |  movsd xmm0, qword [BASE+RD*8]
+    |2:
+    |  add PC, 4
+    |  ucomisd xmm0, qword [BASE+RA*8]
+    |3:
+    |  // Unordered: all of ZF CF PF set, ordered: PF clear.
+    |  // To preserve NaN semantics GE/GT branch on unordered, but LT/LE don't.
+    |.if DUALNUM
+    |  jmp_comp jbe, ja, jb, jae, <9
+    |  jmp <6
+    |.else
+    |  jmp_comp jbe, ja, jb, jae, >1
+    |  movzx RD, PC_RD
+    |  branchPC RD
+    |1:
+    |  ins_next
+    |.endif
+    break;
+
+  case BC_ISEQV: case BC_ISNEV:
+    vk = op == BC_ISEQV;
+    |  ins_AD	// RA = src1, RD = src2, JMP with RD = target
+    |  mov RB, [BASE+RD*8+4]
+    |  add PC, 4
+    |.if DUALNUM
+    |  cmp RB, LJ_TISNUM; jne >7
+    |  checkint RA, >8
+    |  mov RB, dword [BASE+RD*8]
+    |  cmp RB, dword [BASE+RA*8]
+    if (vk) {
+      |  jne >9
+    } else {
+      |  je >9
+    }
+    |  movzx RD, PC_RD
+    |  branchPC RD
+    |9:
+    |  ins_next
+    |
+    |7:  // RD is not an integer.
+    |  ja >5
+    |  // RD is a number.
+    |  cmp dword [BASE+RA*8+4], LJ_TISNUM; jb >1; jne >5
+    |  // RD is a number, RA is an integer.
+    |  cvtsi2sd xmm0, dword [BASE+RA*8]
+    |  jmp >2
+    |
+    |8:  // RD is an integer, RA is not an integer.
+    |  ja >5
+    |  // RD is an integer, RA is a number.
+    |  cvtsi2sd xmm0, dword [BASE+RD*8]
+    |  ucomisd xmm0, qword [BASE+RA*8]
+    |  jmp >4
+    |
+    |.else
+    |  cmp RB, LJ_TISNUM; jae >5
+    |  checknum RA, >5
+    |.endif
+    |1:
+    |  movsd xmm0, qword [BASE+RA*8]
+    |2:
+    |  ucomisd xmm0, qword [BASE+RD*8]
+    |4:
+  iseqne_fp:
+    if (vk) {
+      |  jp >2				// Unordered means not equal.
+      |  jne >2
+    } else {
+      |  jp >2				// Unordered means not equal.
+      |  je >1
+    }
+  iseqne_end:
+    if (vk) {
+      |1:				// EQ: Branch to the target.
+      |  movzx RD, PC_RD
+      |  branchPC RD
+      |2:				// NE: Fallthrough to next instruction.
+      |.if not FFI
+      |3:
+      |.endif
+    } else {
+      |.if not FFI
+      |3:
+      |.endif
+      |2:				// NE: Branch to the target.
+      |  movzx RD, PC_RD
+      |  branchPC RD
+      |1:				// EQ: Fallthrough to next instruction.
+    }
+    if (LJ_DUALNUM && (op == BC_ISEQV || op == BC_ISNEV ||
+		       op == BC_ISEQN || op == BC_ISNEN)) {
+      |  jmp <9
+    } else {
+      |  ins_next
+    }
+    |
+    if (op == BC_ISEQV || op == BC_ISNEV) {
+      |5:  // Either or both types are not numbers.
+      |.if FFI
+      |  cmp RB, LJ_TCDATA; je ->vmeta_equal_cd
+      |  checktp RA, LJ_TCDATA; je ->vmeta_equal_cd
+      |.endif
+      |  checktp RA, RB			// Compare types.
+      |  jne <2				// Not the same type?
+      |  cmp RB, LJ_TISPRI
+      |  jae <1				// Same type and primitive type?
+      |
+      |  // Same types and not a primitive type. Compare GCobj or pvalue.
+      |  mov RA, [BASE+RA*8]
+      |  mov RD, [BASE+RD*8]
+      |  cmp RA, RD
+      |  je <1				// Same GCobjs or pvalues?
+      |  cmp RB, LJ_TISTABUD
+      |  ja <2				// Different objects and not table/ud?
+      |.if X64
+      |  cmp RB, LJ_TUDATA		// And not 64 bit lightuserdata.
+      |  jb <2
+      |.endif
+      |
+      |  // Different tables or userdatas. Need to check __eq metamethod.
+      |  // Field metatable must be at same offset for GCtab and GCudata!
+      |  mov TAB:RB, TAB:RA->metatable
+      |  test TAB:RB, TAB:RB
+      |  jz <2				// No metatable?
+      |  test byte TAB:RB->nomm, 1<<MM_eq
+      |  jnz <2				// Or 'no __eq' flag set?
+      if (vk) {
+	|  xor RB, RB			// ne = 0
+      } else {
+	|  mov RB, 1			// ne = 1
+      }
+      |  jmp ->vmeta_equal		// Handle __eq metamethod.
+    } else {
+      |.if FFI
+      |3:
+      |  cmp RB, LJ_TCDATA
+      if (LJ_DUALNUM && vk) {
+	|  jne <9
+      } else {
+	|  jne <2
+      }
+      |  jmp ->vmeta_equal_cd
+      |.endif
+    }
+    break;
+  case BC_ISEQS: case BC_ISNES:
+    vk = op == BC_ISEQS;
+    |  ins_AND	// RA = src, RD = str const, JMP with RD = target
+    |  mov RB, [BASE+RA*8+4]
+    |  add PC, 4
+    |  cmp RB, LJ_TSTR; jne >3
+    |  mov RA, [BASE+RA*8]
+    |  cmp RA, [KBASE+RD*4]
+  iseqne_test:
+    if (vk) {
+      |  jne >2
+    } else {
+      |  je >1
+    }
+    goto iseqne_end;
+  case BC_ISEQN: case BC_ISNEN:
+    vk = op == BC_ISEQN;
+    |  ins_AD	// RA = src, RD = num const, JMP with RD = target
+    |  mov RB, [BASE+RA*8+4]
+    |  add PC, 4
+    |.if DUALNUM
+    |  cmp RB, LJ_TISNUM; jne >7
+    |  cmp dword [KBASE+RD*8+4], LJ_TISNUM; jne >8
+    |  mov RB, dword [KBASE+RD*8]
+    |  cmp RB, dword [BASE+RA*8]
+    if (vk) {
+      |  jne >9
+    } else {
+      |  je >9
+    }
+    |  movzx RD, PC_RD
+    |  branchPC RD
+    |9:
+    |  ins_next
+    |
+    |7:  // RA is not an integer.
+    |  ja >3
+    |  // RA is a number.
+    |  cmp dword [KBASE+RD*8+4], LJ_TISNUM; jb >1
+    |  // RA is a number, RD is an integer.
+    |  cvtsi2sd xmm0, dword [KBASE+RD*8]
+    |  jmp >2
+    |
+    |8:  // RA is an integer, RD is a number.
+    |  cvtsi2sd xmm0, dword [BASE+RA*8]
+    |  ucomisd xmm0, qword [KBASE+RD*8]
+    |  jmp >4
+    |.else
+    |  cmp RB, LJ_TISNUM; jae >3
+    |.endif
+    |1:
+    |  movsd xmm0, qword [KBASE+RD*8]
+    |2:
+    |  ucomisd xmm0, qword [BASE+RA*8]
+    |4:
+    goto iseqne_fp;
+  case BC_ISEQP: case BC_ISNEP:
+    vk = op == BC_ISEQP;
+    |  ins_AND	// RA = src, RD = primitive type (~), JMP with RD = target
+    |  mov RB, [BASE+RA*8+4]
+    |  add PC, 4
+    |  cmp RB, RD
+    if (!LJ_HASFFI) goto iseqne_test;
+    if (vk) {
+      |  jne >3
+      |  movzx RD, PC_RD
+      |  branchPC RD
+      |2:
+      |  ins_next
+      |3:
+      |  cmp RB, LJ_TCDATA; jne <2
+      |  jmp ->vmeta_equal_cd
+    } else {
+      |  je >2
+      |  cmp RB, LJ_TCDATA; je ->vmeta_equal_cd
+      |  movzx RD, PC_RD
+      |  branchPC RD
+      |2:
+      |  ins_next
+    }
+    break;
+
+  /* -- Unary test and copy ops ------------------------------------------- */
+
+  case BC_ISTC: case BC_ISFC: case BC_IST: case BC_ISF:
+    |  ins_AD	// RA = dst or unused, RD = src, JMP with RD = target
+    |  mov RB, [BASE+RD*8+4]
+    |  add PC, 4
+    |  cmp RB, LJ_TISTRUECOND
+    if (op == BC_IST || op == BC_ISTC) {
+      |  jae >1
+    } else {
+      |  jb >1
+    }
+    if (op == BC_ISTC || op == BC_ISFC) {
+      |  mov [BASE+RA*8+4], RB
+      |  mov RB, [BASE+RD*8]
+      |  mov [BASE+RA*8], RB
+    }
+    |  movzx RD, PC_RD
+    |  branchPC RD
+    |1:					// Fallthrough to the next instruction.
+    |  ins_next
+    break;
+
+  case BC_ISTYPE:
+    |  ins_AD	// RA = src, RD = -type
+    |  add RD, [BASE+RA*8+4]
+    |  jne ->vmeta_istype
+    |  ins_next
+    break;
+  case BC_ISNUM:
+    |  ins_AD	// RA = src, RD = -(TISNUM-1)
+    |  checknum RA, ->vmeta_istype
+    |  ins_next
+    break;
+
+  /* -- Unary ops --------------------------------------------------------- */
+
+  case BC_MOV:
+    |  ins_AD	// RA = dst, RD = src
+    |.if X64
+    |  mov RBa, [BASE+RD*8]
+    |  mov [BASE+RA*8], RBa
+    |.else
+    |  mov RB, [BASE+RD*8+4]
+    |  mov RD, [BASE+RD*8]
+    |  mov [BASE+RA*8+4], RB
+    |  mov [BASE+RA*8], RD
+    |.endif
+    |  ins_next_
+    break;
+  case BC_NOT:
+    |  ins_AD	// RA = dst, RD = src
+    |  xor RB, RB
+    |  checktp RD, LJ_TISTRUECOND
+    |  adc RB, LJ_TTRUE
+    |  mov [BASE+RA*8+4], RB
+    |  ins_next
+    break;
+  case BC_UNM:
+    |  ins_AD	// RA = dst, RD = src
+    |.if DUALNUM
+    |  checkint RD, >5
+    |  mov RB, [BASE+RD*8]
+    |  neg RB
+    |  jo >4
+    |  mov dword [BASE+RA*8+4], LJ_TISNUM
+    |  mov dword [BASE+RA*8], RB
+    |9:
+    |  ins_next
+    |4:
+    |  mov dword [BASE+RA*8+4], 0x41e00000  // 2^31.
+    |  mov dword [BASE+RA*8], 0
+    |  jmp <9
+    |5:
+    |  ja ->vmeta_unm
+    |.else
+    |  checknum RD, ->vmeta_unm
+    |.endif
+    |  movsd xmm0, qword [BASE+RD*8]
+    |  sseconst_sign xmm1, RDa
+    |  xorps xmm0, xmm1
+    |  movsd qword [BASE+RA*8], xmm0
+    |.if DUALNUM
+    |  jmp <9
+    |.else
+    |  ins_next
+    |.endif
+    break;
+  case BC_LEN:
+    |  ins_AD	// RA = dst, RD = src
+    |  checkstr RD, >2
+    |  mov STR:RD, [BASE+RD*8]
+    |.if DUALNUM
+    |  mov RD, dword STR:RD->len
+    |1:
+    |  mov dword [BASE+RA*8+4], LJ_TISNUM
+    |  mov dword [BASE+RA*8], RD
+    |.else
+    |  xorps xmm0, xmm0
+    |  cvtsi2sd xmm0, dword STR:RD->len
+    |1:
+    |  movsd qword [BASE+RA*8], xmm0
+    |.endif
+    |  ins_next
+    |2:
+    |  checktab RD, ->vmeta_len
+    |  mov TAB:FCARG1, [BASE+RD*8]
+#if LJ_52
+    |  mov TAB:RB, TAB:FCARG1->metatable
+    |  cmp TAB:RB, 0
+    |  jnz >9
+    |3:
+#endif
+    |->BC_LEN_Z:
+    |  mov RB, BASE			// Save BASE.
+    |  call extern lj_tab_len@4		// (GCtab *t)
+    |  // Length of table returned in eax (RD).
+    |.if DUALNUM
+    |  // Nothing to do.
+    |.else
+    |  cvtsi2sd xmm0, RD
+    |.endif
+    |  mov BASE, RB			// Restore BASE.
+    |  movzx RA, PC_RA
+    |  jmp <1
+#if LJ_52
+    |9:  // Check for __len.
+    |  test byte TAB:RB->nomm, 1<<MM_len
+    |  jnz <3
+    |  jmp ->vmeta_len			// 'no __len' flag NOT set: check.
+#endif
+    break;
+
+  /* -- Binary ops -------------------------------------------------------- */
+
+    |.macro ins_arithpre, sseins, ssereg
+    |  ins_ABC
+    ||vk = ((int)op - BC_ADDVN) / (BC_ADDNV-BC_ADDVN);
+    ||switch (vk) {
+    ||case 0:
+    |   checknum RB, ->vmeta_arith_vn
+    |   .if DUALNUM
+    |     cmp dword [KBASE+RC*8+4], LJ_TISNUM; jae ->vmeta_arith_vn
+    |   .endif
+    |   movsd xmm0, qword [BASE+RB*8]
+    |   sseins ssereg, qword [KBASE+RC*8]
+    ||  break;
+    ||case 1:
+    |   checknum RB, ->vmeta_arith_nv
+    |   .if DUALNUM
+    |     cmp dword [KBASE+RC*8+4], LJ_TISNUM; jae ->vmeta_arith_nv
+    |   .endif
+    |   movsd xmm0, qword [KBASE+RC*8]
+    |   sseins ssereg, qword [BASE+RB*8]
+    ||  break;
+    ||default:
+    |   checknum RB, ->vmeta_arith_vv
+    |   checknum RC, ->vmeta_arith_vv
+    |   movsd xmm0, qword [BASE+RB*8]
+    |   sseins ssereg, qword [BASE+RC*8]
+    ||  break;
+    ||}
+    |.endmacro
+    |
+    |.macro ins_arithdn, intins
+    |  ins_ABC
+    ||vk = ((int)op - BC_ADDVN) / (BC_ADDNV-BC_ADDVN);
+    ||switch (vk) {
+    ||case 0:
+    |   checkint RB, ->vmeta_arith_vn
+    |   cmp dword [KBASE+RC*8+4], LJ_TISNUM; jne ->vmeta_arith_vn
+    |   mov RB, [BASE+RB*8]
+    |   intins RB, [KBASE+RC*8]; jo ->vmeta_arith_vno
+    ||  break;
+    ||case 1:
+    |   checkint RB, ->vmeta_arith_nv
+    |   cmp dword [KBASE+RC*8+4], LJ_TISNUM; jne ->vmeta_arith_nv
+    |   mov RC, [KBASE+RC*8]
+    |   intins RC, [BASE+RB*8]; jo ->vmeta_arith_nvo
+    ||  break;
+    ||default:
+    |   checkint RB, ->vmeta_arith_vv
+    |   checkint RC, ->vmeta_arith_vv
+    |   mov RB, [BASE+RB*8]
+    |   intins RB, [BASE+RC*8]; jo ->vmeta_arith_vvo
+    ||  break;
+    ||}
+    |  mov dword [BASE+RA*8+4], LJ_TISNUM
+    ||if (vk == 1) {
+    |   mov dword [BASE+RA*8], RC
+    ||} else {
+    |   mov dword [BASE+RA*8], RB
+    ||}
+    |  ins_next
+    |.endmacro
+    |
+    |.macro ins_arithpost
+    |  movsd qword [BASE+RA*8], xmm0
+    |.endmacro
+    |
+    |.macro ins_arith, sseins
+    |  ins_arithpre sseins, xmm0
+    |  ins_arithpost
+    |  ins_next
+    |.endmacro
+    |
+    |.macro ins_arith, intins, sseins
+    |.if DUALNUM
+    |  ins_arithdn intins
+    |.else
+    |  ins_arith, sseins
+    |.endif
+    |.endmacro
+
+    |  // RA = dst, RB = src1 or num const, RC = src2 or num const
+  case BC_ADDVN: case BC_ADDNV: case BC_ADDVV:
+    |  ins_arith add, addsd
+    break;
+  case BC_SUBVN: case BC_SUBNV: case BC_SUBVV:
+    |  ins_arith sub, subsd
+    break;
+  case BC_MULVN: case BC_MULNV: case BC_MULVV:
+    |  ins_arith imul, mulsd
+    break;
+  case BC_DIVVN: case BC_DIVNV: case BC_DIVVV:
+    |  ins_arith divsd
+    break;
+  case BC_MODVN:
+    |  ins_arithpre movsd, xmm1
+    |->BC_MODVN_Z:
+    |  call ->vm_mod
+    |  ins_arithpost
+    |  ins_next
+    break;
+  case BC_MODNV: case BC_MODVV:
+    |  ins_arithpre movsd, xmm1
+    |  jmp ->BC_MODVN_Z			// Avoid 3 copies. It's slow anyway.
+    break;
+  case BC_POW:
+    |  ins_arithpre movsd, xmm1
+    |  mov RB, BASE
+    |.if not X64
+    |  movsd FPARG1, xmm0
+    |  movsd FPARG3, xmm1
+    |.endif
+    |  call extern pow
+    |  movzx RA, PC_RA
+    |  mov BASE, RB
+    |.if X64
+    |  ins_arithpost
+    |.else
+    |  fstp qword [BASE+RA*8]
+    |.endif
+    |  ins_next
+    break;
+
+  case BC_CAT:
+    |  ins_ABC	// RA = dst, RB = src_start, RC = src_end
+    |.if X64
+    |  mov L:CARG1d, SAVE_L
+    |  mov L:CARG1d->base, BASE
+    |  lea CARG2d, [BASE+RC*8]
+    |  mov CARG3d, RC
+    |  sub CARG3d, RB
+    |->BC_CAT_Z:
+    |  mov L:RB, L:CARG1d
+    |.else
+    |  lea RA, [BASE+RC*8]
+    |  sub RC, RB
+    |  mov ARG2, RA
+    |  mov ARG3, RC
+    |->BC_CAT_Z:
+    |  mov L:RB, SAVE_L
+    |  mov ARG1, L:RB
+    |  mov L:RB->base, BASE
+    |.endif
+    |  mov SAVE_PC, PC
+    |  call extern lj_meta_cat		// (lua_State *L, TValue *top, int left)
+    |  // NULL (finished) or TValue * (metamethod) returned in eax (RC).
+    |  mov BASE, L:RB->base
+    |  test RC, RC
+    |  jnz ->vmeta_binop
+    |  movzx RB, PC_RB			// Copy result to Stk[RA] from Stk[RB].
+    |  movzx RA, PC_RA
+    |.if X64
+    |  mov RCa, [BASE+RB*8]
+    |  mov [BASE+RA*8], RCa
+    |.else
+    |  mov RC, [BASE+RB*8+4]
+    |  mov RB, [BASE+RB*8]
+    |  mov [BASE+RA*8+4], RC
+    |  mov [BASE+RA*8], RB
+    |.endif
+    |  ins_next
+    break;
+
+  /* -- Constant ops ------------------------------------------------------ */
+
+  case BC_KSTR:
+    |  ins_AND	// RA = dst, RD = str const (~)
+    |  mov RD, [KBASE+RD*4]
+    |  mov dword [BASE+RA*8+4], LJ_TSTR
+    |  mov [BASE+RA*8], RD
+    |  ins_next
+    break;
+  case BC_KCDATA:
+    |.if FFI
+    |  ins_AND	// RA = dst, RD = cdata const (~)
+    |  mov RD, [KBASE+RD*4]
+    |  mov dword [BASE+RA*8+4], LJ_TCDATA
+    |  mov [BASE+RA*8], RD
+    |  ins_next
+    |.endif
+    break;
+  case BC_KSHORT:
+    |  ins_AD	// RA = dst, RD = signed int16 literal
+    |.if DUALNUM
+    |  movsx RD, RDW
+    |  mov dword [BASE+RA*8+4], LJ_TISNUM
+    |  mov dword [BASE+RA*8], RD
+    |.else
+    |  movsx RD, RDW			// Sign-extend literal.
+    |  cvtsi2sd xmm0, RD
+    |  movsd qword [BASE+RA*8], xmm0
+    |.endif
+    |  ins_next
+    break;
+  case BC_KNUM:
+    |  ins_AD	// RA = dst, RD = num const
+    |  movsd xmm0, qword [KBASE+RD*8]
+    |  movsd qword [BASE+RA*8], xmm0
+    |  ins_next
+    break;
+  case BC_KPRI:
+    |  ins_AND	// RA = dst, RD = primitive type (~)
+    |  mov [BASE+RA*8+4], RD
+    |  ins_next
+    break;
+  case BC_KNIL:
+    |  ins_AD	// RA = dst_start, RD = dst_end
+    |  lea RA, [BASE+RA*8+12]
+    |  lea RD, [BASE+RD*8+4]
+    |  mov RB, LJ_TNIL
+    |  mov [RA-8], RB			// Sets minimum 2 slots.
+    |1:
+    |  mov [RA], RB
+    |  add RA, 8
+    |  cmp RA, RD
+    |  jbe <1
+    |  ins_next
+    break;
+
+  /* -- Upvalue and function ops ------------------------------------------ */
+
+  case BC_UGET:
+    |  ins_AD	// RA = dst, RD = upvalue #
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov UPVAL:RB, [LFUNC:RB+RD*4+offsetof(GCfuncL, uvptr)]
+    |  mov RB, UPVAL:RB->v
+    |.if X64
+    |  mov RDa, [RB]
+    |  mov [BASE+RA*8], RDa
+    |.else
+    |  mov RD, [RB+4]
+    |  mov RB, [RB]
+    |  mov [BASE+RA*8+4], RD
+    |  mov [BASE+RA*8], RB
+    |.endif
+    |  ins_next
+    break;
+  case BC_USETV:
+#define TV2MARKOFS \
+ ((int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv))
+    |  ins_AD	// RA = upvalue #, RD = src
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov UPVAL:RB, [LFUNC:RB+RA*4+offsetof(GCfuncL, uvptr)]
+    |  cmp byte UPVAL:RB->closed, 0
+    |  mov RB, UPVAL:RB->v
+    |  mov RA, [BASE+RD*8]
+    |  mov RD, [BASE+RD*8+4]
+    |  mov [RB], RA
+    |  mov [RB+4], RD
+    |  jz >1
+    |  // Check barrier for closed upvalue.
+    |  test byte [RB+TV2MARKOFS], LJ_GC_BLACK		// isblack(uv)
+    |  jnz >2
+    |1:
+    |  ins_next
+    |
+    |2:  // Upvalue is black. Check if new value is collectable and white.
+    |  sub RD, LJ_TISGCV
+    |  cmp RD, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
+    |  jbe <1
+    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
+    |  jz <1
+    |  // Crossed a write barrier. Move the barrier forward.
+    |.if X64 and not X64WIN
+    |  mov FCARG2, RB
+    |  mov RB, BASE			// Save BASE.
+    |.else
+    |  xchg FCARG2, RB			// Save BASE (FCARG2 == BASE).
+    |.endif
+    |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_barrieruv@8	// (global_State *g, TValue *tv)
+    |  mov BASE, RB			// Restore BASE.
+    |  jmp <1
+    break;
+#undef TV2MARKOFS
+  case BC_USETS:
+    |  ins_AND	// RA = upvalue #, RD = str const (~)
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov UPVAL:RB, [LFUNC:RB+RA*4+offsetof(GCfuncL, uvptr)]
+    |  mov GCOBJ:RA, [KBASE+RD*4]
+    |  mov RD, UPVAL:RB->v
+    |  mov [RD], GCOBJ:RA
+    |  mov dword [RD+4], LJ_TSTR
+    |  test byte UPVAL:RB->marked, LJ_GC_BLACK		// isblack(uv)
+    |  jnz >2
+    |1:
+    |  ins_next
+    |
+    |2:  // Check if string is white and ensure upvalue is closed.
+    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(str)
+    |  jz <1
+    |  cmp byte UPVAL:RB->closed, 0
+    |  jz <1
+    |  // Crossed a write barrier. Move the barrier forward.
+    |  mov RB, BASE			// Save BASE (FCARG2 == BASE).
+    |  mov FCARG2, RD
+    |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_barrieruv@8	// (global_State *g, TValue *tv)
+    |  mov BASE, RB			// Restore BASE.
+    |  jmp <1
+    break;
+  case BC_USETN:
+    |  ins_AD	// RA = upvalue #, RD = num const
+    |  mov LFUNC:RB, [BASE-8]
+    |  movsd xmm0, qword [KBASE+RD*8]
+    |  mov UPVAL:RB, [LFUNC:RB+RA*4+offsetof(GCfuncL, uvptr)]
+    |  mov RA, UPVAL:RB->v
+    |  movsd qword [RA], xmm0
+    |  ins_next
+    break;
+  case BC_USETP:
+    |  ins_AND	// RA = upvalue #, RD = primitive type (~)
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov UPVAL:RB, [LFUNC:RB+RA*4+offsetof(GCfuncL, uvptr)]
+    |  mov RA, UPVAL:RB->v
+    |  mov [RA+4], RD
+    |  ins_next
+    break;
+  case BC_UCLO:
+    |  ins_AD	// RA = level, RD = target
+    |  branchPC RD			// Do this first to free RD.
+    |  mov L:RB, SAVE_L
+    |  cmp dword L:RB->openupval, 0
+    |  je >1
+    |  mov L:RB->base, BASE
+    |  lea FCARG2, [BASE+RA*8]		// Caveat: FCARG2 == BASE
+    |  mov L:FCARG1, L:RB		// Caveat: FCARG1 == RA
+    |  call extern lj_func_closeuv@8	// (lua_State *L, TValue *level)
+    |  mov BASE, L:RB->base
+    |1:
+    |  ins_next
+    break;
+
+  case BC_FNEW:
+    |  ins_AND	// RA = dst, RD = proto const (~) (holding function prototype)
+    |.if X64
+    |  mov L:RB, SAVE_L
+    |  mov L:RB->base, BASE		// Caveat: CARG2d/CARG3d may be BASE.
+    |  mov CARG3d, [BASE-8]
+    |  mov CARG2d, [KBASE+RD*4]		// Fetch GCproto *.
+    |  mov CARG1d, L:RB
+    |.else
+    |  mov LFUNC:RA, [BASE-8]
+    |  mov PROTO:RD, [KBASE+RD*4]	// Fetch GCproto *.
+    |  mov L:RB, SAVE_L
+    |  mov ARG3, LFUNC:RA
+    |  mov ARG2, PROTO:RD
+    |  mov ARG1, L:RB
+    |  mov L:RB->base, BASE
+    |.endif
+    |  mov SAVE_PC, PC
+    |  // (lua_State *L, GCproto *pt, GCfuncL *parent)
+    |  call extern lj_func_newL_gc
+    |  // GCfuncL * returned in eax (RC).
+    |  mov BASE, L:RB->base
+    |  movzx RA, PC_RA
+    |  mov [BASE+RA*8], LFUNC:RC
+    |  mov dword [BASE+RA*8+4], LJ_TFUNC
+    |  ins_next
+    break;
+
+  /* -- Table ops --------------------------------------------------------- */
+
+  case BC_TNEW:
+    |  ins_AD	// RA = dst, RD = hbits|asize
+    |  mov L:RB, SAVE_L
+    |  mov L:RB->base, BASE
+    |  mov RA, [DISPATCH+DISPATCH_GL(gc.total)]
+    |  cmp RA, [DISPATCH+DISPATCH_GL(gc.threshold)]
+    |  mov SAVE_PC, PC
+    |  jae >5
+    |1:
+    |.if X64
+    |  mov CARG3d, RD
+    |  and RD, 0x7ff
+    |  shr CARG3d, 11
+    |.else
+    |  mov RA, RD
+    |  and RD, 0x7ff
+    |  shr RA, 11
+    |  mov ARG3, RA
+    |.endif
+    |  cmp RD, 0x7ff
+    |  je >3
+    |2:
+    |.if X64
+    |  mov L:CARG1d, L:RB
+    |  mov CARG2d, RD
+    |.else
+    |  mov ARG1, L:RB
+    |  mov ARG2, RD
+    |.endif
+    |  call extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_t hbits)
+    |  // Table * returned in eax (RC).
+    |  mov BASE, L:RB->base
+    |  movzx RA, PC_RA
+    |  mov [BASE+RA*8], TAB:RC
+    |  mov dword [BASE+RA*8+4], LJ_TTAB
+    |  ins_next
+    |3:  // Turn 0x7ff into 0x801.
+    |  mov RD, 0x801
+    |  jmp <2
+    |5:
+    |  mov L:FCARG1, L:RB
+    |  call extern lj_gc_step_fixtop@4	// (lua_State *L)
+    |  movzx RD, PC_RD
+    |  jmp <1
+    break;
+  case BC_TDUP:
+    |  ins_AND	// RA = dst, RD = table const (~) (holding template table)
+    |  mov L:RB, SAVE_L
+    |  mov RA, [DISPATCH+DISPATCH_GL(gc.total)]
+    |  mov SAVE_PC, PC
+    |  cmp RA, [DISPATCH+DISPATCH_GL(gc.threshold)]
+    |  mov L:RB->base, BASE
+    |  jae >3
+    |2:
+    |  mov TAB:FCARG2, [KBASE+RD*4]	// Caveat: FCARG2 == BASE
+    |  mov L:FCARG1, L:RB		// Caveat: FCARG1 == RA
+    |  call extern lj_tab_dup@8		// (lua_State *L, Table *kt)
+    |  // Table * returned in eax (RC).
+    |  mov BASE, L:RB->base
+    |  movzx RA, PC_RA
+    |  mov [BASE+RA*8], TAB:RC
+    |  mov dword [BASE+RA*8+4], LJ_TTAB
+    |  ins_next
+    |3:
+    |  mov L:FCARG1, L:RB
+    |  call extern lj_gc_step_fixtop@4	// (lua_State *L)
+    |  movzx RD, PC_RD			// Need to reload RD.
+    |  not RDa
+    |  jmp <2
+    break;
+
+  case BC_GGET:
+    |  ins_AND	// RA = dst, RD = str const (~)
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov TAB:RB, LFUNC:RB->env
+    |  mov STR:RC, [KBASE+RD*4]
+    |  jmp ->BC_TGETS_Z
+    break;
+  case BC_GSET:
+    |  ins_AND	// RA = src, RD = str const (~)
+    |  mov LFUNC:RB, [BASE-8]
+    |  mov TAB:RB, LFUNC:RB->env
+    |  mov STR:RC, [KBASE+RD*4]
+    |  jmp ->BC_TSETS_Z
+    break;
+
+  case BC_TGETV:
+    |  ins_ABC	// RA = dst, RB = table, RC = key
+    |  checktab RB, ->vmeta_tgetv
+    |  mov TAB:RB, [BASE+RB*8]
+    |
+    |  // Integer key?
+    |.if DUALNUM
+    |  checkint RC, >5
+    |  mov RC, dword [BASE+RC*8]
+    |.else
+    |  // Convert number to int and back and compare.
+    |  checknum RC, >5
+    |  movsd xmm0, qword [BASE+RC*8]
+    |  cvttsd2si RC, xmm0
+    |  cvtsi2sd xmm1, RC
+    |  ucomisd xmm0, xmm1
+    |  jne ->vmeta_tgetv		// Generic numeric key? Use fallback.
+    |.endif
+    |  cmp RC, TAB:RB->asize	// Takes care of unordered, too.
+    |  jae ->vmeta_tgetv		// Not in array part? Use fallback.
+    |  shl RC, 3
+    |  add RC, TAB:RB->array
+    |  cmp dword [RC+4], LJ_TNIL	// Avoid overwriting RB in fastpath.
+    |  je >2
+    |  // Get array slot.
+    |.if X64
+    |  mov RBa, [RC]
+    |  mov [BASE+RA*8], RBa
+    |.else
+    |  mov RB, [RC]
+    |  mov RC, [RC+4]
+    |  mov [BASE+RA*8], RB
+    |  mov [BASE+RA*8+4], RC
+    |.endif
+    |1:
+    |  ins_next
+    |
+    |2:  // Check for __index if table value is nil.
+    |  cmp dword TAB:RB->metatable, 0	// Shouldn't overwrite RA for fastpath.
+    |  jz >3
+    |  mov TAB:RA, TAB:RB->metatable
+    |  test byte TAB:RA->nomm, 1<<MM_index
+    |  jz ->vmeta_tgetv			// 'no __index' flag NOT set: check.
+    |  movzx RA, PC_RA			// Restore RA.
+    |3:
+    |  mov dword [BASE+RA*8+4], LJ_TNIL
+    |  jmp <1
+    |
+    |5:  // String key?
+    |  checkstr RC, ->vmeta_tgetv
+    |  mov STR:RC, [BASE+RC*8]
+    |  jmp ->BC_TGETS_Z
+    break;
+  case BC_TGETS:
+    |  ins_ABC	// RA = dst, RB = table, RC = str const (~)
+    |  not RCa
+    |  mov STR:RC, [KBASE+RC*4]
+    |  checktab RB, ->vmeta_tgets
+    |  mov TAB:RB, [BASE+RB*8]
+    |->BC_TGETS_Z:	// RB = GCtab *, RC = GCstr *, refetches PC_RA.
+    |  mov RA, TAB:RB->hmask
+    |  and RA, STR:RC->sid
+    |  imul RA, #NODE
+    |  add NODE:RA, TAB:RB->node
+    |1:
+    |  cmp dword NODE:RA->key.it, LJ_TSTR
+    |  jne >4
+    |  cmp dword NODE:RA->key.gcr, STR:RC
+    |  jne >4
+    |  // Ok, key found. Assumes: offsetof(Node, val) == 0
+    |  cmp dword [RA+4], LJ_TNIL	// Avoid overwriting RB in fastpath.
+    |  je >5				// Key found, but nil value?
+    |  movzx RC, PC_RA
+    |  // Get node value.
+    |.if X64
+    |  mov RBa, [RA]
+    |  mov [BASE+RC*8], RBa
+    |.else
+    |  mov RB, [RA]
+    |  mov RA, [RA+4]
+    |  mov [BASE+RC*8], RB
+    |  mov [BASE+RC*8+4], RA
+    |.endif
+    |2:
+    |  ins_next
+    |
+    |3:
+    |  movzx RC, PC_RA
+    |  mov dword [BASE+RC*8+4], LJ_TNIL
+    |  jmp <2
+    |
+    |4:  // Follow hash chain.
+    |  mov NODE:RA, NODE:RA->next
+    |  test NODE:RA, NODE:RA
+    |  jnz <1
+    |  // End of hash chain: key not found, nil result.
+    |
+    |5:  // Check for __index if table value is nil.
+    |  mov TAB:RA, TAB:RB->metatable
+    |  test TAB:RA, TAB:RA
+    |  jz <3				// No metatable: done.
+    |  test byte TAB:RA->nomm, 1<<MM_index
+    |  jnz <3				// 'no __index' flag set: done.
+    |  jmp ->vmeta_tgets		// Caveat: preserve STR:RC.
+    break;
+  case BC_TGETB:
+    |  ins_ABC	// RA = dst, RB = table, RC = byte literal
+    |  checktab RB, ->vmeta_tgetb
+    |  mov TAB:RB, [BASE+RB*8]
+    |  cmp RC, TAB:RB->asize
+    |  jae ->vmeta_tgetb
+    |  shl RC, 3
+    |  add RC, TAB:RB->array
+    |  cmp dword [RC+4], LJ_TNIL	// Avoid overwriting RB in fastpath.
+    |  je >2
+    |  // Get array slot.
+    |.if X64
+    |  mov RBa, [RC]
+    |  mov [BASE+RA*8], RBa
+    |.else
+    |  mov RB, [RC]
+    |  mov RC, [RC+4]
+    |  mov [BASE+RA*8], RB
+    |  mov [BASE+RA*8+4], RC
+    |.endif
+    |1:
+    |  ins_next
+    |
+    |2:  // Check for __index if table value is nil.
+    |  cmp dword TAB:RB->metatable, 0	// Shouldn't overwrite RA for fastpath.
+    |  jz >3
+    |  mov TAB:RA, TAB:RB->metatable
+    |  test byte TAB:RA->nomm, 1<<MM_index
+    |  jz ->vmeta_tgetb			// 'no __index' flag NOT set: check.
+    |  movzx RA, PC_RA			// Restore RA.
+    |3:
+    |  mov dword [BASE+RA*8+4], LJ_TNIL
+    |  jmp <1
+    break;
+  case BC_TGETR:
+    |  ins_ABC	// RA = dst, RB = table, RC = key
+    |  mov TAB:RB, [BASE+RB*8]
+    |.if DUALNUM
+    |  mov RC, dword [BASE+RC*8]
+    |.else
+    |  cvttsd2si RC, qword [BASE+RC*8]
+    |.endif
+    |  cmp RC, TAB:RB->asize
+    |  jae ->vmeta_tgetr		// Not in array part? Use fallback.
+    |  shl RC, 3
+    |  add RC, TAB:RB->array
+    |  // Get array slot.
+    |->BC_TGETR_Z:
+    |.if X64
+    |  mov RBa, [RC]
+    |  mov [BASE+RA*8], RBa
+    |.else
+    |  mov RB, [RC]
+    |  mov RC, [RC+4]
+    |  mov [BASE+RA*8], RB
+    |  mov [BASE+RA*8+4], RC
+    |.endif
+    |->BC_TGETR2_Z:
+    |  ins_next
+    break;
+
+  case BC_TSETV:
+    |  ins_ABC	// RA = src, RB = table, RC = key
+    |  checktab RB, ->vmeta_tsetv
+    |  mov TAB:RB, [BASE+RB*8]
+    |
+    |  // Integer key?
+    |.if DUALNUM
+    |  checkint RC, >5
+    |  mov RC, dword [BASE+RC*8]
+    |.else
+    |  // Convert number to int and back and compare.
+    |  checknum RC, >5
